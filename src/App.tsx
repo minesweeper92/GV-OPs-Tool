@@ -32,6 +32,7 @@ import {
 } from "./model";
 import { Heading, Badge, Table, Empty, ErrorBox } from "./components";
 import { Editor } from "./Editor";
+import { Organizations, Team, Onboarding } from "./Access";
 import {
   DealRecord,
   PersonRecord,
@@ -80,13 +81,23 @@ const groups = [
     label: "Organization",
     items: [
       ["settings", "Entities & settings", Settings],
+      ["team", "Team & access", Users],
       ["activity", "Activity log", BookOpen],
     ],
   },
 ] as const;
 function Login({ done }: { done: () => void }) {
+  useEffect(() => {
+    if (/^#join\/[a-f0-9-]{36}$/.test(location.hash))
+      sessionStorage.setItem("gv-signin-return", location.hash);
+  }, []);
+  const config = useQuery({
+    queryKey: ["auth-config"],
+    queryFn: () => request<{ mode: string }>("auth/config"),
+  });
   const q = useQuery({
       queryKey: ["demo-accounts"],
+      enabled: config.data?.mode === "sample",
       queryFn: () =>
         request<
           {
@@ -100,6 +111,47 @@ function Login({ done }: { done: () => void }) {
     }),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  if (config.isPending)
+    return (
+      <main className="loading" aria-busy="true">
+        Opening sign-in…
+      </main>
+    );
+  if (config.error)
+    return (
+      <main className="login">
+        <ErrorBox error={config.error.message} />
+        <button onClick={() => config.refetch()}>Try again</button>
+      </main>
+    );
+  if (config.data?.mode === "oidc")
+    return (
+      <main className="login">
+        <div className="brand">
+          <span className="brand-mark">gv</span>
+          <strong>Workspace</strong>
+        </div>
+        <h1>
+          Your relationships.
+          <br />
+          Your business. Together.
+        </h1>
+        <p className="login-copy">
+          Sign in securely to open your organizations or accept an invitation.
+          Use the email address your administrator invited.
+        </p>
+        {new URLSearchParams(location.search).get("signin") === "failed" ? (
+          <ErrorBox error="Sign-in could not be completed. The request may have expired, or the account's email could not be verified. Start again; if it persists, contact your administrator." />
+        ) : null}
+        <a className="button primary" href="/auth/login">
+          Continue to secure sign-in
+        </a>
+        <p className="muted">
+          Your identity provider handles your password. This workspace never
+          receives it.
+        </p>
+      </main>
+    );
   return (
     <main className="login">
       <div className="brand">
@@ -177,10 +229,17 @@ export default function App() {
     retry: false,
   });
   const me = meQuery.data;
+  useEffect(() => {
+    if (!me) return;
+    const intended = sessionStorage.getItem("gv-signin-return");
+    sessionStorage.removeItem("gv-signin-return");
+    if (intended && /^#join\/[a-f0-9-]{36}$/.test(intended))
+      location.hash = intended;
+  }, [me?.user.id]);
   const dataQuery = useQuery({
     queryKey: ["data", me?.organization.id, me?.user.id],
     queryFn: () => request<Data>("data"),
-    enabled: !!me,
+    enabled: !!me && !me.onboarding,
     retry: 1,
   });
   const data = dataQuery.data;
@@ -243,7 +302,7 @@ export default function App() {
       return (
         <Login
           done={() => {
-            location.hash = "home";
+            if (!location.hash.startsWith("#join/")) location.hash = "home";
             location.reload();
           }}
         />
@@ -256,6 +315,7 @@ export default function App() {
     );
   }
   if (!me) return null;
+  if (me.onboarding) return <Onboarding me={me} />;
   const edit = (value: EditorState) => {
     setError("");
     setEditor(value);
@@ -278,6 +338,9 @@ export default function App() {
     };
   const props = data ? { data, me, edit, run } : null;
   function content() {
+    if (view === "organizations" || view === "join")
+      return <Organizations me={me!} />;
+    if (view === "team") return <Team me={me!} />;
     if (dataQuery.isPending)
       return (
         <div className="skeleton" aria-label="Loading records" aria-busy="true">
@@ -1006,14 +1069,18 @@ export default function App() {
             <h2>Build scope</h2>
             <p>
               This fresh development build covers the first connected
-              CRM-to-ledger workflow. It uses fictional data and local sample
-              roles.
+              CRM-to-ledger workflow.{" "}
+              {me!.mode === "sample"
+                ? "It uses fictional data and local sample roles."
+                : "This identity-enabled environment requires release validation before live financial use."}
             </p>
             <p>
-              Production sign-in, custom roles, per-entity grants, bank
-              connections, email delivery, tax compliance, subscriptions and the
-              remaining requirements are not enabled yet. Nothing is connected
-              to your live books.
+              Custom roles, per-entity grants, bank connections, email delivery,
+              tax compliance, subscriptions and the remaining requirements are
+              not enabled yet.{" "}
+              {me!.mode === "sample"
+                ? "Secure sign-in is available only on a separately configured identity-enabled server; this preview uses sample accounts."
+                : "Sign-in is handled by the configured identity provider."}
             </p>
             <h3>Display</h3>
             <label>
@@ -1058,8 +1125,10 @@ export default function App() {
   function denied() {
     return (
       <Empty title="This section needs a finance role">
-        Switch sample accounts to review the books. The API enforces this
-        restriction too.
+        {me!.mode === "sample"
+          ? "Switch sample accounts to review the books."
+          : "Ask your administrator if you need access to the books."}{" "}
+        The API enforces this restriction too.
       </Empty>
     );
   }
@@ -1108,7 +1177,14 @@ export default function App() {
           <span className="brand-mark">gv</span>
           <strong>Workspace</strong>
         </a>
-        <div className="organization-name">{me.organization.name}</div>
+        <a
+          className="organization-name organization-link"
+          href="#organizations"
+          aria-label={`Switch organization: ${me.organization.name}`}
+        >
+          {me.organization.name}
+          <small>Switch organization →</small>
+        </a>
         <nav aria-label="Main navigation">
           {groups
             .filter(
@@ -1118,23 +1194,25 @@ export default function App() {
             .map((g) => (
               <section className="nav-group" key={g.label}>
                 <h2>{g.label}</h2>
-                {g.items.map(([key, label, Icon]) => (
-                  <a
-                    key={key}
-                    href={`#${key}`}
-                    aria-label={label}
-                    aria-current={view === key ? "page" : undefined}
-                  >
-                    <Icon size={17} />
-                    <span>{label}</span>
-                    {key === "leads" &&
-                    data?.leads.filter((l) => l.status === "New").length ? (
-                      <span className="nav-count">
-                        {data.leads.filter((l) => l.status === "New").length}
-                      </span>
-                    ) : null}
-                  </a>
-                ))}
+                {g.items
+                  .filter(([key]) => key !== "team" || me.user.role === "admin")
+                  .map(([key, label, Icon]) => (
+                    <a
+                      key={key}
+                      href={`#${key}`}
+                      aria-label={label}
+                      aria-current={view === key ? "page" : undefined}
+                    >
+                      <Icon size={17} />
+                      <span>{label}</span>
+                      {key === "leads" &&
+                      data?.leads.filter((l) => l.status === "New").length ? (
+                        <span className="nav-count">
+                          {data.leads.filter((l) => l.status === "New").length}
+                        </span>
+                      ) : null}
+                    </a>
+                  ))}
               </section>
             ))}
         </nav>
@@ -1187,7 +1265,9 @@ export default function App() {
             </select>
           </label>
           <div className="topbar-actions">
-            <span className="sample-label">Sample workspace</span>
+            <span className="sample-label">
+              {me.mode === "sample" ? "Sample workspace" : "Secure workspace"}
+            </span>
             <button
               aria-label="Toggle theme"
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
@@ -1207,7 +1287,9 @@ export default function App() {
           {content()}
         </main>
         <footer className="app-footer">
-          Fresh build · Synthetic data only · No live integrations
+          {me.mode === "sample"
+            ? "Fresh build · Synthetic data only · No live integrations"
+            : "GV Workspace · CRM and books"}
         </footer>
       </div>
       {toast ? (

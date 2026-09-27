@@ -41,6 +41,8 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
       "payments",
       "expenses",
       "settings",
+      "team",
+      "organizations",
     ]) {
       await page.goto(`/#${route}`);
       await expect(page.locator("main h1")).toBeVisible();
@@ -174,4 +176,146 @@ test("sales role cannot open accounting via navigation or direct API", async ({
   await expect(
     page.getByRole("heading", { name: "This section needs a finance role" }),
   ).toBeVisible();
+});
+
+test("team invitation, cancellation and member access are usable and audited", async ({
+  page,
+}) => {
+  await owner(page);
+  await page.getByRole("link", { name: "Team & access", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Team & access", exact: true }),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: "test-results/new-workspace-team.png",
+    fullPage: true,
+  });
+  await page.getByLabel("Teammate email").fill("invited@example.test");
+  await page.getByLabel("Invitation role").selectOption("sales");
+  await page
+    .getByRole("button", { name: "Create invitation", exact: true })
+    .click();
+  await expect(page.getByLabel("Invitation link")).toHaveValue(/#join\//);
+  const invite = page
+    .getByRole("row")
+    .filter({ hasText: "invited@example.test" });
+  await expect(invite).toContainText("Pending");
+  page.on("dialog", (dialog) => dialog.accept());
+  await invite.getByRole("button", { name: "Revoke", exact: true }).click();
+  await expect(invite).toContainText("Revoked");
+  await page
+    .getByRole("button", { name: "Manage Read-only reviewer", exact: true })
+    .click();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page
+    .getByLabel("Organization access", { exact: true })
+    .selectOption("removed");
+  await page.getByRole("button", { name: "Save access", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: "Read-only reviewer" }),
+  ).toContainText("Removed");
+  await page
+    .getByRole("button", { name: "Manage Read-only reviewer", exact: true })
+    .click();
+  await page
+    .getByLabel("Organization access", { exact: true })
+    .selectOption("active");
+  await page.getByRole("button", { name: "Save access", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("button", { name: "Manage Owner", exact: true }).click();
+  await page.getByLabel("Role", { exact: true }).selectOption("viewer");
+  await page.getByRole("button", { name: "Save access", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "at least one active administrator",
+  );
+  await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page.getByRole("link", { name: "Activity log", exact: true }).click();
+  await expect(page.getByText("team · access changed").first()).toBeVisible();
+});
+
+test("organization creation and switching clear previous records", async ({
+  page,
+}) => {
+  await owner(page);
+  await page.getByRole("link", { name: /Switch organization:/ }).click();
+  await page
+    .getByRole("button", { name: "Create organization", exact: true })
+    .click();
+  await page
+    .getByLabel("Organization name", { exact: true })
+    .fill("Browser-created workspace");
+  await page
+    .getByLabel("First legal entity name")
+    .fill("Browser Private Limited");
+  await page.getByLabel("Entity code", { exact: true }).fill("BPL");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page
+    .getByRole("button", { name: "Create and open", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", {
+      name: /Switch organization: Browser-created workspace/,
+    }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Contacts", exact: true }).click();
+  await expect(page.getByText("Maya Noor", { exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: /Switch organization:/ }).click();
+  await page
+    .locator(".access-card")
+    .filter({ hasText: "Grid Velocity · sample" })
+    .getByRole("button", { name: "Open organization" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Contacts", exact: true }).click();
+  await expect(page.getByText("Maya Noor", { exact: true })).toBeVisible();
+});
+
+test("an invited teammate accepts and opens the correct organization", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Separate organization · sample" })
+    .click();
+  await page.getByRole("link", { name: "Team & access", exact: true }).click();
+  await page.getByLabel("Teammate email").fill("finance@example.test");
+  await page.getByLabel("Invitation role").selectOption("finance");
+  await page
+    .getByRole("button", { name: "Create invitation", exact: true })
+    .click();
+  await expect(page.getByLabel("Invitation link")).toHaveValue(/#join\//);
+  const link = await page.getByLabel("Invitation link").inputValue();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose a sample role" }),
+  ).toBeVisible();
+  await page.goto(link);
+  await page
+    .getByRole("button", { name: "Accountant Grid Velocity · sample" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Invitations for finance@example.test" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Accept invitation", exact: true })
+    .click();
+  await expect(
+    page.getByRole("link", {
+      name: /Switch organization: Separate organization/,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Team & access", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Companies", exact: true }).click();
+  await expect(
+    page.getByText("Meridian Creative", { exact: true }),
+  ).toHaveCount(0);
 });

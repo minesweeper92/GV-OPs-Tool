@@ -1,5 +1,5 @@
 import { createServer as createVite } from "vite";
-import { openDatabase, migrate } from "./db.ts";
+import { openDatabase, migrate, bindEnvironment } from "./db.ts";
 import { seed } from "./seed.ts";
 import { createApp } from "./app.ts";
 if (process.env.NODE_ENV === "production")
@@ -9,10 +9,11 @@ if (process.env.NODE_ENV === "production")
 const port = Number(process.env.PORT || 4320);
 const db = await openDatabase(process.env.GV_SAMPLE_DB || ".data/workspace");
 await migrate(db);
+await bindEnvironment(db, "sample");
 await seed(db);
 const app = createApp(db, `http://127.0.0.1:${port}`);
 const vite = await createVite({
-  server: { middlewareMode: true },
+  server: { middlewareMode: true, ws: { host: "127.0.0.1", port: port + 1 } },
   appType: "spa",
 });
 app.setNotFoundHandler((req, res) => {

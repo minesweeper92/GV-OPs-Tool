@@ -1,31 +1,48 @@
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { inTenant, type Database } from "./db.ts";
-import { execute, snapshot, reports, Problem, type Context } from "./domain.ts";
+import { execute, snapshot, reports, Problem } from "./domain.ts";
 import { commandSchema } from "../shared/commands.ts";
-const hash = (value: string) =>
-  createHash("sha256").update(value).digest("hex");
-const token = () => randomBytes(32).toString("base64url");
-export function createApp(db: Database, origin: string) {
+import { Access, hash, type Session } from "./access.ts";
+import { IdentityProvider, equalSecret } from "./oidc.ts";
+export function createApp(
+  db: Database,
+  origin: string,
+  identity?: IdentityProvider,
+) {
   const url = new URL(origin);
-  if (url.hostname !== "127.0.0.1")
+  if (!identity && url.hostname !== "127.0.0.1")
     throw new Error(
       "This first build uses local sample identities and must remain on loopback.",
     );
   const app = Fastify({ logger: false, bodyLimit: 128 * 1024 });
-  const sessions = new WeakMap<
-    object,
-    {
-      ctx: Context;
-      csrf: string;
-      hash: string;
-      name: string;
-      organization: string;
-    }
-  >();
+  if (
+    identity &&
+    (identity.origin !== origin ||
+      identity.access.db !== db ||
+      identity.access.mode !== "oidc")
+  )
+    throw new Error("Identity gateway configuration mismatch.");
+  const access = identity?.access || new Access(db, "sample");
+  const sessions = new WeakMap<object, Session>();
+  const secure = url.protocol === "https:",
+    cookieName = secure
+      ? "__Host-gv_workspace_session"
+      : "gv_workspace_session";
+  const cookieOptions = {
+    path: "/",
+    httpOnly: true,
+    secure,
+    sameSite: "lax" as const,
+    maxAge: 28800,
+  };
+  const browserCookie = secure ? "__Host-gv_oidc_browser" : "gv_oidc_browser";
+  const publicPaths = new Set([
+    "/api/auth/config",
+    ...(!identity ? ["/api/demo-accounts", "/api/demo-login"] : []),
+  ]);
   app.register(cookie);
   app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
   app.addHook("onRequest", async (req, res) => {
@@ -41,109 +58,159 @@ export function createApp(db: Database, origin: string) {
       req.headers.origin !== origin
     )
       throw new Problem(403, "Request origin does not match.");
-    if (
-      !req.url.startsWith("/api/") ||
-      req.url.startsWith("/api/demo-accounts") ||
-      req.url.startsWith("/api/demo-login")
-    )
-      return;
-    const value = req.cookies.gv_workspace_session;
-    const s = value
-      ? (
-          await db.query(
-            `SELECT s.*,m.role,u.name,t.name AS organization FROM sessions s
-      JOIN memberships m ON m.tenant_id=s.tenant_id AND m.user_id=s.user_id JOIN users u ON u.id=s.user_id JOIN tenants t ON t.id=s.tenant_id
-      WHERE s.hash=$1 AND s.expires_at>now()`,
-            [hash(value)],
-          )
-        ).rows[0]
-      : null;
-    if (!s) throw new Problem(401, "Sign in to the sample workspace.");
+    const path = req.url.split("?")[0];
+    if (!path.startsWith("/api/") || publicPaths.has(path)) return;
+    const s = await access.read(req.cookies[cookieName]);
     if (req.method !== "GET") {
       const supplied = String(req.headers["x-csrf-token"] || "");
-      if (
-        supplied.length !== s.csrf.length ||
-        !timingSafeEqual(Buffer.from(supplied), Buffer.from(s.csrf))
-      )
+      if (!equalSecret(supplied, s.csrf))
         throw new Problem(403, "Your session changed. Refresh before saving.");
     }
-    sessions.set(req, {
-      ctx: { tenantId: s.tenant_id, userId: s.user_id, role: s.role },
-      csrf: s.csrf,
-      hash: s.hash,
-      name: s.name,
-      organization: s.organization,
-    });
+    sessions.set(req, s);
   });
   app.get("/health", async () => ({
     status: "ok",
-    mode: "local-sample-build",
+    mode: access.mode,
   }));
-  app.get(
-    "/api/demo-accounts",
-    async () =>
-      (
-        await db.query(
-          `SELECT m.user_id,m.tenant_id,m.role,u.name,t.name AS organization FROM memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id ORDER BY t.name,u.name`,
-        )
-      ).rows,
-  );
-  app.post("/api/demo-login", async (req, res) => {
-    const b = z
-      .object({ userId: z.uuid(), tenantId: z.uuid() })
-      .strict()
-      .parse(req.body);
-    if (
-      !(
-        await db.query(
-          "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2",
-          [b.tenantId, b.userId],
-        )
-      ).rows.length
-    )
-      throw new Problem(403, "Unknown sample account.");
-    const raw = token(),
-      csrf = token();
-    await db.transaction(async (tx) => {
-      await tx.query("DELETE FROM sessions WHERE expires_at<now()");
-      if (req.cookies.gv_workspace_session)
-        await tx.query("DELETE FROM sessions WHERE hash=$1", [
-          hash(req.cookies.gv_workspace_session),
-        ]);
-      await tx.query(
-        "INSERT INTO sessions(hash,user_id,tenant_id,csrf,expires_at) VALUES($1,$2,$3,$4,now()+interval '8 hours')",
-        [hash(raw), b.userId, b.tenantId, csrf],
+  app.get("/api/auth/config", async () => ({ mode: access.mode }));
+  if (identity) {
+    app.get("/auth/login", async (_req, res) => {
+      const start = await identity.begin();
+      res.setCookie(browserCookie, start.browser, {
+        ...cookieOptions,
+        maxAge: 600,
+      });
+      return res.redirect(start.url);
+    });
+    app.get("/auth/callback", async (req, res) => {
+      try {
+        const person = await identity.finish(
+          new URL(req.url, origin),
+          req.cookies[browserCookie],
+        );
+        const issued = await access.issue(
+          person.userId,
+          person.tenantId,
+          req.cookies[cookieName] ? hash(req.cookies[cookieName]) : undefined,
+        );
+        res.setCookie(cookieName, issued.raw, cookieOptions);
+        return res.redirect("/");
+      } catch (error) {
+        if (error instanceof Problem) return res.redirect("/?signin=failed");
+        throw error;
+      } finally {
+        res.clearCookie(browserCookie, { path: "/", secure });
+      }
+    });
+  } else {
+    app.get(
+      "/api/demo-accounts",
+      async () =>
+        (
+          await db.query(
+            `SELECT m.user_id,m.tenant_id,m.role,u.name,t.name AS organization FROM memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id WHERE m.active=true ORDER BY t.name,u.name`,
+          )
+        ).rows,
+    );
+    app.post("/api/demo-login", async (req, res) => {
+      const b = z
+        .object({ userId: z.uuid(), tenantId: z.uuid() })
+        .strict()
+        .parse(req.body);
+      if (
+        !(
+          await db.query(
+            "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2",
+            [b.tenantId, b.userId],
+          )
+        ).rows.length
+      )
+        throw new Problem(403, "Unknown sample account.");
+      const { raw } = await access.issue(
+        b.userId,
+        b.tenantId,
+        req.cookies[cookieName] ? hash(req.cookies[cookieName]) : undefined,
       );
+      res.setCookie(cookieName, raw, cookieOptions);
+      return { ok: true };
     });
-    res.setCookie("gv_workspace_session", raw, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "strict",
-      maxAge: 28800,
-    });
-    return { ok: true };
-  });
+  }
   app.post("/api/logout", async (req, res) => {
     await db.query("DELETE FROM sessions WHERE hash=$1", [
       sessions.get(req)!.hash,
     ]);
-    res.clearCookie("gv_workspace_session", { path: "/" });
+    res.clearCookie(cookieName, { path: "/", secure });
     return { ok: true };
   });
   app.get("/api/me", async (req) => {
     const s = sessions.get(req)!;
     return {
-      user: { id: s.ctx.userId, name: s.name, role: s.ctx.role },
-      organization: { id: s.ctx.tenantId, name: s.organization },
+      user: { id: s.userId, name: s.name, email: s.email, role: s.role || "" },
+      organization: { id: s.tenantId || "", name: s.organization || "" },
       csrf: s.csrf,
-      mode: "sample",
+      mode: access.mode,
+      onboarding: !s.tenantId,
     };
   });
-  app.get("/api/data", async (req) =>
-    inTenant(db, sessions.get(req)!.ctx.tenantId, (tx) =>
-      snapshot(tx, sessions.get(req)!.ctx),
+  app.get("/api/organizations", async (req) =>
+    access.organizations(sessions.get(req)!),
+  );
+  app.post("/api/organizations", async (req) =>
+    access.createOrganization(
+      sessions.get(req)!,
+      z
+        .object({
+          name: z.string().trim().min(2).max(150),
+          entityName: z.string().trim().min(2).max(150),
+          entityCode: z.string().regex(/^[A-Z0-9]{2,8}$/),
+          requestKey: z.uuid(),
+        })
+        .strict()
+        .parse(req.body),
     ),
   );
+  app.post("/api/organizations/switch", async (req, res) => {
+    const { id } = z.object({ id: z.uuid() }).strict().parse(req.body);
+    const issued = await access.switchOrganization(sessions.get(req)!, id);
+    res.setCookie(cookieName, issued.raw, cookieOptions);
+    return { ok: true };
+  });
+  const role = z.enum(["admin", "finance", "sales", "viewer"]);
+  const idBody = z.object({ id: z.uuid() }).strict();
+  app.get("/api/team", async (req) => access.team(sessions.get(req)!));
+  app.post("/api/team/invite", async (req) =>
+    access.invite(
+      sessions.get(req)!,
+      z
+        .object({ email: z.email().max(254), role })
+        .strict()
+        .parse(req.body),
+    ),
+  );
+  app.post("/api/team/revoke-invitation", async (req) =>
+    access.revokeInvite(sessions.get(req)!, idBody.parse(req.body).id),
+  );
+  app.post("/api/team/accept-invitation", async (req) =>
+    access.accept(sessions.get(req)!, idBody.parse(req.body).id),
+  );
+  app.post("/api/team/member", async (req) =>
+    access.updateMember(
+      sessions.get(req)!,
+      z
+        .object({
+          userId: z.uuid(),
+          role,
+          active: z.boolean(),
+          version: z.number().int().positive(),
+        })
+        .strict()
+        .parse(req.body),
+    ),
+  );
+  app.get("/api/data", async (req) => {
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(db, ctx.tenantId, (tx) => snapshot(tx, ctx));
+  });
   app.get("/api/reports", async (req) => {
     const q = z
       .object({ entityId: z.uuid(), from: z.iso.date(), to: z.iso.date() })
@@ -151,43 +218,37 @@ export function createApp(db: Database, origin: string) {
       .parse(req.query);
     if (q.from > q.to)
       throw new Problem(400, "Start date must precede end date.");
-    const ctx = sessions.get(req)!.ctx;
+    const ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) =>
       reports(tx, ctx, q.entityId, q.from, q.to),
     );
   });
   app.post("/api/commands", async (req) => {
     const c = commandSchema.parse(req.body),
-      ctx = sessions.get(req)!.ctx;
+      ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) => execute(tx, ctx, c));
   });
   app.setErrorHandler((error, req, res) => {
     if (error instanceof z.ZodError)
-      return res
-        .code(400)
-        .send({
-          error: error.issues
-            .map((i) => `${i.path.join(".") || "Input"}: ${i.message}`)
-            .join("; "),
-        });
-    if (error instanceof RangeError) return res.code(400).send({error:error.message});
+      return res.code(400).send({
+        error: error.issues
+          .map((i) => `${i.path.join(".") || "Input"}: ${i.message}`)
+          .join("; "),
+      });
+    if (error instanceof RangeError)
+      return res.code(400).send({ error: error.message });
     if (error instanceof Problem)
       return res.code(error.status).send({ error: error.message });
     const code = (error as { code?: string }).code;
     if (code === "23505")
-      return res
-        .code(409)
-        .send({
-          error:
-            "A matching record already exists. Reuse it or use a different name.",
-        });
+      return res.code(409).send({
+        error:
+          "A matching record already exists. Reuse it or use a different name.",
+      });
     if (["23503", "23514", "22P02"].includes(code || ""))
-      return res
-        .code(400)
-        .send({
-          error:
-            "Check the dates, amounts and related records, then try again.",
-        });
+      return res.code(400).send({
+        error: "Check the dates, amounts and related records, then try again.",
+      });
     if ((error as { statusCode?: number }).statusCode === 429)
       return res
         .code(429)

@@ -192,7 +192,7 @@ export async function snapshot(tx: SQL, ctx: Context) {
   ];
   const events = (
     await tx.query(
-      `SELECT * FROM audit_events ${own ? "WHERE record_id=ANY($1::uuid[])" : ""} ORDER BY created_at DESC LIMIT 200`,
+      `SELECT * FROM audit_events ${own ? "WHERE record_id=ANY($1::uuid[]) AND action NOT LIKE 'team.%' AND action NOT LIKE 'organization.%'" : ctx.role === "admin" ? "" : "WHERE action NOT LIKE 'team.%' AND action NOT LIKE 'organization.%'"} ORDER BY created_at DESC LIMIT 200`,
       own ? [auditIds] : [],
     )
   ).rows;
@@ -429,7 +429,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
       } catch (error) {
         throw new Problem(400, (error as Error).message);
       }
-      if(baseAmount(BigInt(calculated.total),fx)<=0n) reject(400,'The converted quote total rounds to zero.');
+      if (baseAmount(BigInt(calculated.total), fx) <= 0n)
+        reject(400, "The converted quote total rounds to zero.");
       const revision = Number(
         (
           await tx.query(

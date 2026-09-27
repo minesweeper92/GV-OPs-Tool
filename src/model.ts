@@ -152,10 +152,11 @@ export interface Data {
   events: Event[];
 }
 export interface Me {
-  user: { id: string; name: string; role: string };
+  user: { id: string; name: string; role: string; email: string };
   organization: { id: string; name: string };
   csrf: string;
   mode: string;
+  onboarding: boolean;
 }
 export interface Report {
   trial: {
