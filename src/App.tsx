@@ -36,6 +36,7 @@ import { Organizations, Team, Onboarding } from "./Access";
 import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
 import { Banking } from "./Banking";
+import { Projects } from "./Projects";
 import {
   DealRecord,
   PersonRecord,
@@ -98,6 +99,10 @@ const groups = [
       ["reports", "Trial balance", BookOpen],
       ["financial-reports", "Financial reports", BookOpen],
     ],
+  },
+  {
+    label: "Delivery",
+    items: [["projects", "Projects", PanelsTopLeft]],
   },
   {
     label: "Organization",
@@ -399,6 +404,20 @@ export default function App() {
     if (view === "financial-reports")
       return canFinance ? (
         <FinancialReports key={me!.organization.id} me={me!} entity={entity} />
+      ) : (
+        denied()
+      );
+    if (view === "projects" || view === "project")
+      return canFinance ? (
+        <Projects
+          key={view + (id || "") + entity}
+          data={data}
+          entity={entity}
+          id={view === "project" ? id : undefined}
+          initialQuote={view === "projects" ? id : undefined}
+          edit={edit}
+          run={run}
+        />
       ) : (
         denied()
       );
@@ -1291,7 +1310,8 @@ export default function App() {
           {groups
             .filter(
               (g) =>
-                canFinance || !["Purchases", "Accounting"].includes(g.label),
+                canFinance ||
+                !["Purchases", "Accounting", "Delivery"].includes(g.label),
             )
             .map((g) => (
               <section className="nav-group" key={g.label}>

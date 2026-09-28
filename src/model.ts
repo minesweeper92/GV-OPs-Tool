@@ -89,6 +89,9 @@ export interface Quote {
   created_at: string;
 }
 export interface Invoice {
+  billing_kind: "earned" | "advance";
+  label: string;
+  milestone_id: string | null;
   id: string;
   entity_id: string;
   deal_id: string;
@@ -138,6 +141,9 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  projects: import("../shared/projects").Project[];
+  milestones: import("../shared/projects").Milestone[];
+  recognitions: import("../shared/projects").Recognition[];
   bankAccounts: import("../shared/banking").BankAccount[];
   bills: Bill[];
   vendorPayments: VendorPayment[];

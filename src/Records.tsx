@@ -127,7 +127,18 @@ export function DealRecord({ deal, data, me, edit }: Props & { deal: Deal }) {
                             </button>
                           </>
                         ) : null}
-                        {accepted && !invoices.length && finance(me) ? (
+                        {accepted &&
+                        invoices
+                          .filter(
+                            (i) => !["Cancelled", "Voided"].includes(i.status),
+                          )
+                          .reduce((s, i) => s + BigInt(i.net_minor), 0n) +
+                          BigInt(
+                            data.projects.find((p) => p.deal_id === deal.id)
+                              ?.planned_net || "0",
+                          ) <
+                          BigInt(q.net_minor) &&
+                        finance(me) ? (
                           <button
                             onClick={() => edit({ kind: "invoice", id: q.id })}
                           >
@@ -158,6 +169,26 @@ export function DealRecord({ deal, data, me, edit }: Props & { deal: Deal }) {
           <Timeline events={events} />
         </section>
         <aside className="associations">
+          {finance(me) && deal.accepted_quote_id ? (
+            <>
+              <h3>Delivery & profitability</h3>
+              {data.projects.find((p) => p.deal_id === deal.id) ? (
+                <a
+                  className="association-item"
+                  href={`#project/${data.projects.find((p) => p.deal_id === deal.id)!.id}`}
+                >
+                  Open project
+                </a>
+              ) : (
+                <a
+                  className="association-item"
+                  href={`#projects/${deal.accepted_quote_id}`}
+                >
+                  Start project from accepted quote
+                </a>
+              )}
+            </>
+          ) : null}
           <h3>Linked invoices</h3>
           {invoices.length ? (
             invoices.map((i) => (
@@ -500,6 +531,14 @@ export function DocumentRecord({
             </div>
             {invoice ? (
               <dl>
+                <dt>Billing stage</dt>
+                <dd>{invoice.label}</dd>
+                <dt>Revenue treatment</dt>
+                <dd>
+                  {invoice.billing_kind === "advance"
+                    ? "Advance / deferred revenue"
+                    : "Delivered work"}
+                </dd>
                 <dt>Invoice date</dt>
                 <dd>{day(invoice.issue_date)}</dd>
                 <dt>Due date</dt>
@@ -555,7 +594,7 @@ export function DocumentRecord({
                 <dt>Balance</dt>
                 <dd>
                   {money(
-                    invoice.status === "Voided"
+                    ["Voided", "Cancelled"].includes(invoice.status)
                       ? 0n
                       : BigInt(invoice.total_minor) -
                           BigInt(invoice.paid_minor),
@@ -572,11 +611,51 @@ export function DocumentRecord({
             </>
           ) : null}
           <p className="muted small">
+            {invoice
+              ? "Partial billing allocates tax from the accepted quote, including any final rounding remainder. "
+              : ""}
             Sample build. Not a tax-compliance-certified document. No email is
             sent from this preview.
           </p>
         </article>
         <aside className="document-context">
+          {invoice && finance(me) ? (
+            <div className="vertical-actions">
+              {invoice.status === "Draft" ? (
+                <button onClick={() => edit({ kind: "cancel-invoice", id })}>
+                  Cancel draft
+                </button>
+              ) : null}
+              {invoice.billing_kind === "advance" &&
+              ["Issued", "Paid"].includes(invoice.status) ? (
+                <>
+                  <h3>Revenue recognition</h3>
+                  <p>
+                    Deferred subtotal:{" "}
+                    {money(
+                      BigInt(invoice.net_minor) -
+                        data.recognitions
+                          .filter((r) => r.invoice_id === id)
+                          .reduce((s, r) => s + BigInt(r.net_minor), 0n),
+                      invoice.currency,
+                    )}
+                  </p>
+                  <button onClick={() => edit({ kind: "recognise", id })}>
+                    Recognise delivered work
+                  </button>
+                  {data.recognitions
+                    .filter((r) => r.invoice_id === id)
+                    .map((r) => (
+                      <p key={r.id}>
+                        {day(r.recognition_date)} ·{" "}
+                        {money(r.net_minor, invoice.currency)}
+                        <small>{r.reference}</small>
+                      </p>
+                    ))}
+                </>
+              ) : null}
+            </div>
+          ) : null}
           <h3>Linked records</h3>
           <a href={`#deal/${doc.deal_id}`}>{deal?.name}</a>
           <p>{entity?.code} · base PKR</p>

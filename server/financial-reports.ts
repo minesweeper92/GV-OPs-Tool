@@ -39,8 +39,8 @@ async function ageing(
   const effects =
     kind === "ar"
       ? `
-    SELECT i.id AS doc,j.id AS journal,CASE WHEN j.source_type='invoice' THEN q.total_minor ELSE -q.total_minor END AS amount
-    FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN journals j ON j.source_id=i.id AND j.source_type IN ('invoice','invoice_void')
+    SELECT i.id AS doc,j.id AS journal,CASE WHEN j.source_type='invoice' THEN i.total_minor ELSE -i.total_minor END AS amount
+    FROM invoices i JOIN journals j ON j.source_id=i.id AND j.source_type IN ('invoice','invoice_void')
     UNION ALL
     SELECT p.invoice_id,j.id,-(p.amount_minor+p.wht_minor) FROM payments p JOIN journals j ON j.source_id=p.id AND j.source_type='payment'`
       : `SELECT b.id AS doc,j.id AS journal,CASE WHEN j.source_type='bill' THEN b.total_minor ELSE -b.total_minor END AS amount
@@ -122,7 +122,16 @@ export async function financialReports(
   );
   const opening = sum(cashAccounts, (a) => BigInt(a.opening)),
     closing = sum(cashAccounts, (a) => BigInt(a.closing));
-  const workingCodes = ["1100", "1200", "1300", "1400", "2000", "2100", "2200"];
+  const workingCodes = [
+    "1100",
+    "1200",
+    "1300",
+    "1400",
+    "2000",
+    "2100",
+    "2200",
+    "2300",
+  ];
   const workingCapital = -sum(
     accounts.filter((a) => workingCodes.includes(a.code)),
     movement,

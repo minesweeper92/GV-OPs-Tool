@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { bankCommands } from "./banking.ts";
+import { projectCommands } from "./projects.ts";
 const id = z.uuid(),
   text = z.string().trim().min(1).max(200),
   optional = z.string().trim().max(4000).default("");
@@ -23,6 +24,7 @@ const line = z
   .strict();
 export const commandSchema = z.discriminatedUnion("action", [
   ...bankCommands,
+  ...projectCommands,
   z.strictObject({
     action: z.literal("bill.create"),
     entity_id: id,
@@ -176,6 +178,11 @@ export const commandSchema = z.discriminatedUnion("action", [
     quote_id: id,
     issue_date: date,
     due_date: date,
+    amount: money.optional(),
+    billing_kind: z.enum(["earned", "advance"]).default("earned"),
+    label: text.default("Accepted quote"),
+    milestone_id: id.nullable().optional(),
+    request_key: id.optional(),
   }),
   z.strictObject({ action: z.literal("invoice.issue"), id }),
   z.strictObject({ action: z.literal("invoice.void"), id, reason: text, date }),

@@ -2,6 +2,7 @@ import { randomUUID as uuid } from "node:crypto";
 import type { SQL, Row } from "./db.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
+import { createProjectInvoice } from "./projects.ts";
 export type Context = {
   tenantId: string;
   userId: string;
@@ -36,6 +37,7 @@ export const chart = [
   ["2000", "Accounts payable", "Liability"],
   ["2100", "Output tax payable", "Liability"],
   ["2200", "Withholding tax payable", "Liability"],
+  ["2300", "Deferred service revenue", "Liability"],
   ["3000", "Owner equity", "Equity"],
   ["3900", "Opening balance clearing", "Equity"],
   ["4000", "Service revenue", "Income"],
@@ -178,7 +180,7 @@ export async function snapshot(tx: SQL, ctx: Context) {
   ).rows;
   const invoices = (
     await tx.query(
-      `SELECT i.*,q.currency,q.fx_micros,q.total_minor,q.net_minor,q.tax_minor,q.lines,q.customer_name,q.issuer_name,
+      `SELECT i.*,q.currency,q.fx_micros,q.customer_name,q.issuer_name,
     q.issuer_address,q.issuer_tax_id,q.terms,d.name AS deal_name,e.code AS entity_code
     FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id JOIN entities e ON e.id=i.entity_id
     WHERE i.deal_id=ANY($1::uuid[]) ORDER BY i.created_at DESC`,
@@ -239,7 +241,9 @@ export async function snapshot(tx: SQL, ctx: Context) {
           (e) =>
             !e.action.startsWith("bill.") &&
             !e.action.startsWith("vendor-payment.") &&
-            !e.action.startsWith("bank."),
+            !e.action.startsWith("bank.") &&
+            !e.action.startsWith("project.") &&
+            e.action !== "invoice.recognise",
         ),
   };
 }
@@ -527,22 +531,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
       break;
     }
     case "invoice.create": {
-      const q = await record(tx, "quotes", c.quote_id, ctx),
-        d = await record(tx, "deals", q.deal_id, ctx);
-      if (d.accepted_quote_id !== q.id)
-        reject(409, "Select the explicitly accepted quote version.");
-      const existing = (
-        await tx.query("SELECT id FROM invoices WHERE deal_id=$1", [d.id])
-      ).rows[0];
-      if (existing) return existing;
-      await entityDate(tx, d.entity_id, c.issue_date, ctx);
-      if (c.due_date < c.issue_date)
-        reject(400, "Due date cannot precede invoice date.");
-      await tx.query(
-        "INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date) VALUES($1,$2,$3,$4,$5,$6,$7)",
-        [id, t, d.entity_id, d.id, q.id, c.issue_date, c.due_date],
-      );
-      break;
+      return createProjectInvoice(tx, ctx, c);
     }
     case "invoice.issue": {
       const i = await record(tx, "invoices", c.id, ctx);
@@ -562,8 +551,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         "UPDATE entities SET next_invoice=next_invoice+1 WHERE id=$1",
         [e.id],
       );
-      const net = baseAmount(BigInt(q.net_minor), BigInt(q.fx_micros)),
-        total = baseAmount(BigInt(q.total_minor), BigInt(q.fx_micros));
+      const net = baseAmount(BigInt(i.net_minor), BigInt(q.fx_micros)),
+        total = baseAmount(BigInt(i.total_minor), BigInt(q.fx_micros));
       if (total <= 0n) reject(400, "Base-currency total rounds to zero.");
       await post(
         tx,
@@ -575,7 +564,10 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         number,
         [
           { account: "1100", debit: total },
-          { account: "4000", credit: net },
+          {
+            account: i.billing_kind === "advance" ? "2300" : "4000",
+            credit: net,
+          },
           { account: "2100", credit: total - net },
         ],
       );
@@ -624,7 +616,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         wht = minor(c.wht),
         settled = cash + wht,
         fx = scaled(c.fx, 6),
-        total = BigInt(q.total_minor),
+        total = BigInt(i.total_minor),
         paid = BigInt(i.paid_minor);
       if (
         cash <= 0n ||
@@ -696,6 +688,18 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         );
       if (c.date < String(i.issue_date).slice(0, 10))
         reject(400, "Reversal date cannot precede invoice date.");
+      if (
+        (
+          await tx.query(
+            "SELECT id FROM revenue_recognitions WHERE invoice_id=$1 LIMIT 1",
+            [i.id],
+          )
+        ).rows.length
+      )
+        reject(
+          409,
+          "An advance with recognised revenue cannot be voided. It requires a reviewed credit adjustment.",
+        );
       const lines = (
         await tx.query(
           "SELECT l.* FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_type='invoice' AND j.source_id=$1",

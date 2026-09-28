@@ -46,6 +46,7 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
       "payables",
       "financial-reports",
       "banking",
+      "projects",
       "settings",
       "team",
       "organizations",
@@ -66,6 +67,172 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
   await page.getByLabel("Theme", { exact: true }).selectOption("contrast");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByLabel("Theme", { exact: true }).selectOption("light");
+  expect(errors).toEqual([]);
+});
+test("accepted work to project, advance invoice, delivery recognition and profitability", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await owner(page);
+  const me = await (await page.request.get("/api/me")).json(),
+    data = await (await page.request.get("/api/data")).json();
+  const entity = data.entities.find((e: any) => e.code === "PVT");
+  const command = async (payload: Record<string, unknown>) => {
+    const r = await page.request.post("/api/commands", {
+      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      data: payload,
+    });
+    expect(r.ok(), await r.text()).toBeTruthy();
+    return r.json();
+  };
+  const company = (
+    await command({
+      action: "company.create",
+      name: "Project browser client",
+      customer: true,
+      vendor: false,
+      service_entity_id: null,
+    })
+  ).id;
+  const contact = (
+    await command({
+      action: "contact.create",
+      first_name: "Maya",
+      email: "",
+      company_id: company,
+      role: "Client producer",
+    })
+  ).id;
+  const lead = (
+    await command({
+      action: "lead.create",
+      entity_id: entity.id,
+      company_id: company,
+      contact_id: contact,
+      title: "Product launch film",
+      next_action: "Approve quote",
+      due_date: "2026-01-01",
+    })
+  ).id;
+  const deal = (await command({ action: "lead.convert", id: lead })).id;
+  const quote = (
+    await command({
+      action: "quote.create",
+      deal_id: deal,
+      option_name: "Director Maya",
+      currency: "PKR",
+      fx: "1",
+      lines: [
+        {
+          description: "Launch film",
+          quantity: "1",
+          price: "100000",
+          tax: "18",
+        },
+      ],
+    })
+  ).id;
+  await command({
+    action: "quote.accept",
+    id: quote,
+    reference: "QA approval",
+  });
+  await page.goto("/?view=projects");
+  await page
+    .getByRole("button", { name: "Start project", exact: true })
+    .click();
+  await page.getByLabel("Accepted quote").selectOption(quote);
+  await page.getByLabel("Confirm issuing entity").selectOption(entity.id);
+  await page.getByLabel("Project code").fill("FILM-QA");
+  await page.getByLabel("Cost budget (PKR)").fill("25000");
+  await page
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("link", { name: "Product launch film", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Project profitability" }),
+  ).toBeVisible();
+  const projectUrl = page.url();
+  await page
+    .getByRole("button", { name: "Add milestone", exact: true })
+    .click();
+  await page.getByLabel("Milestone name").fill("40% mobilisation advance");
+  await page.getByLabel("Milestone subtotal (PKR)").fill("40000");
+  await page.getByLabel("Revenue treatment").selectOption("advance");
+  await page.getByRole("button", { name: "Save milestone" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Create invoice", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save invoice draft" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("link", { name: "Open draft", exact: true }).click();
+  await expect(page.locator(".document")).toContainText("PKR 47,200.00");
+  await page
+    .getByRole("button", { name: "Issue invoice", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("deferred revenue");
+  await page.getByRole("button", { name: "Issue and post" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Record payment", exact: true })
+    .click();
+  await page.getByLabel("Bank or receipt reference").fill("QA-ADVANCE");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Record payment", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Recognise delivered work", exact: true })
+    .click();
+  await page.getByLabel("Delivered subtotal (PKR)").fill("20000");
+  await page.getByLabel("Delivery evidence").fill("First cut accepted");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("link", { name: "Expenses", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Record expense", exact: true })
+    .click();
+  await page
+    .getByLabel("Legal entity", { exact: true })
+    .selectOption(entity.id);
+  await page.getByLabel("What was the expense for?").fill("Crew costs");
+  await page.getByLabel("Amount paid (PKR)").fill("21000");
+  await page.getByLabel("Receipt or payment reference").fill("QA-CREW");
+  await page.getByLabel("Project (optional)").selectOption(deal);
+  await page.getByRole("button", { name: "Post expense" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.goto(projectUrl);
+  const metric = (label: string) =>
+    page
+      .locator(".project-metrics > div")
+      .filter({ has: page.getByText(label, { exact: true }) });
+  await expect(metric("Earned revenue")).toContainText("PKR 20,000.00");
+  await expect(metric("Cash collected")).toContainText("PKR 47,200.00");
+  await expect(metric("Deferred revenue")).toContainText("PKR 20,000.00");
+  await expect(metric("Posted costs")).toContainText("PKR 21,000.00");
+  await expect(metric("Net project result")).toContainText("PKR -1,000.00");
+  await expect(page.getByRole("status")).toContainText("80%");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    ).toBe(true);
+  }
+  await page.reload();
+  await expect(metric("Cash collected")).toContainText("PKR 47,200.00");
+  await page.screenshot({
+    path: "test-results/project-profitability.png",
+    fullPage: true,
+  });
   expect(errors).toEqual([]);
 });
 

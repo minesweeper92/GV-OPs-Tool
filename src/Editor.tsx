@@ -24,6 +24,9 @@ const titles: Record<string, string> = {
   accept: "Accept this quote",
   share: "Mark quote as shared",
   invoice: "Create invoice draft",
+  "milestone-invoice": "Invoice milestone",
+  "cancel-invoice": "Cancel invoice draft",
+  recognise: "Recognise delivered work",
   issue: "Issue invoice",
   void: "Void invoice",
   lose: "Close deal as lost",
@@ -52,7 +55,16 @@ export function Editor({
     [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  const initialQuote = data.quotes.find((q) => q.id === id),
+  const milestone =
+    kind === "milestone-invoice"
+      ? data.milestones.find((m) => m.id === id)
+      : undefined;
+  const milestoneProject = data.projects.find(
+    (p) => p.id === milestone?.project_id,
+  );
+  const initialQuote = data.quotes.find(
+      (q) => q.id === (milestoneProject?.quote_id || id),
+    ),
     initialDeal = data.deals.find(
       (d) => d.id === (initialQuote?.deal_id || id),
     ),
@@ -122,6 +134,25 @@ export function Editor({
     </Field>
   );
   const quote = initialQuote;
+  const available = quote
+    ? BigInt(quote.net_minor) -
+      data.invoices
+        .filter(
+          (i) =>
+            i.quote_id === quote.id &&
+            !["Voided", "Cancelled"].includes(i.status),
+        )
+        .reduce((s, i) => s + BigInt(i.net_minor), 0n) -
+      BigInt(
+        data.projects.find((p) => p.quote_id === quote.id)?.planned_net || "0",
+      )
+    : 0n;
+  const deferred = invoice
+    ? BigInt(invoice.net_minor) -
+      data.recognitions
+        .filter((r) => r.invoice_id === invoice.id)
+        .reduce((s, r) => s + BigInt(r.net_minor), 0n)
+    : 0n;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -161,7 +192,25 @@ export function Editor({
         command = { action: "quote.share", id, ...f };
         break;
       case "invoice":
-        command = { action: "invoice.create", quote_id: id, ...f };
+      case "milestone-invoice":
+        command = {
+          action: "invoice.create",
+          quote_id: quote?.id,
+          ...f,
+          request_key: requestKey,
+          ...(milestone ? { milestone_id: milestone.id } : {}),
+        };
+        break;
+      case "cancel-invoice":
+        command = { action: "invoice.cancel", id, ...f };
+        break;
+      case "recognise":
+        command = {
+          action: "invoice.recognise",
+          id,
+          ...f,
+          request_key: requestKey,
+        };
         break;
       case "issue":
         command = { action: "invoice.issue", id };
@@ -479,14 +528,54 @@ export function Editor({
               )}
             </>
           ) : null}
-          {kind === "invoice" ? (
+          {kind === "invoice" || kind === "milestone-invoice" ? (
             <>
               <p>
                 The accepted quote supplies the customer, legal entity, currency
                 and line items. Saving a draft does not post to the books.
               </p>
+              <p className="context-label">
+                {quote?.issuer_name} · {quote?.customer_name} · Available
+                outside drafts and planned milestones:{" "}
+                {money(available, quote?.currency)}
+              </p>
+              {milestone ? (
+                <p>
+                  {milestone.name} ·{" "}
+                  {money(milestone.net_minor, quote?.currency)} before tax ·{" "}
+                  {milestone.billing_kind === "advance"
+                    ? "Advance / deferred revenue"
+                    : "Earned revenue"}
+                </p>
+              ) : (
+                <>
+                  {text("label", "Billing stage", true, "Accepted quote")}
+                  {text(
+                    "amount",
+                    `Subtotal to invoice (${quote?.currency}, before tax)`,
+                    true,
+                    decimal(available),
+                  )}
+                  <Field label="Revenue treatment">
+                    <select name="billing_kind" defaultValue="earned">
+                      <option value="earned">
+                        Delivered work — earned revenue
+                      </option>
+                      <option value="advance">
+                        Advance — deferred revenue
+                      </option>
+                    </select>
+                  </Field>
+                </>
+              )}
               {text("issue_date", "Invoice date", true, today(), "date")}
               {text("due_date", "Due date", true, today(), "date")}
+              <p className="muted">
+                Partial amounts are distributed across the remaining quote
+                lines, preserving their tax rates. Drafts reserve the amount;
+                cancel a draft to release it. Planned milestones reserve their
+                amounts separately.
+              </p>
             </>
           ) : null}
           {kind === "issue" ? (
@@ -496,11 +585,41 @@ export function Editor({
                 {invoice ? money(invoice.total_minor, invoice.currency) : ""}
               </p>
               <p>
-                Issue a numbered invoice and record accounts receivable, revenue
+                Issue a numbered invoice and record accounts receivable,{" "}
+                {invoice?.billing_kind === "advance"
+                  ? "deferred revenue"
+                  : "earned revenue"}{" "}
                 and output tax. The document becomes read-only. This does not
                 send an email.
               </p>
             </div>
+          ) : null}
+          {kind === "cancel-invoice" ? (
+            <>
+              <p>
+                Cancel this unissued draft and release its quote allocation. Its
+                history remains available.
+              </p>
+              {text("reason", "Reason")}
+            </>
+          ) : null}
+          {kind === "recognise" ? (
+            <>
+              <p>
+                {invoice?.number} · Unrecognised subtotal{" "}
+                {money(deferred, invoice?.currency)}. Use this only for work
+                already delivered. This moves deferred revenue to earned
+                revenue; it does not record another invoice or receipt.
+              </p>
+              {text(
+                "amount",
+                `Delivered subtotal (${invoice?.currency})`,
+                true,
+                decimal(deferred),
+              )}
+              {text("date", "Recognition date", true, today(), "date")}
+              {text("reference", "Delivery evidence")}
+            </>
           ) : null}
           {kind === "payment" ? (
             <>
@@ -671,7 +790,7 @@ export function Editor({
               ? "Saving…"
               : kind === "quote"
                 ? "Save quote version"
-                : kind === "invoice"
+                : kind === "invoice" || kind === "milestone-invoice"
                   ? "Save invoice draft"
                   : kind === "issue"
                     ? "Issue and post"

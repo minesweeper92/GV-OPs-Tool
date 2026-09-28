@@ -11,6 +11,7 @@ import { executePayable, payableSnapshot } from "./payables.ts";
 import { reportFilter } from "../shared/reporting.ts";
 import { financialReports, accountDetail } from "./financial-reports.ts";
 import { bankAccounts, bankDetail, executeBank } from "./banking.ts";
+import { projectSnapshot, executeProject } from "./projects.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -213,11 +214,17 @@ export function createApp(
   );
   app.get("/api/data", async (req) => {
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, async (tx) => ({
-      ...(await snapshot(tx, ctx)),
-      ...(await payableSnapshot(tx, ctx)),
-      bankAccounts: await bankAccounts(tx, ctx),
-    }));
+    return inTenant(
+      db,
+      ctx.tenantId,
+      async (tx) => ({
+        ...(await snapshot(tx, ctx)),
+        ...(await payableSnapshot(tx, ctx)),
+        bankAccounts: await bankAccounts(tx, ctx),
+        ...(await projectSnapshot(tx, ctx)),
+      }),
+      true,
+    );
   });
   app.get("/api/reports", async (req) => {
     const q = z
@@ -268,11 +275,15 @@ export function createApp(
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) =>
-      c.action.startsWith("bank.")
-        ? executeBank(tx, ctx, c)
-        : c.action.startsWith("bill.") || c.action.startsWith("vendor-payment.")
-          ? executePayable(tx, ctx, c)
-          : execute(tx, ctx, c),
+      c.action.startsWith("project.") ||
+      ["invoice.cancel", "invoice.recognise"].includes(c.action)
+        ? executeProject(tx, ctx, c)
+        : c.action.startsWith("bank.")
+          ? executeBank(tx, ctx, c)
+          : c.action.startsWith("bill.") ||
+              c.action.startsWith("vendor-payment.")
+            ? executePayable(tx, ctx, c)
+            : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {
@@ -301,12 +312,10 @@ export function createApp(
         .code(429)
         .send({ error: "Too many requests. Please wait a moment." });
     if ((error as { statusCode?: number }).statusCode === 413)
-      return res
-        .code(413)
-        .send({
-          error:
-            "This upload is too large. Use fewer statement rows or shorter descriptions.",
-        });
+      return res.code(413).send({
+        error:
+          "This upload is too large. Use fewer statement rows or shorter descriptions.",
+      });
     console.error("Request failed", {
       requestId: req.id,
       code: code || "INTERNAL",
