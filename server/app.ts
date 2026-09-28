@@ -8,6 +8,9 @@ import { commandSchema } from "../shared/commands.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
 import { executePayable, payableSnapshot } from "./payables.ts";
+import { reportFilter } from "../shared/reporting.ts";
+import { financialReports, accountDetail } from "./financial-reports.ts";
+import { bankAccounts, bankDetail, executeBank } from "./banking.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -213,6 +216,7 @@ export function createApp(
     return inTenant(db, ctx.tenantId, async (tx) => ({
       ...(await snapshot(tx, ctx)),
       ...(await payableSnapshot(tx, ctx)),
+      bankAccounts: await bankAccounts(tx, ctx),
     }));
   });
   app.get("/api/reports", async (req) => {
@@ -227,13 +231,48 @@ export function createApp(
       reports(tx, ctx, q.entityId, q.from, q.to),
     );
   });
+  app.get("/api/financial-reports", async (req) => {
+    const q = reportFilter.parse(req.query),
+      ctx = access.context(sessions.get(req)!);
+    return inTenant(
+      db,
+      ctx.tenantId,
+      (tx) => financialReports(tx, ctx, q),
+      true,
+    );
+  });
+  app.get("/api/banking", async (req) => {
+    const q = z
+        .strictObject({ bankId: z.uuid(), statementId: z.uuid().optional() })
+        .parse(req.query),
+      ctx = access.context(sessions.get(req)!);
+    return inTenant(
+      db,
+      ctx.tenantId,
+      (tx) => bankDetail(tx, ctx, q.bankId, q.statementId),
+      true,
+    );
+  });
+  app.get("/api/account-detail", async (req) => {
+    const q = reportFilter
+      .safeExtend({
+        entityId: z.uuid(),
+        code: z.string().regex(/^[A-Za-z0-9]{1,12}$/),
+        offset: z.coerce.number().int().min(0).max(1000000).default(0),
+      })
+      .parse(req.query);
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(db, ctx.tenantId, (tx) => accountDetail(tx, ctx, q), true);
+  });
   app.post("/api/commands", async (req) => {
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) =>
-      c.action.startsWith("bill.") || c.action.startsWith("vendor-payment.")
-        ? executePayable(tx, ctx, c)
-        : execute(tx, ctx, c),
+      c.action.startsWith("bank.")
+        ? executeBank(tx, ctx, c)
+        : c.action.startsWith("bill.") || c.action.startsWith("vendor-payment.")
+          ? executePayable(tx, ctx, c)
+          : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {
@@ -261,6 +300,13 @@ export function createApp(
       return res
         .code(429)
         .send({ error: "Too many requests. Please wait a moment." });
+    if ((error as { statusCode?: number }).statusCode === 413)
+      return res
+        .code(413)
+        .send({
+          error:
+            "This upload is too large. Use fewer statement rows or shorter descriptions.",
+        });
     console.error("Request failed", {
       requestId: req.id,
       code: code || "INTERNAL",

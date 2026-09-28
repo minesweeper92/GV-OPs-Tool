@@ -62,6 +62,7 @@ async function migrations() {
       "./schema.sql",
       "./migrations/002_access.sql",
       "./migrations/003_payables.sql",
+      "./migrations/004_banking.sql",
     ].map(async (path, index) => {
       const sql = await readFile(new URL(path, import.meta.url), "utf8");
       return {
@@ -130,8 +131,13 @@ export async function inTenant<T>(
   db: Database,
   tenantId: string,
   fn: (tx: SQL) => Promise<T>,
+  consistentRead = false,
 ): Promise<T> {
   return db.transaction(async (tx) => {
+    if (consistentRead)
+      await tx.query(
+        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY",
+      );
     await tx.query("SET LOCAL ROLE gv_workspace_runtime");
     await tx.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
     return fn(tx);

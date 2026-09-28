@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Drawer, Field, ErrorBox } from "./components";
+import { BankSelect } from "./Banking";
 import {
   today,
   money,
@@ -170,6 +171,7 @@ export function Editor({
           action: "payment.create",
           invoice_id: id,
           ...f,
+          bank_account_id: f.bank_account_id || null,
           request_key: requestKey,
         };
         break;
@@ -177,6 +179,7 @@ export function Editor({
         command = {
           action: "expense.create",
           ...f,
+          bank_account_id: f.bank_account_id || null,
           deal_id: f.deal_id || null,
           request_key: requestKey,
         };
@@ -501,6 +504,7 @@ export function Editor({
           ) : null}
           {kind === "payment" ? (
             <>
+              <BankSelect data={data} entity={invoice?.entity_id || ""} />
               <p className="context-label">
                 {invoice?.number} · Balance{" "}
                 {invoice
@@ -544,6 +548,7 @@ export function Editor({
           {kind === "expense" ? (
             <>
               {entityField}
+              <BankSelect data={data} entity={selectedEntity} />
               {text("description", "What was the expense for?")}
               {text("amount", "Amount paid (PKR)")}
               {text("date", "Expense date", true, today(), "date")}

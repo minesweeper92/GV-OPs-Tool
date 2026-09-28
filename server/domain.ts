@@ -1,6 +1,7 @@
 import { randomUUID as uuid } from "node:crypto";
 import type { SQL, Row } from "./db.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
+import { cashAccount } from "./bank-account.ts";
 export type Context = {
   tenantId: string;
   userId: string;
@@ -36,6 +37,7 @@ export const chart = [
   ["2100", "Output tax payable", "Liability"],
   ["2200", "Withholding tax payable", "Liability"],
   ["3000", "Owner equity", "Equity"],
+  ["3900", "Opening balance clearing", "Equity"],
   ["4000", "Service revenue", "Income"],
   ["4100", "Realised exchange gain", "Income"],
   ["5000", "Operating expenses", "Expense"],
@@ -110,6 +112,19 @@ export async function post(
   lines: PostingLine[],
 ) {
   const filtered = lines.filter((l) => (l.debit || 0n) + (l.credit || 0n) > 0n);
+  if (source !== "bank-opening") {
+    const closed = (
+      await tx.query(
+        "SELECT name FROM bank_accounts WHERE entity_id=$1 AND account_code=ANY($2::text[]) AND last_reconciled_on>=$3",
+        [entity, filtered.map((l) => l.account), date],
+      )
+    ).rows;
+    if (closed.length)
+      throw new Problem(
+        409,
+        "This posting would change a reconciled bank period. Choose a later date.",
+      );
+  }
   const delta = filtered.reduce(
     (sum, l) => sum + (l.debit || 0n) - (l.credit || 0n),
     0n,
@@ -223,7 +238,8 @@ export async function snapshot(tx: SQL, ctx: Context) {
       : events.filter(
           (e) =>
             !e.action.startsWith("bill.") &&
-            !e.action.startsWith("vendor-payment."),
+            !e.action.startsWith("vendor-payment.") &&
+            !e.action.startsWith("bank."),
         ),
   };
 }
@@ -583,7 +599,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           BigInt(prior.wht_minor) !== minor(c.wht) ||
           BigInt(prior.fx_micros) !== scaled(c.fx, 6) ||
           String(prior.payment_date).slice(0, 10) !== c.date ||
-          prior.reference !== c.reference
+          prior.reference !== c.reference ||
+          (prior.bank_account_id || null) !== (c.bank_account_id || null)
         )
           reject(409, "This retry key was used for a different payment.");
         return { id: prior.id };
@@ -595,6 +612,12 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         );
       const q = await record(tx, "quotes", i.quote_id, ctx);
       await entityDate(tx, i.entity_id, c.date, ctx);
+      const bankCode = await cashAccount(
+        tx,
+        i.entity_id,
+        c.bank_account_id,
+        c.date,
+      );
       if (c.date < String(i.issue_date).slice(0, 10))
         reject(400, "Payment date cannot precede invoice date.");
       const cash = minor(c.amount),
@@ -620,7 +643,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         tax = baseAmount(wht, fx),
         gain = bank + tax - ar;
       await tx.query(
-        "INSERT INTO payments(id,tenant_id,entity_id,invoice_id,payment_date,amount_minor,wht_minor,fx_micros,reference,request_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        "INSERT INTO payments(id,tenant_id,entity_id,invoice_id,payment_date,amount_minor,wht_minor,fx_micros,reference,request_key,bank_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         [
           id,
           t,
@@ -632,6 +655,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           String(fx),
           c.reference,
           c.request_key,
+          c.bank_account_id || null,
         ],
       );
       await post(
@@ -643,7 +667,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         id,
         `Payment for ${i.number}`,
         [
-          { account: "1000", debit: bank },
+          { account: bankCode, debit: bank },
           { account: "1200", debit: tax },
           { account: "1100", credit: ar },
           gain >= 0n
@@ -709,7 +733,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           BigInt(prior.amount_minor) !== minor(c.amount) ||
           prior.description !== c.description ||
           prior.reference !== c.reference ||
-          String(prior.expense_date).slice(0, 10) !== c.date
+          String(prior.expense_date).slice(0, 10) !== c.date ||
+          (prior.bank_account_id || null) !== (c.bank_account_id || null)
         )
           reject(409, "This retry key was used for another expense.");
         return { id: prior.id };
@@ -720,9 +745,15 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           reject(400, "Project and expense must use the same legal entity.");
       }
       const amount = minor(c.amount);
+      const bankCode = await cashAccount(
+        tx,
+        c.entity_id,
+        c.bank_account_id,
+        c.date,
+      );
       if (amount <= 0n) reject(400, "Expense must be greater than zero.");
       await tx.query(
-        "INSERT INTO expenses(id,tenant_id,entity_id,deal_id,description,amount_minor,expense_date,reference,request_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        "INSERT INTO expenses(id,tenant_id,entity_id,deal_id,description,amount_minor,expense_date,reference,request_key,bank_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         [
           id,
           t,
@@ -733,11 +764,12 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           c.date,
           c.reference,
           c.request_key,
+          c.bank_account_id || null,
         ],
       );
       await post(tx, ctx, c.entity_id, c.date, "expense", id, c.description, [
         { account: "5000", debit: amount },
-        { account: "1000", credit: amount },
+        { account: bankCode, credit: amount },
       ]);
       break;
     }

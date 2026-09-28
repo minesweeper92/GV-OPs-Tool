@@ -10,6 +10,7 @@ import {
   Empty,
 } from "./components";
 import { Timeline } from "./Records";
+import { BankSelect } from "./Banking";
 import {
   request,
   day,
@@ -81,6 +82,9 @@ export function Payables({
     await Promise.all([
       cache.invalidateQueries({ queryKey: ["data"] }),
       cache.invalidateQueries({ queryKey: ["report"] }),
+      cache.invalidateQueries({ queryKey: ["financial-report"] }),
+      cache.invalidateQueries({ queryKey: ["financial-detail"] }),
+      cache.invalidateQueries({ queryKey: ["banking"] }),
     ]);
     return result;
   }
@@ -673,6 +677,7 @@ function PayableEditor({
             else if (kind === "pay")
               c = {
                 action: "vendor-payment.create",
+                bank_account_id: f.bank_account_id || null,
                 bill_id: b!.id,
                 date: f.date,
                 amount: f.amount,
@@ -926,6 +931,7 @@ function PayableEditor({
             </>
           ) : kind === "pay" ? (
             <>
+              <BankSelect data={data} entity={b!.entity_id} />
               <p>
                 <strong>
                   {b!.vendor_name} · {b!.reference}
@@ -961,9 +967,9 @@ function PayableEditor({
               {field("Payment reference", "reference")}
               <p>
                 Cash + withholding settles the bill. Cash and charges post
-                through Bank and cash (1000). This records an existing payment;
-                it does not transfer money. Do not also record it as a direct
-                expense.
+                through the selected bank ledger. This records an existing
+                payment; it does not transfer money. Do not also record it as a
+                direct expense.
               </p>
             </>
           ) : (

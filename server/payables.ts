@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { SQL, Row } from "./db.ts";
 import { Problem, post, audit, type Context } from "./domain.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
+import { cashAccount } from "./bank-account.ts";
 
 function requireFinance(ctx: Context) {
   if (!["admin", "finance"].includes(ctx.role))
@@ -337,6 +338,12 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     if (b.status !== "Open")
       throw new Problem(409, "Only an approved, open bill can be paid.");
     await openDate(tx, b, c.date);
+    const bankCode = await cashAccount(
+      tx,
+      b.entity_id,
+      c.bank_account_id,
+      c.date,
+    );
     const amount = minor(c.amount),
       wht = minor(c.wht),
       fee = minor(c.fee),
@@ -365,7 +372,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         "Payment must convert to at least one PKR minor unit.",
       );
     await tx.query(
-      "INSERT INTO vendor_payments(id,tenant_id,entity_id,bill_id,payment_date,amount_minor,wht_minor,fee_minor,fx_micros,carrying_minor,reference,request_key,request_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+      "INSERT INTO vendor_payments(id,tenant_id,entity_id,bill_id,payment_date,amount_minor,wht_minor,fee_minor,fx_micros,carrying_minor,reference,request_key,request_payload,bank_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
       [
         id,
         t,
@@ -380,6 +387,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         c.reference,
         c.request_key,
         JSON.stringify(c),
+        c.bank_account_id || null,
       ],
     );
     await post(
@@ -392,7 +400,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       `Vendor payment for ${b.reference}`,
       [
         { account: "2000", debit: carrying },
-        { account: "1000", credit: cash + fees },
+        { account: bankCode, credit: cash + fees },
         { account: "2200", credit: withheld },
         { account: "5300", debit: fees },
         difference >= 0n

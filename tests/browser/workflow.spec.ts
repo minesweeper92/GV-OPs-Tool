@@ -44,6 +44,8 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
       "bills",
       "vendor-payments",
       "payables",
+      "financial-reports",
+      "banking",
       "settings",
       "team",
       "organizations",
@@ -229,6 +231,206 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   await expect(
     page.getByRole("row").filter({ hasText: "Accounts payable" }),
   ).toContainText("PKR 0.00");
+  expect(errors).toEqual([]);
+});
+test("historical financial reports, drill-down, export and responsive ageing", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await owner(page);
+  await page
+    .getByRole("link", { name: "Financial reports", exact: true })
+    .click();
+  await page.getByLabel("From", { exact: true }).fill("2026-09-01");
+  await page.getByLabel("As at", { exact: true }).fill("2026-09-21");
+  await page.getByRole("button", { name: "Run report", exact: true }).click();
+  await page.getByLabel("Report", { exact: true }).selectOption("ap");
+  await page
+    .getByLabel("Legal entity view", { exact: true })
+    .selectOption({ label: "PVT · Sample Private Limited" });
+  await expect(page.getByLabel("As at", { exact: true })).toHaveValue(
+    "2026-09-21",
+  );
+  await expect(page.getByLabel("Report", { exact: true })).toHaveValue("ap");
+  await page
+    .getByLabel("Legal entity view", { exact: true })
+    .selectOption("all");
+  await expect(
+    page.getByRole("row").filter({ hasText: "STUDIO-BILL-101" }),
+  ).toContainText("PKR 68,000.00");
+  await expect(page.getByRole("alert")).not.toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export CSV", exact: true }).click();
+  expect((await downloadPromise).suggestedFilename()).toBe(
+    "gv-ap-2026-09-21.csv",
+  );
+  await page.getByLabel("Ageing view", { exact: true }).selectOption("summary");
+  await expect(
+    page.getByRole("row").filter({ hasText: "Studio Supplies Test" }),
+  ).toContainText("PKR 68,000.00");
+  await page.getByLabel("Report", { exact: true }).selectOption("balance");
+  await page
+    .getByRole("button", { name: "2000 · Accounts payable", exact: true })
+    .filter({ visible: true })
+    .last()
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("Bill STUDIO-BILL-101");
+  await expect(page.getByRole("dialog")).toContainText("PKR -68,000.00");
+  await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page.getByLabel("Report", { exact: true }).selectOption("cash");
+  await expect(
+    page.getByText("Net operating cash", { exact: false }),
+  ).toBeVisible();
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    ).toBe(true);
+  }
+  await page.getByLabel("Report", { exact: true }).selectOption("ap");
+  await page.screenshot({
+    path: "test-results/historical-ageing.png",
+    fullPage: true,
+  });
+  await page.getByLabel("As at", { exact: true }).fill("2026-09-24");
+  await page.getByRole("button", { name: "Run report", exact: true }).click();
+  await expect(
+    page.getByText("No outstanding posted documents at this date.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+});
+test("bank account, recorded expense, CSV preview, grouped match and reconciliation", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("dialog", (dialog) =>
+    dialog.type() === "prompt" ? dialog.accept("Review test") : dialog.accept(),
+  );
+  await owner(page);
+  await page.getByRole("link", { name: "Banking", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Add bank account", exact: true })
+    .click();
+  await page
+    .getByLabel("Legal entity", { exact: true })
+    .selectOption({ label: "AOP · Sample Partnership" });
+  await page
+    .getByLabel("Account name", { exact: true })
+    .fill("QA Operating Bank");
+  await page
+    .getByLabel("Account label / last four digits", { exact: true })
+    .fill("4321");
+  await page
+    .getByLabel("Opening balance date", { exact: true })
+    .fill("2026-08-31");
+  await page
+    .getByLabel("Verified opening balance (PKR)", { exact: true })
+    .fill("5000");
+  await page
+    .getByLabel("Opening balance offset", { exact: true })
+    .selectOption("3900");
+  await page
+    .getByRole("button", { name: "Create bank account", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "QA Operating Bank", exact: true }),
+  ).toBeVisible();
+  const bankUrl = page.url();
+  await page.getByRole("link", { name: "Expenses", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Record expense", exact: true })
+    .click();
+  await page
+    .getByLabel("Legal entity", { exact: true })
+    .selectOption({ label: "Sample Partnership (AOP)" });
+  await page
+    .getByLabel("Bank account", { exact: true })
+    .selectOption({ label: "QA Operating Bank · PKR" });
+  await page
+    .getByLabel("What was the expense for?", { exact: true })
+    .fill("QA office supplies");
+  await page.getByLabel("Amount paid (PKR)", { exact: true }).fill("1000");
+  await page.getByLabel("Expense date", { exact: true }).fill("2026-09-05");
+  await page
+    .getByLabel("Receipt or payment reference", { exact: true })
+    .fill("QA-BANK");
+  await page.getByRole("button", { name: "Post expense", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.goto(bankUrl);
+  await page
+    .getByRole("button", { name: "Import statement", exact: true })
+    .click();
+  await page
+    .getByLabel("Statement reference", { exact: true })
+    .fill("September QA");
+  await page.getByLabel("Statement to", { exact: true }).fill("2026-09-30");
+  await page
+    .getByLabel("Statement closing balance (PKR)", { exact: true })
+    .fill("4000");
+  await page
+    .getByLabel("Statement CSV", { exact: true })
+    .fill(
+      "Date,Description,Reference,Amount\n2026-09-05,Part A,QA-1,-600\n2026-09-05,Part B,QA-2,-400",
+    );
+  await page.getByRole("button", { name: "Preview rows", exact: true }).click();
+  await expect(
+    page.getByText("2 rows · Net movement PKR -1,000.00", { exact: true }),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Import statement", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByLabel("Statement row 1", { exact: true }).check();
+  await page.getByLabel("Statement row 2", { exact: true }).check();
+  await page.getByLabel("Ledger QA office supplies", { exact: true }).check();
+  await page
+    .getByRole("button", { name: "Match selected", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Undo match 1", exact: true }).click();
+  await page.getByLabel("Statement row 1", { exact: true }).check();
+  await page.getByLabel("Statement row 2", { exact: true }).check();
+  await page.getByLabel("Ledger QA office supplies", { exact: true }).check();
+  await page
+    .getByRole("button", { name: "Match selected", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Complete reconciliation", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "September QA · Reconciled",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", {
+      name: "September QA · Reconciled",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    ).toBe(true);
+  }
+  await page.screenshot({
+    path: "test-results/bank-reconciliation.png",
+    fullPage: true,
+  });
   expect(errors).toEqual([]);
 });
 test("real UI lead-to-cash, project expense, persisted ledger and audit", async ({

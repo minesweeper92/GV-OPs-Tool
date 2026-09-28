@@ -7,6 +7,8 @@ import { createApp } from "../server/app.ts";
 import { minor, totals, baseAmount } from "../shared/money.ts";
 import { post, type Context } from "../server/domain.ts";
 import { verifyPayables } from "./payables-cases.ts";
+import { verifyReporting } from "./reporting-cases.ts";
+import { verifyBanking } from "./banking-cases.ts";
 
 test("integer pricing, tax rounding and FX remain exact", () => {
   assert.equal(minor("90071992547.41"), 9007199254741n);
@@ -54,6 +56,10 @@ test("fresh integrated platform", async (t) => {
   t.after(() => db.close());
   await migrate(db);
   await seed(db);
+  await t.test("financial statements and historical ageing", (sub) =>
+    verifyReporting(sub, db),
+  );
+  await t.test("banking and reconciliation", (sub) => verifyBanking(sub, db));
   const origin = "http://127.0.0.1:4320",
     app = createApp(db, origin);
   await app.ready();

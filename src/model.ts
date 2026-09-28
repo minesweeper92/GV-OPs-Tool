@@ -138,6 +138,7 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  bankAccounts: import("../shared/banking").BankAccount[];
   bills: Bill[];
   vendorPayments: VendorPayment[];
   entities: Entity[];

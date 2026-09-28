@@ -1412,3 +1412,124 @@ details[open] summary {
     }
   }
 }
+/* Reports retain their scope and applied dates in print and exports. */
+.report-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.report-controls .field {
+  flex: 1;
+  min-width: 180px;
+}
+.report-controls .field small {
+  max-width: 260px;
+}
+.report-paper {
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.report-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.report-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.report-total.strong {
+  font-size: 1.2rem;
+}
+.report-account {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  padding: 4px 0;
+  text-align: left;
+  text-decoration: underline;
+}
+.report-totals {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.report-totals p {
+  flex: 1;
+  min-width: 190px;
+}
+.report-totals span,
+.report-totals strong {
+  display: block;
+}
+.report-totals strong {
+  font-size: 1.3rem;
+  margin-top: 8px;
+}
+.bank-match-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 16px 0;
+}
+@media (max-width: 600px) {
+  .report-paper {
+    padding: 14px;
+  }
+  .report-paper .section-title {
+    align-items: start;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+@media print {
+  .sidebar,
+  .topbar,
+  .app-shell > .skip,
+  footer,
+  .page-heading {
+    display: none !important;
+  }
+  .app-shell {
+    display: block;
+  }
+  .main-shell {
+    margin: 0;
+    width: 100%;
+  }
+  main {
+    padding: 0 !important;
+  }
+  body {
+    background: white;
+    color: black;
+  }
+  .financial-reports .report-controls,
+  .financial-reports .report-actions {
+    display: none;
+  }
+  .report-paper {
+    border: 0;
+    padding: 0;
+  }
+  .report-paper .table-scroll {
+    overflow: visible;
+  }
+  .report-paper table {
+    min-width: 0;
+    font-size: 9pt;
+  }
+  .report-account {
+    color: #000;
+    text-decoration: none;
+  }
+}

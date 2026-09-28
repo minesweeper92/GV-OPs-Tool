@@ -34,6 +34,8 @@ import { Heading, Badge, Table, Empty, ErrorBox } from "./components";
 import { Editor } from "./Editor";
 import { Organizations, Team, Onboarding } from "./Access";
 import { Payables } from "./Payables";
+import { FinancialReports } from "./FinancialReports";
+import { Banking } from "./Banking";
 import {
   DealRecord,
   PersonRecord,
@@ -90,9 +92,11 @@ const groups = [
   {
     label: "Accounting",
     items: [
+      ["banking", "Banking", Wallet],
       ["accounts", "Chart of accounts", BookOpen],
       ["journals", "Journals", BookOpen],
       ["reports", "Trial balance", BookOpen],
+      ["financial-reports", "Financial reports", BookOpen],
     ],
   },
   {
@@ -297,6 +301,9 @@ export default function App() {
       await Promise.all([
         cache.invalidateQueries({ queryKey: ["data"] }),
         cache.invalidateQueries({ queryKey: ["report"] }),
+        cache.invalidateQueries({ queryKey: ["financial-report"] }),
+        cache.invalidateQueries({ queryKey: ["financial-detail"] }),
+        cache.invalidateQueries({ queryKey: ["banking"] }),
       ]);
       setToast("Saved");
     } catch (e) {
@@ -385,6 +392,24 @@ export default function App() {
           view={view}
           id={id}
           newVendor={() => edit({ kind: "company", id: "vendor" })}
+        />
+      ) : (
+        denied()
+      );
+    if (view === "financial-reports")
+      return canFinance ? (
+        <FinancialReports key={me!.organization.id} me={me!} entity={entity} />
+      ) : (
+        denied()
+      );
+    if (view === "banking" || view === "bank")
+      return canFinance ? (
+        <Banking
+          key={view + (id || "") + entity}
+          me={me!}
+          data={data}
+          entity={entity}
+          id={id}
         />
       ) : (
         denied()

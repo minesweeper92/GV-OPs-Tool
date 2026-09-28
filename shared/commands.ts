@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bankCommands } from "./banking.ts";
 const id = z.uuid(),
   text = z.string().trim().min(1).max(200),
   optional = z.string().trim().max(4000).default("");
@@ -21,6 +22,7 @@ const line = z
   })
   .strict();
 export const commandSchema = z.discriminatedUnion("action", [
+  ...bankCommands,
   z.strictObject({
     action: z.literal("bill.create"),
     entity_id: id,
@@ -88,6 +90,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   }),
   z.strictObject({
     action: z.literal("vendor-payment.create"),
+    bank_account_id: id.nullable().optional(),
     bill_id: id,
     date,
     amount: money,
@@ -178,6 +181,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("invoice.void"), id, reason: text, date }),
   z.strictObject({
     action: z.literal("payment.create"),
+    bank_account_id: id.nullable().optional(),
     invoice_id: id,
     date,
     amount: money,
@@ -188,6 +192,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   }),
   z.strictObject({
     action: z.literal("expense.create"),
+    bank_account_id: id.nullable().optional(),
     entity_id: id,
     deal_id: id.nullable(),
     description: text,
