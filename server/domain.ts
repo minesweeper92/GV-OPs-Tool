@@ -38,6 +38,7 @@ export const chart = [
   ["2100", "Output tax payable", "Liability"],
   ["2200", "Withholding tax payable", "Liability"],
   ["2300", "Deferred service revenue", "Liability"],
+  ["2400", "Customer credits payable", "Liability"],
   ["3000", "Owner equity", "Equity"],
   ["3900", "Opening balance clearing", "Equity"],
   ["4000", "Service revenue", "Income"],
@@ -180,7 +181,7 @@ export async function snapshot(tx: SQL, ctx: Context) {
   ).rows;
   const invoices = (
     await tx.query(
-      `SELECT i.*,q.currency,q.fx_micros,q.customer_name,q.issuer_name,
+      `SELECT i.*,q.customer_name,q.issuer_name,
     q.issuer_address,q.issuer_tax_id,q.terms,d.name AS deal_name,e.code AS entity_code
     FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id JOIN entities e ON e.id=i.entity_id
     WHERE i.deal_id=ANY($1::uuid[]) ORDER BY i.created_at DESC`,
@@ -243,7 +244,9 @@ export async function snapshot(tx: SQL, ctx: Context) {
             !e.action.startsWith("vendor-payment.") &&
             !e.action.startsWith("bank.") &&
             !e.action.startsWith("project.") &&
-            e.action !== "invoice.recognise",
+            e.action !== "invoice.recognise" &&
+            !e.action.startsWith("credit.") &&
+            !e.action.startsWith("recurring."),
         ),
   };
 }
@@ -536,7 +539,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
     case "invoice.issue": {
       const i = await record(tx, "invoices", c.id, ctx);
       if (i.status !== "Draft") {
-        if (["Issued", "Paid"].includes(i.status)) return { id: i.id };
+        if (["Issued", "Paid", "Settled"].includes(i.status))
+          return { id: i.id };
         reject(409, "This invoice cannot be issued.");
       }
       const q = await record(tx, "quotes", i.quote_id, ctx),
@@ -551,8 +555,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         "UPDATE entities SET next_invoice=next_invoice+1 WHERE id=$1",
         [e.id],
       );
-      const net = baseAmount(BigInt(i.net_minor), BigInt(q.fx_micros)),
-        total = baseAmount(BigInt(i.total_minor), BigInt(q.fx_micros));
+      const net = baseAmount(BigInt(i.net_minor), BigInt(i.fx_micros)),
+        total = baseAmount(BigInt(i.total_minor), BigInt(i.fx_micros));
       if (total <= 0n) reject(400, "Base-currency total rounds to zero.");
       await post(
         tx,
@@ -617,20 +621,26 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         settled = cash + wht,
         fx = scaled(c.fx, 6),
         total = BigInt(i.total_minor),
-        paid = BigInt(i.paid_minor);
+        paid = BigInt(i.paid_minor),
+        credited = BigInt(i.credited_minor);
       if (
         cash <= 0n ||
         fx <= 0n ||
-        (q.currency === "PKR" && fx !== 1_000_000n) ||
-        settled > total - paid
+        (i.currency === "PKR" && fx !== 1_000_000n) ||
+        settled > total - paid - credited
       )
         reject(
           400,
           "Enter a positive payment within the balance and a valid exchange rate.",
         );
-      const fullBase = baseAmount(total, BigInt(q.fx_micros)),
-        ar =
-          round(fullBase * (paid + settled), total) - BigInt(i.paid_base_minor);
+      const fullBase = baseAmount(total, BigInt(i.fx_micros)),
+        ar = round(
+          (fullBase -
+            BigInt(i.paid_base_minor) -
+            BigInt(i.credited_base_minor)) *
+            settled,
+          total - paid - credited,
+        );
       const bank = baseAmount(cash, fx),
         tax = baseAmount(wht, fx),
         gain = bank + tax - ar;
@@ -673,7 +683,11 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           i.id,
           String(paid + settled),
           String(ar),
-          paid + settled === total ? "Paid" : "Issued",
+          paid + settled + credited === total
+            ? credited > 0n
+              ? "Settled"
+              : "Paid"
+            : "Issued",
         ],
       );
       break;
@@ -681,13 +695,40 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
     case "invoice.void": {
       const i = await record(tx, "invoices", c.id, ctx);
       await entityDate(tx, i.entity_id, c.date, ctx);
-      if (i.status !== "Issued" || BigInt(i.paid_minor) !== 0n)
+      if (
+        i.status !== "Issued" ||
+        BigInt(i.paid_minor) !== 0n ||
+        BigInt(i.credited_minor) !== 0n
+      )
         reject(
           409,
           "Only unpaid issued invoices can be voided. Paid invoices require a credit note.",
         );
       if (c.date < String(i.issue_date).slice(0, 10))
         reject(400, "Reversal date cannot precede invoice date.");
+      const lastCreditReversal = (
+        await tx.query(
+          `SELECT max(d)::text AS date FROM (
+        SELECT r.reversal_date AS d FROM credit_reversals r JOIN credit_notes n ON n.id=r.credit_id WHERE n.invoice_id=$1
+        UNION ALL SELECT r.reversal_date FROM application_reversals r JOIN credit_applications a ON a.id=r.application_id WHERE a.invoice_id=$1
+      ) reversals`,
+          [i.id],
+        )
+      ).rows[0].date;
+      if (lastCreditReversal && c.date < lastCreditReversal)
+        reject(409, "Void date cannot precede related credit reversals.");
+      if (
+        (
+          await tx.query(
+            "SELECT c.id FROM credit_notes c WHERE c.invoice_id=$1 AND NOT EXISTS(SELECT 1 FROM credit_reversals r WHERE r.credit_id=c.id)",
+            [i.id],
+          )
+        ).rows.length
+      )
+        reject(
+          409,
+          "Reverse existing credit notes before voiding this invoice.",
+        );
       if (
         (
           await tx.query(

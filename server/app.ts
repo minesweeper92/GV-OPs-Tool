@@ -12,6 +12,8 @@ import { reportFilter } from "../shared/reporting.ts";
 import { financialReports, accountDetail } from "./financial-reports.ts";
 import { bankAccounts, bankDetail, executeBank } from "./banking.ts";
 import { projectSnapshot, executeProject } from "./projects.ts";
+import { creditSnapshot, executeCredit } from "./credits.ts";
+import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -222,6 +224,8 @@ export function createApp(
         ...(await payableSnapshot(tx, ctx)),
         bankAccounts: await bankAccounts(tx, ctx),
         ...(await projectSnapshot(tx, ctx)),
+        ...(await creditSnapshot(tx, ctx)),
+        ...(await recurringSnapshot(tx, ctx)),
       }),
       true,
     );
@@ -275,15 +279,19 @@ export function createApp(
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) =>
-      c.action.startsWith("project.") ||
-      ["invoice.cancel", "invoice.recognise"].includes(c.action)
-        ? executeProject(tx, ctx, c)
-        : c.action.startsWith("bank.")
-          ? executeBank(tx, ctx, c)
-          : c.action.startsWith("bill.") ||
-              c.action.startsWith("vendor-payment.")
-            ? executePayable(tx, ctx, c)
-            : execute(tx, ctx, c),
+      c.action.startsWith("recurring.")
+        ? executeRecurring(tx, ctx, c)
+        : c.action.startsWith("credit.")
+          ? executeCredit(tx, ctx, c)
+          : c.action.startsWith("project.") ||
+              ["invoice.cancel", "invoice.recognise"].includes(c.action)
+            ? executeProject(tx, ctx, c)
+            : c.action.startsWith("bank.")
+              ? executeBank(tx, ctx, c)
+              : c.action.startsWith("bill.") ||
+                  c.action.startsWith("vendor-payment.")
+                ? executePayable(tx, ctx, c)
+                : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

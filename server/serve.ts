@@ -4,6 +4,7 @@ import { openPostgres, verifyMigrations, bindEnvironment } from "./db.ts";
 import { Access } from "./access.ts";
 import { IdentityProvider } from "./oidc.ts";
 import { createApp } from "./app.ts";
+import { startRecurringWorker } from "./recurring.ts";
 
 function required(name: string) {
   const value = process.env[name];
@@ -49,9 +50,11 @@ try {
     port: Number(process.env.PORT || 4320),
   });
   let closing = false;
+  const stopRecurring = startRecurringWorker(db);
   async function close() {
     if (closing) return;
     closing = true;
+    await stopRecurring();
     await app.close();
     await db.close();
   }

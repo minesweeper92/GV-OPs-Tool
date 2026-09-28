@@ -42,7 +42,9 @@ async function ageing(
     SELECT i.id AS doc,j.id AS journal,CASE WHEN j.source_type='invoice' THEN i.total_minor ELSE -i.total_minor END AS amount
     FROM invoices i JOIN journals j ON j.source_id=i.id AND j.source_type IN ('invoice','invoice_void')
     UNION ALL
-    SELECT p.invoice_id,j.id,-(p.amount_minor+p.wht_minor) FROM payments p JOIN journals j ON j.source_id=p.id AND j.source_type='payment'`
+    SELECT p.invoice_id,j.id,-(p.amount_minor+p.wht_minor) FROM payments p JOIN journals j ON j.source_id=p.id AND j.source_type='payment'
+    UNION ALL SELECT a.invoice_id,j.id,-a.amount_minor FROM credit_applications a JOIN journals j ON j.source_id=a.id AND j.source_type='credit-application'
+    UNION ALL SELECT a.invoice_id,j.id,a.amount_minor FROM application_reversals r JOIN credit_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='credit-application-reversal'`
       : `SELECT b.id AS doc,j.id AS journal,CASE WHEN j.source_type='bill' THEN b.total_minor ELSE -b.total_minor END AS amount
     FROM bills b JOIN journals j ON j.source_id=b.id AND j.source_type IN ('bill','bill-void')
     UNION ALL
@@ -51,7 +53,7 @@ async function ageing(
     SELECT p.bill_id,j.id,p.amount_minor+p.wht_minor FROM vendor_payments p JOIN vendor_payment_reversals r ON r.payment_id=p.id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'`;
   const documents =
     kind === "ar"
-      ? `SELECT i.id,i.entity_id,d.company_id AS party_id,q.customer_name AS party,i.number,i.issue_date AS date,i.due_date,q.currency FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id`
+      ? `SELECT i.id,i.entity_id,d.company_id AS party_id,q.customer_name AS party,i.number,i.issue_date AS date,i.due_date,i.currency FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id`
       : `SELECT id,entity_id,vendor_id AS party_id,vendor_name AS party,reference AS number,bill_date AS date,due_date,currency FROM bills`;
   const rows = (
     await tx.query(
@@ -131,6 +133,7 @@ export async function financialReports(
     "2100",
     "2200",
     "2300",
+    "2400",
   ];
   const workingCapital = -sum(
     accounts.filter((a) => workingCodes.includes(a.code)),
@@ -173,7 +176,14 @@ export async function financialReports(
     if (["vendor-payment", "vendor-payment-reversal"].includes(j.source_type)) {
       if (!allocationMap.has(j.source_id)) unsupported.add(j.source_type);
       else investing += allocationMap.get(j.source_id)!;
-    } else if (!["payment", "expense"].includes(j.source_type))
+    } else if (
+      ![
+        "payment",
+        "expense",
+        "customer-refund",
+        "customer-refund-reversal",
+      ].includes(j.source_type)
+    )
       unsupported.add(j.source_type);
   }
   // Explicit balance-sheet bridge removes non-cash capital purchases and the

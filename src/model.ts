@@ -89,6 +89,8 @@ export interface Quote {
   created_at: string;
 }
 export interface Invoice {
+  credited_minor: string;
+  credited_base_minor: string;
   billing_kind: "earned" | "advance";
   label: string;
   milestone_id: string | null;
@@ -141,6 +143,11 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  recurringProfiles: import("../shared/recurring").RecurringProfile[];
+  recurringOccurrences: import("../shared/recurring").RecurringOccurrence[];
+  credits: import("../shared/billing").CreditNote[];
+  creditApplications: import("../shared/billing").CreditApplication[];
+  customerRefunds: import("../shared/billing").CustomerRefund[];
   projects: import("../shared/projects").Project[];
   milestones: import("../shared/projects").Milestone[];
   recognitions: import("../shared/projects").Recognition[];
@@ -224,6 +231,7 @@ export interface Report {
 }
 export type Editor = { kind: string; id?: string };
 export const today = () => new Date().toLocaleDateString("en-CA");
+export const invoiceBalance=(i:Invoice)=>['Voided','Cancelled'].includes(i.status)?0n:BigInt(i.total_minor)-BigInt(i.paid_minor)-BigInt(i.credited_minor||'0');
 export const day = (value: string | null) =>
   value
     ? new Date(value.slice(0, 10) + "T12:00:00").toLocaleDateString("en-GB", {

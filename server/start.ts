@@ -2,6 +2,7 @@ import { createServer as createVite } from "vite";
 import { openDatabase, migrate, bindEnvironment } from "./db.ts";
 import { seed } from "./seed.ts";
 import { createApp } from "./app.ts";
+import { startRecurringWorker } from "./recurring.ts";
 if (process.env.NODE_ENV === "production")
   throw new Error(
     "Production identity, deployment hardening and release validation are not configured. This build is local only.",
@@ -27,7 +28,9 @@ app.setNotFoundHandler((req, res) => {
 });
 await app.listen({ host: "127.0.0.1", port });
 console.log(`Fresh GV Workspace sample build: http://127.0.0.1:${port}`);
+const stopRecurring = startRecurringWorker(db);
 async function close() {
+  await stopRecurring();
   await app.close();
   await vite.close();
   await db.close();

@@ -2,6 +2,7 @@ import { randomUUID as uuid } from "node:crypto";
 import type { SQL, Row } from "./db.ts";
 import { Problem, audit, post, type Context } from "./domain.ts";
 import { minor, round, baseAmount } from "../shared/money.ts";
+import { invoiceCredits } from "./credits.ts";
 const finance = (ctx: Context) => {
   if (!["admin", "finance"].includes(ctx.role))
     throw new Problem(
@@ -126,6 +127,18 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
     }
   }
   const invoices = await activeInvoices(tx, d.id);
+  if (
+    (
+      await tx.query(
+        "SELECT id FROM recurring_profiles WHERE deal_id=$1 AND kind='invoice'",
+        [d.id],
+      )
+    ).rows.length
+  )
+    throw new Problem(
+      409,
+      "This deal uses recurring billing. Generate invoices from its schedule.",
+    );
   // Retain the old one-click full-quote API's retry behaviour for existing callers.
   if (
     c.amount === undefined &&
@@ -205,8 +218,8 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
   if (baseAmount(BigInt(calculated.net), BigInt(q.fx_micros)) <= 0n)
     throw new Problem(400, "The invoice subtotal rounds to zero in PKR.");
   await tx.query(
-    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
     [
       id,
       ctx.tenantId,
@@ -224,6 +237,8 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
       c.milestone_id || null,
       c.request_key || null,
       JSON.stringify(c),
+      q.currency,
+      q.fx_micros,
     ],
   );
   await audit(tx, ctx, id, "invoice.create", { ...c, deal_id: d.id });
@@ -235,6 +250,18 @@ export async function executeProject(tx: SQL, ctx: Context, c: Row) {
   if (c.action === "project.create") {
     const q = await get(tx, "quotes", c.quote_id, false),
       d = await get(tx, "deals", q.deal_id);
+    if (
+      (
+        await tx.query(
+          "SELECT id FROM recurring_profiles WHERE deal_id=$1 AND kind='invoice'",
+          [d.id],
+        )
+      ).rows.length
+    )
+      throw new Problem(
+        409,
+        "Recurring contracts are separate from fixed-budget projects.",
+      );
     if (d.accepted_quote_id !== q.id || c.entity_id !== d.entity_id)
       throw new Problem(
         409,
@@ -379,7 +406,10 @@ export async function executeProject(tx: SQL, ctx: Context, c: Row) {
         );
       return { id: prior.id };
     }
-    if (i.billing_kind !== "advance" || !["Issued", "Paid"].includes(i.status))
+    if (
+      i.billing_kind !== "advance" ||
+      !["Issued", "Paid", "Settled"].includes(i.status)
+    )
       throw new Problem(
         409,
         "Only an issued advance invoice can have revenue recognised.",
@@ -395,16 +425,28 @@ export async function executeProject(tx: SQL, ctx: Context, c: Row) {
     ).rows[0];
     const amount = minor(c.amount),
       net = BigInt(i.net_minor);
-    if (amount <= 0n || amount + BigInt(used.net) > net)
+    const credits = (await invoiceCredits(tx, i.id)).filter(
+      (c) => c.treatment === "deferred",
+    );
+    if (credits.some((x) => c.date < date(x.credit_date)))
+      throw new Problem(
+        409,
+        "Recognition cannot precede existing deferred credits.",
+      );
+    const remainingNet =
+        net -
+        BigInt(used.net) -
+        credits.reduce((s, x) => s + BigInt(x.net_minor), 0n),
+      remainingBase =
+        baseAmount(net, BigInt(i.fx_micros)) -
+        BigInt(used.base) -
+        credits.reduce((s, x) => s + BigInt(x.net_base_minor), 0n);
+    if (amount <= 0n || amount > remainingNet)
       throw new Problem(
         409,
         "Recognition exceeds the deferred invoice subtotal.",
       );
-    const base =
-      round(
-        baseAmount(net, BigInt(q.fx_micros)) * (amount + BigInt(used.net)),
-        net,
-      ) - BigInt(used.base);
+    const base = round(remainingBase * amount, remainingNet);
     if (base <= 0n)
       throw new Problem(400, "Recognition amount rounds to zero in PKR.");
     id = uuid();
@@ -446,6 +488,12 @@ export async function projectSnapshot(tx: SQL, ctx: Context) {
   const projects = (
     await tx.query(`WITH sources AS (
  SELECT i.deal_id,j.id FROM invoices i JOIN journals j ON j.source_id=i.id AND j.source_type IN ('invoice','invoice_void')
+ UNION ALL SELECT i.deal_id,j.id FROM credit_notes c JOIN invoices i ON i.id=c.invoice_id JOIN journals j ON j.source_id=c.id AND j.source_type='credit'
+ UNION ALL SELECT i.deal_id,j.id FROM credit_reversals r JOIN credit_notes c ON c.id=r.credit_id JOIN invoices i ON i.id=c.invoice_id JOIN journals j ON j.source_id=r.id AND j.source_type='credit-reversal'
+ UNION ALL SELECT i.deal_id,j.id FROM credit_applications a JOIN invoices i ON i.id=a.invoice_id JOIN journals j ON j.source_id=a.id AND j.source_type='credit-application'
+ UNION ALL SELECT i.deal_id,j.id FROM application_reversals r JOIN credit_applications a ON a.id=r.application_id JOIN invoices i ON i.id=a.invoice_id JOIN journals j ON j.source_id=r.id AND j.source_type='credit-application-reversal'
+ UNION ALL SELECT i.deal_id,j.id FROM customer_refunds f JOIN credit_notes c ON c.id=f.credit_id JOIN invoices i ON i.id=c.invoice_id JOIN journals j ON j.source_id=f.id AND j.source_type='customer-refund'
+ UNION ALL SELECT i.deal_id,j.id FROM refund_reversals r JOIN customer_refunds f ON f.id=r.refund_id JOIN credit_notes c ON c.id=f.credit_id JOIN invoices i ON i.id=c.invoice_id JOIN journals j ON j.source_id=r.id AND j.source_type='customer-refund-reversal'
  UNION ALL SELECT i.deal_id,j.id FROM revenue_recognitions r JOIN invoices i ON i.id=r.invoice_id JOIN journals j ON j.source_id=r.id AND j.source_type='invoice-recognition'
  UNION ALL SELECT i.deal_id,j.id FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN journals j ON j.source_id=p.id AND j.source_type='payment'
  UNION ALL SELECT x.deal_id,j.id FROM expenses x JOIN journals j ON j.source_id=x.id AND j.source_type='expense'
@@ -460,11 +508,13 @@ export async function projectSnapshot(tx: SQL, ctx: Context) {
  coalesce(sum(l.debit_minor-l.credit_minor) FILTER(WHERE j.source_type='payment' AND (l.account_code='1000' OR l.account_code LIKE '10B%')),0)::text AS cash,
  coalesce(sum(l.debit_minor-l.credit_minor) FILTER(WHERE l.account_code='1200'),0)::text AS withholding,
  coalesce(sum(l.debit_minor-l.credit_minor) FILTER(WHERE l.account_code='1100'),0)::text AS receivable,
- coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code='2300'),0)::text AS deferred
+ coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code='2300'),0)::text AS deferred,
+ coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE j.source_type IN ('customer-refund','customer-refund-reversal') AND (l.account_code='1000' OR l.account_code LIKE '10B%')),0)::text AS refunded
  FROM sources s JOIN journals j ON j.id=s.id JOIN journal_lines l ON l.journal_id=s.id GROUP BY s.deal_id)
  SELECT p.*,q.customer_name,d.contact_id,q.currency,q.fx_micros,q.net_minor::text AS quote_net,q.total_minor::text AS quote_total,
  coalesce(a.revenue,'0') AS revenue,coalesce(a.cost,'0') AS cost,coalesce(a.cash,'0') AS cash,coalesce(a.withholding,'0') AS withholding,coalesce(a.receivable,'0') AS receivable,coalesce(a.deferred,'0') AS deferred,coalesce(a.fx_result,'0') AS fx_result,
- (SELECT coalesce(sum(i.net_minor),0)::text FROM invoices i WHERE i.deal_id=p.deal_id AND i.status IN ('Issued','Paid')) AS billed_net,
+ coalesce(a.refunded,'0') AS refunded,
+ (SELECT coalesce(sum(i.net_minor),0)::text FROM invoices i WHERE i.deal_id=p.deal_id AND i.status IN ('Issued','Paid','Settled')) AS billed_net,
  (SELECT coalesce(sum(i.net_minor),0)::text FROM invoices i WHERE i.deal_id=p.deal_id AND i.status='Draft') AS reserved_net,
  (SELECT coalesce(sum(m.net_minor),0)::text FROM project_milestones m WHERE m.project_id=p.id AND m.status='Planned' AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.milestone_id=m.id AND i.status NOT IN ('Cancelled','Voided'))) AS planned_net
  FROM projects p JOIN quotes q ON q.id=p.quote_id JOIN deals d ON d.id=p.deal_id LEFT JOIN amounts a ON a.deal_id=p.deal_id ORDER BY p.created_at DESC`)

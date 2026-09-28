@@ -95,6 +95,9 @@ test("project migration preserves an already-paid legacy invoice and immutable s
   assert.equal(old.net_minor, "20000");
   assert.deepEqual(old.lines, lines);
   assert.equal(old.billing_kind, "earned");
+  assert.equal(old.currency, "PKR");
+  assert.equal(old.fx_micros, "1000000");
+  assert.equal(old.credited_minor, "0");
   await assert.rejects(() =>
     inTenant(db, tenant, (tx) =>
       tx.query("UPDATE invoices SET label=$2 WHERE id=$1", [

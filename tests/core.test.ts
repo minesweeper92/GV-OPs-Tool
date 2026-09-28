@@ -10,6 +10,7 @@ import { verifyPayables } from "./payables-cases.ts";
 import { verifyReporting } from "./reporting-cases.ts";
 import { verifyBanking } from "./banking-cases.ts";
 import { verifyProjects } from "./project-cases.ts";
+import { verifyBilling } from "./billing-cases.ts";
 
 test("integer pricing, tax rounding and FX remain exact", () => {
   assert.equal(minor("90071992547.41"), 9007199254741n);
@@ -57,6 +58,9 @@ test("fresh integrated platform", async (t) => {
   t.after(() => db.close());
   await migrate(db);
   await seed(db);
+  await t.test("credits, refunds and recurring billing", (sub) =>
+    verifyBilling(sub, db),
+  );
   await t.test("financial statements and historical ageing", (sub) =>
     verifyReporting(sub, db),
   );

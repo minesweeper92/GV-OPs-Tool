@@ -75,6 +75,7 @@ export interface Project {
   revenue: string;
   cost: string;
   cash: string;
+  refunded: string;
   withholding: string;
   receivable: string;
   deferred: string;

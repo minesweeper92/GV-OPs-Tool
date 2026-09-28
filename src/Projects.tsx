@@ -33,7 +33,10 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
     (q) =>
       (entity === "all" || q.entity_id === entity) &&
       data.deals.some((d) => d.accepted_quote_id === q.id) &&
-      !data.projects.some((p) => p.deal_id === q.deal_id),
+      !data.projects.some((p) => p.deal_id === q.deal_id) &&
+      !data.recurringProfiles.some(
+        (p) => p.kind === "invoice" && p.deal_id === q.deal_id,
+      ),
   );
   const open = (kind: string) => {
     setError("");
@@ -192,6 +195,7 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
                   ),
                 ],
                 ["Cash collected", project.cash],
+                ["Refunds paid", project.refunded],
                 ["Withholding receivable", project.withholding],
                 ["Customer balance", project.receivable],
                 ["Deferred revenue", project.deferred],

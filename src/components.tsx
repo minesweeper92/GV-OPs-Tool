@@ -10,7 +10,15 @@ import {
 import { X, Plus, ArrowRight, Check, Clock, Minus } from "lucide-react";
 export function Badge({ children }: { children: ReactNode }) {
   const value = String(children),
-    positive = ["Won", "Paid", "Accepted", "Customer"].includes(value),
+    positive = [
+      "Won",
+      "Paid",
+      "Settled",
+      "Accepted",
+      "Customer",
+      "Completed",
+      "Posted",
+    ].includes(value),
     negative = ["Lost", "Voided", "Overdue"].includes(value);
   const Icon = positive ? Check : negative ? Minus : Clock;
   return (

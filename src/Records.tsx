@@ -1,5 +1,5 @@
 import type { Data, Deal, Editor, Invoice, Me, Report } from "./model";
-import { day, money } from "./model";
+import { day, money, invoiceBalance } from "./model";
 import { Badge, Empty, Heading, Table } from "./components";
 import { ArrowLeft, ArrowUpRight, Plus } from "lucide-react";
 type Props = {
@@ -303,9 +303,7 @@ export function PersonRecord({
   for (const i of invoices.filter((i) => i.status === "Issued"))
     balances.set(
       i.currency,
-      (balances.get(i.currency) || 0n) +
-        BigInt(i.total_minor) -
-        BigInt(i.paid_minor),
+      (balances.get(i.currency) || 0n) + invoiceBalance(i),
     );
   return (
     <>
@@ -591,16 +589,10 @@ export function DocumentRecord({
               <>
                 <dt>Settled (cash + withholding)</dt>
                 <dd>{money(invoice.paid_minor, invoice.currency)}</dd>
+                <dt>Credit applied</dt>
+                <dd>{money(invoice.credited_minor, invoice.currency)}</dd>
                 <dt>Balance</dt>
-                <dd>
-                  {money(
-                    ["Voided", "Cancelled"].includes(invoice.status)
-                      ? 0n
-                      : BigInt(invoice.total_minor) -
-                          BigInt(invoice.paid_minor),
-                    invoice.currency,
-                  )}
-                </dd>
+                <dd>{money(invoiceBalance(invoice), invoice.currency)}</dd>
               </>
             ) : null}
           </dl>
@@ -621,13 +613,24 @@ export function DocumentRecord({
         <aside className="document-context">
           {invoice && finance(me) ? (
             <div className="vertical-actions">
+              {["Issued", "Paid", "Settled"].includes(invoice.status) ? (
+                <a href={`#credits/${invoice.id}`}>Create credit note</a>
+              ) : null}
+              {data.credits
+                .filter((c) => c.invoice_id === id)
+                .map((c) => (
+                  <a key={c.id} href={`#credit/${c.id}`}>
+                    {c.number} · {money(c.total_minor, c.currency)}
+                    {c.reversal_date ? " · Reversed" : ""}
+                  </a>
+                ))}
               {invoice.status === "Draft" ? (
                 <button onClick={() => edit({ kind: "cancel-invoice", id })}>
                   Cancel draft
                 </button>
               ) : null}
               {invoice.billing_kind === "advance" &&
-              ["Issued", "Paid"].includes(invoice.status) ? (
+              ["Issued", "Paid", "Settled"].includes(invoice.status) ? (
                 <>
                   <h3>Revenue recognition</h3>
                   <p>
@@ -636,7 +639,15 @@ export function DocumentRecord({
                       BigInt(invoice.net_minor) -
                         data.recognitions
                           .filter((r) => r.invoice_id === id)
-                          .reduce((s, r) => s + BigInt(r.net_minor), 0n),
+                          .reduce((s, r) => s + BigInt(r.net_minor), 0n) -
+                        data.credits
+                          .filter(
+                            (c) =>
+                              c.invoice_id === id &&
+                              c.treatment === "deferred" &&
+                              !c.reversal_date,
+                          )
+                          .reduce((s, c) => s + BigInt(c.net_minor), 0n),
                       invoice.currency,
                     )}
                   </p>
@@ -673,6 +684,7 @@ export function DocumentRecord({
                 ))}
               {invoice.status === "Issued" &&
               invoice.paid_minor === "0" &&
+              invoice.credited_minor === "0" &&
               finance(me) ? (
                 <button onClick={() => edit({ kind: "void", id })}>
                   Void unpaid invoice

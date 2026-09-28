@@ -4,6 +4,7 @@ import { Drawer, Field, ErrorBox } from "./components";
 import { BankSelect } from "./Banking";
 import {
   today,
+  invoiceBalance,
   money,
   decimal,
   rate,
@@ -151,7 +152,7 @@ export function Editor({
     ? BigInt(invoice.net_minor) -
       data.recognitions
         .filter((r) => r.invoice_id === invoice.id)
-        .reduce((s, r) => s + BigInt(r.net_minor), 0n)
+        .reduce((s, r) => s + BigInt(r.net_minor), 0n) - data.credits.filter(c=>c.invoice_id===invoice.id&&!c.reversal_date&&c.treatment==='deferred').reduce((s,c)=>s+BigInt(c.net_minor),0n)
     : 0n;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -628,7 +629,7 @@ export function Editor({
                 {invoice?.number} · Balance{" "}
                 {invoice
                   ? money(
-                      BigInt(invoice.total_minor) - BigInt(invoice.paid_minor),
+                      invoiceBalance(invoice),
                       invoice.currency,
                     )
                   : ""}
@@ -640,7 +641,7 @@ export function Editor({
                 true,
                 invoice
                   ? decimal(
-                      BigInt(invoice.total_minor) - BigInt(invoice.paid_minor),
+                      invoiceBalance(invoice),
                     )
                   : "",
               )}

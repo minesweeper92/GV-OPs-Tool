@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   request,
+  invoiceBalance,
   money,
   day,
   today,
@@ -37,6 +38,12 @@ import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
 import { Banking } from "./Banking";
 import { Projects } from "./Projects";
+const Credits = lazy(() =>
+  import("./Billing").then((m) => ({ default: m.Credits })),
+);
+const Recurring = lazy(() =>
+  import("./Recurring").then((m) => ({ default: m.Recurring })),
+);
 import {
   DealRecord,
   PersonRecord,
@@ -78,6 +85,8 @@ const groups = [
       ["quotes", "Quotes", FileText],
       ["invoices", "Invoices", Receipt],
       ["payments", "Payments received", Wallet],
+      ["credits", "Credit notes & refunds", Receipt],
+      ["recurring", "Recurring invoices", FileText],
     ],
   },
   {
@@ -88,6 +97,7 @@ const groups = [
       ["vendor-payments", "Payments made", Wallet],
       ["payables", "Payable balances", BookOpen],
       ["expenses", "Expenses", Receipt],
+      ["recurring-expenses", "Recurring expenses", Receipt],
     ],
   },
   {
@@ -407,6 +417,32 @@ export default function App() {
       ) : (
         denied()
       );
+    if (view === "credits" || view === "credit")
+      return canFinance ? (
+        <Credits
+          key={route}
+          data={data!}
+          entity={entity}
+          id={view === "credit" ? id : undefined}
+          initialInvoice={view === "credits" ? id : undefined}
+          run={run}
+        />
+      ) : (
+        denied()
+      );
+    if (["recurring", "recurring-expenses", "schedule"].includes(view))
+      return canFinance ? (
+        <Recurring
+          key={route}
+          data={data!}
+          entity={entity}
+          id={view === "schedule" ? id : undefined}
+          kind={view === "recurring-expenses" ? "expense" : "invoice"}
+          run={run}
+        />
+      ) : (
+        denied()
+      );
     if (view === "projects" || view === "project")
       return canFinance ? (
         <Projects
@@ -544,12 +580,7 @@ export default function App() {
                         {i.number} · due {day(i.due_date)}
                       </small>
                     </div>
-                    <strong>
-                      {money(
-                        BigInt(i.total_minor) - BigInt(i.paid_minor),
-                        i.currency,
-                      )}
-                    </strong>
+                    <strong>{money(invoiceBalance(i), i.currency)}</strong>
                   </a>
                 ))
               ) : (
@@ -964,9 +995,7 @@ export default function App() {
                   <td className="num">{money(i.total_minor, i.currency)}</td>
                   <td className="num">
                     {money(
-                      i.status === "Voided"
-                        ? 0n
-                        : BigInt(i.total_minor) - BigInt(i.paid_minor),
+                      i.status === "Voided" ? 0n : invoiceBalance(i),
                       i.currency,
                     )}
                   </td>
@@ -1318,6 +1347,13 @@ export default function App() {
                 <h2>{g.label}</h2>
                 {g.items
                   .filter(([key]) => key !== "team" || me.user.role === "admin")
+                  .filter(
+                    ([key]) =>
+                      canFinance ||
+                      !["credits", "recurring", "recurring-expenses"].includes(
+                        key,
+                      ),
+                  )
                   .map(([key, label, Icon]) => (
                     <a
                       key={key}
@@ -1419,7 +1455,9 @@ export default function App() {
         </header>
         <main id="main" tabIndex={-1}>
           {error && !editor ? <ErrorBox error={error} /> : null}
-          {content()}
+          <Suspense fallback={<p role="status">Opening workspace…</p>}>
+            {content()}
+          </Suspense>
         </main>
         <footer className="app-footer">
           {me.mode === "sample"
