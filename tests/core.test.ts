@@ -6,6 +6,7 @@ import { seed } from "../server/seed.ts";
 import { createApp } from "../server/app.ts";
 import { minor, totals, baseAmount } from "../shared/money.ts";
 import { post, type Context } from "../server/domain.ts";
+import { verifyPayables } from "./payables-cases.ts";
 
 test("integer pricing, tax rounding and FX remain exact", () => {
   assert.equal(minor("90071992547.41"), 9007199254741n);
@@ -110,7 +111,7 @@ test("fresh integrated platform", async (t) => {
   const initial = (await owner.call("/api/data")).json();
   const entity = initial.entities.find((e: any) => e.code === "PVT"),
     deal = initial.deals[0];
-  const day = new Date().toISOString().slice(0,10);
+  const day = (await db.query("SELECT CURRENT_DATE::text AS day")).rows[0].day;
   let invoiceId: string;
   await t.test(
     "database RLS blocks forgotten predicates, writes across tenants, auth-table access and context leaks",
@@ -510,5 +511,8 @@ test("fresh integrated platform", async (t) => {
       );
       assert.equal((await other.call("/api/data")).json().events.length, 0);
     },
+  );
+  await t.test("vendor bills and payments on the configured database", (sub) =>
+    verifyPayables(sub, db),
   );
 });

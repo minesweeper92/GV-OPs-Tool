@@ -180,6 +180,21 @@ export function DealRecord({ deal, data, me, edit }: Props & { deal: Deal }) {
           {finance(me) ? (
             <>
               <h3 className="space-top">Project expenses</h3>
+              {(data.bills || [])
+                .filter((b) => b.deal_id === deal.id)
+                .map((b) => (
+                  <a
+                    className="association-item"
+                    key={b.id}
+                    href={`#bill/${b.id}`}
+                  >
+                    <strong>
+                      {b.reference} · {b.vendor_name}
+                    </strong>
+                    <span>{money(b.total_minor, b.currency)}</span>
+                    <Badge>{b.status}</Badge>
+                  </a>
+                ))}
               {data.expenses
                 .filter((e) => e.deal_id === deal.id)
                 .map((e) => (
@@ -371,6 +386,27 @@ export function PersonRecord({
             <button onClick={() => edit({ kind: "association", id })}>
               Add company
             </button>
+          ) : null}
+          {company?.vendor && finance(me) ? (
+            <>
+              <h3 className="space-top">Vendor bills</h3>
+              {(data.bills || [])
+                .filter((b) => b.vendor_id === company.id)
+                .map((b) => (
+                  <a
+                    className="association-item"
+                    key={b.id}
+                    href={`#bill/${b.id}`}
+                  >
+                    <strong>{b.reference}</strong>
+                    <span>
+                      {data.entities.find((e) => e.id === b.entity_id)?.code} ·{" "}
+                      {money(b.total_minor, b.currency)}
+                    </span>
+                    <Badge>{b.status}</Badge>
+                  </a>
+                ))}
+            </>
           ) : null}
           <h3 className="space-top">Outstanding invoices</h3>
           {balances.size ? (

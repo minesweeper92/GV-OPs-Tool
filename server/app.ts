@@ -7,6 +7,7 @@ import { execute, snapshot, reports, Problem } from "./domain.ts";
 import { commandSchema } from "../shared/commands.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
+import { executePayable, payableSnapshot } from "./payables.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -209,7 +210,10 @@ export function createApp(
   );
   app.get("/api/data", async (req) => {
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, (tx) => snapshot(tx, ctx));
+    return inTenant(db, ctx.tenantId, async (tx) => ({
+      ...(await snapshot(tx, ctx)),
+      ...(await payableSnapshot(tx, ctx)),
+    }));
   });
   app.get("/api/reports", async (req) => {
     const q = z
@@ -226,7 +230,11 @@ export function createApp(
   app.post("/api/commands", async (req) => {
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, (tx) => execute(tx, ctx, c));
+    return inTenant(db, ctx.tenantId, (tx) =>
+      c.action.startsWith("bill.") || c.action.startsWith("vendor-payment.")
+        ? executePayable(tx, ctx, c)
+        : execute(tx, ctx, c),
+    );
   });
   app.setErrorHandler((error, req, res) => {
     if (error instanceof z.ZodError)

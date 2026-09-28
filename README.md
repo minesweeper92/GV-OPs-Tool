@@ -17,6 +17,8 @@ Node 24+, `npm ci`, then `npm run dev`. Open `http://127.0.0.1:4320` and choose 
 - Accepted quote to invoice draft, explicit numbered issue, cash and withholding receipts, partial payments, unpaid invoice reversal.
 - Manual PKR/USD/AED/EUR/GBP transaction currencies, PKR base, fixed document exchange rates, realised FX gain/loss on settlement.
 - Paid general/project expenses, separate charts/ledgers per entity, trial balance movements, journal drill-down, transaction locks, immutable audit records.
+- Vendor bills with editable drafts, submission, single-administrator approval/posting, duplicate checks and explicit entity/project links. Partial payments support withholding, bank fees and realised FX; dated payment reversals and unpaid-bill voids preserve the original ledger history.
+- Vendor directories and payable balances by entity and transaction currency. Base-currency balances use historical carrying amounts; period-end FX revaluation is not implemented.
 - Transaction-level RLS, own-record sales filtering, role checks, session cookies, origin/CSRF validation and retry protection for financial postings.
 - Responsive React UI with light/dark/high-contrast themes and side-panel forms.
 - Organization creation/switching, administrator-managed invitations, member roles, access removal/restoration and session revocation. Invitation links are shared manually, not emailed.
@@ -32,7 +34,7 @@ Local tests exercise the real OIDC protocol library against a disposable signed-
 
 ## Deliberate limits / next work
 
-Custom roles, per-entity permissions, extended onboarding, subscriptions, full contact editing/import, approvals, milestones, recurring documents, credit notes, bills/POs, inventory, reconciliation, bank integrations, tax/WHT certificates, financial statements, portals, email/calendar sync and other requirements remain to build. Quotes are manually marked shared; nothing is emailed. No statutory tax configuration is assumed. Base currency is PKR; broader currency precision/rate providers remain open. Period locks cannot yet be reopened. One accepted full invoice per deal in this slice.
+Custom roles, per-entity permissions, extended onboarding, subscriptions, full contact editing/import, multi-level approvals, milestones, recurring documents, credit notes, purchase orders, vendor credits, multi-bill payment allocation, attachments, inventory, reconciliation, bank integrations, tax/WHT certificates, financial statements, portals, email/calendar sync and other requirements remain to build. Quotes are manually marked shared; nothing is emailed. No statutory tax configuration is assumed. Base currency is PKR; broader currency precision/rate providers remain open. Period locks cannot yet be reopened. One accepted full invoice per deal and one bill per vendor payment in this slice.
 
 The client list snapshot is appropriate for this small increment, not yet paginated for production-scale tenants. Production runtime/control DB privilege separation, live identity-provider configuration/validation, background jobs, backups, observability, performance/security reviews, accountant sign-off and user acceptance remain release gates. The local preview entry point refuses production mode. The PostgreSQL CI job is configured but not evidence of a hosted CI run until pushed and executed.
 

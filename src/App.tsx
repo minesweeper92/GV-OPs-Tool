@@ -33,6 +33,7 @@ import {
 import { Heading, Badge, Table, Empty, ErrorBox } from "./components";
 import { Editor } from "./Editor";
 import { Organizations, Team, Onboarding } from "./Access";
+import { Payables } from "./Payables";
 import {
   DealRecord,
   PersonRecord,
@@ -41,11 +42,19 @@ import {
   Timeline,
 } from "./Records";
 function useRoute() {
-  const [route, setRoute] = useState(location.hash.slice(1) || "home");
+  const currentRoute = () =>
+    location.hash.slice(1) ||
+    new URLSearchParams(location.search).get("view") ||
+    "home";
+  const [route, setRoute] = useState(currentRoute);
   useEffect(() => {
-    const change = () => setRoute(location.hash.slice(1) || "home");
+    const change = () => setRoute(currentRoute());
     window.addEventListener("hashchange", change);
-    return () => window.removeEventListener("hashchange", change);
+    window.addEventListener("popstate", change);
+    return () => {
+      window.removeEventListener("hashchange", change);
+      window.removeEventListener("popstate", change);
+    };
   }, []);
   return route;
 }
@@ -68,7 +77,16 @@ const groups = [
       ["payments", "Payments received", Wallet],
     ],
   },
-  { label: "Purchases", items: [["expenses", "Expenses", Receipt]] },
+  {
+    label: "Purchases",
+    items: [
+      ["vendors", "Vendors", Building2],
+      ["bills", "Bills", FileText],
+      ["vendor-payments", "Payments made", Wallet],
+      ["payables", "Payable balances", BookOpen],
+      ["expenses", "Expenses", Receipt],
+    ],
+  },
   {
     label: "Accounting",
     items: [
@@ -355,6 +373,22 @@ export default function App() {
           error={dataQuery.error?.message || "Unable to load records."}
         />
       );
+    if (
+      ["vendors", "bills", "bill", "vendor-payments", "payables"].includes(view)
+    )
+      return canFinance ? (
+        <Payables
+          key={view + "/" + (id || "") + "/" + entity}
+          data={data}
+          me={me!}
+          entity={entity}
+          view={view}
+          id={id}
+          newVendor={() => edit({ kind: "company", id: "vendor" })}
+        />
+      ) : (
+        denied()
+      );
     if (view === "deal") {
       const deal = data.deals.find((d) => d.id === id);
       return deal ? (
@@ -480,6 +514,49 @@ export default function App() {
                   when issued.
                 </Empty>
               )}
+              {canFinance ? (
+                <>
+                  <div className="section-title space-top">
+                    <h2>Money to pay</h2>
+                    <a href="/?view=payables">
+                      Payable balances <ArrowRight size={15} />
+                    </a>
+                  </div>
+                  {(data.bills || []).some(
+                    (b) => b.status === "Open" && inEntity(b.entity_id),
+                  ) ? (
+                    (data.bills || [])
+                      .filter(
+                        (b) => b.status === "Open" && inEntity(b.entity_id),
+                      )
+                      .sort((a, b) => a.due_date.localeCompare(b.due_date))
+                      .slice(0, 5)
+                      .map((b) => (
+                        <a
+                          className="work-item"
+                          key={b.id}
+                          href={`#bill/${b.id}`}
+                        >
+                          <div>
+                            <strong>{b.vendor_name}</strong>
+                            <small>
+                              {b.reference} · {entityCode(b.entity_id)} · due{" "}
+                              {day(b.due_date)}
+                            </small>
+                          </div>
+                          <strong>
+                            {money(
+                              BigInt(b.total_minor) - BigInt(b.paid_minor),
+                              b.currency,
+                            )}
+                          </strong>
+                        </a>
+                      ))
+                  ) : (
+                    <p className="muted">No approved bills awaiting payment.</p>
+                  )}
+                </>
+              ) : null}
               <h2 className="space-top">Latest activity</h2>
               <Timeline events={data.events.slice(0, 5)} />
             </section>
@@ -1199,7 +1276,20 @@ export default function App() {
                   .map(([key, label, Icon]) => (
                     <a
                       key={key}
-                      href={`#${key}`}
+                      href={`/?view=${key}`}
+                      onClick={(e) => {
+                        if (
+                          e.button === 0 &&
+                          !e.ctrlKey &&
+                          !e.metaKey &&
+                          !e.shiftKey &&
+                          !e.altKey
+                        ) {
+                          e.preventDefault();
+                          history.pushState(null, "", `/?view=${key}`);
+                          window.dispatchEvent(new PopStateEvent("popstate"));
+                        }
+                      }}
                       aria-label={label}
                       aria-current={view === key ? "page" : undefined}
                     >

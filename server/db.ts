@@ -58,7 +58,11 @@ export async function openPostgres(
 }
 async function migrations() {
   return Promise.all(
-    ["./schema.sql", "./migrations/002_access.sql"].map(async (path, index) => {
+    [
+      "./schema.sql",
+      "./migrations/002_access.sql",
+      "./migrations/003_payables.sql",
+    ].map(async (path, index) => {
       const sql = await readFile(new URL(path, import.meta.url), "utf8");
       return {
         version: index + 1,

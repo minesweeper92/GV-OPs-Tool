@@ -29,12 +29,19 @@ export const chart = [
   ["1000", "Bank and cash", "Asset"],
   ["1100", "Accounts receivable", "Asset"],
   ["1200", "Withholding tax receivable", "Asset"],
+  ["1300", "Input tax receivable", "Asset"],
+  ["1400", "Prepayments", "Asset"],
+  ["1500", "Equipment", "Asset"],
+  ["2000", "Accounts payable", "Liability"],
   ["2100", "Output tax payable", "Liability"],
+  ["2200", "Withholding tax payable", "Liability"],
   ["3000", "Owner equity", "Equity"],
   ["4000", "Service revenue", "Income"],
   ["4100", "Realised exchange gain", "Income"],
   ["5000", "Operating expenses", "Expense"],
   ["5100", "Realised exchange loss", "Expense"],
+  ["5200", "Project production costs", "Expense"],
+  ["5300", "Bank charges", "Expense"],
 ];
 export async function seedAccounts(
   tx: SQL,
@@ -211,7 +218,13 @@ export async function snapshot(tx: SQL, ctx: Context) {
     invoices,
     payments,
     expenses,
-    events,
+    events: allowedBooks
+      ? events
+      : events.filter(
+          (e) =>
+            !e.action.startsWith("bill.") &&
+            !e.action.startsWith("vendor-payment."),
+        ),
   };
 }
 export async function reports(

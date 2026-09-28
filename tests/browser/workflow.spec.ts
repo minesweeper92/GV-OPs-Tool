@@ -40,6 +40,10 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
       "invoices",
       "payments",
       "expenses",
+      "vendors",
+      "bills",
+      "vendor-payments",
+      "payables",
       "settings",
       "team",
       "organizations",
@@ -60,6 +64,171 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
   await page.getByLabel("Theme", { exact: true }).selectOption("contrast");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByLabel("Theme", { exact: true }).selectOption("light");
+  expect(errors).toEqual([]);
+});
+
+test("vendor bill approval, partial payments, balances and corrections reach the ledger", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("dialog", (dialog) => dialog.accept());
+  await owner(page);
+  await page.getByRole("link", { name: "Vendors", exact: true }).click();
+  await page.getByRole("button", { name: "New vendor", exact: true }).click();
+  await page
+    .getByLabel("Company name", { exact: true })
+    .fill("Studio Supplies Test");
+  await expect(page.getByLabel("Vendor", { exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("link", { name: "Bills", exact: true }).click();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await page
+    .getByLabel("Legal entity", { exact: true })
+    .selectOption({ label: "Sample Private Limited (PVT)" });
+  await page
+    .getByLabel("Vendor", { exact: true })
+    .selectOption({ label: "Studio Supplies Test" });
+  await page
+    .getByLabel("Vendor bill number", { exact: true })
+    .fill("STUDIO-BILL-101");
+  await page.getByLabel("Bill date", { exact: true }).fill("2026-09-20");
+  await page.getByLabel("Due date", { exact: true }).fill("2026-10-20");
+  await page
+    .getByLabel("Project (optional)", { exact: true })
+    .selectOption({ label: "Brand launch film" });
+  await page
+    .getByLabel("Description 1", { exact: true })
+    .fill("Set design and lighting");
+  await page.getByLabel("Account 1", { exact: true }).selectOption("5200");
+  await page
+    .getByLabel("Unit cost before tax 1", { exact: true })
+    .fill("100000");
+  await page.getByLabel("Tax % 1", { exact: true }).fill("18");
+  await page
+    .getByLabel("Purchase tax treatment", { exact: true })
+    .selectOption("recoverable");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page
+    .getByRole("button", { name: "Save bill draft", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "STUDIO-BILL-101", exact: true }),
+  ).toBeVisible();
+  const billUrl = page.url();
+  await expect(page.getByText("Not posted", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Submit for approval", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Approve & post", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Record vendor payment", exact: true }),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page
+    .getByRole("button", { name: "Record vendor payment", exact: true })
+    .click();
+  await page.getByLabel("Payment date", { exact: true }).fill("2026-09-21");
+  await page
+    .getByLabel("Cash paid to vendor (PKR)", { exact: true })
+    .fill("40000");
+  await page
+    .getByLabel("Withholding deducted (PKR)", { exact: true })
+    .fill("10000");
+  await page.getByLabel("Bank charge (PKR)", { exact: true }).fill("500");
+  await page
+    .getByLabel("Payment reference", { exact: true })
+    .fill("VENDOR-BANK-1");
+  await page
+    .getByRole("button", { name: "Record payment", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.reload();
+  await expect(page.getByText("PKR 68,000.00", { exact: true })).toBeVisible();
+  await page
+    .getByRole("link", { name: "Payable balances", exact: true })
+    .click();
+  await expect(
+    page.getByRole("row").filter({ hasText: "STUDIO-BILL-101" }),
+  ).toContainText("PKR 68,000.00");
+  await page.screenshot({
+    path: "test-results/payable-balances.png",
+    fullPage: true,
+  });
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    ).toBe(true);
+  }
+  await page.goto(billUrl);
+  await page
+    .getByRole("button", { name: "Record vendor payment", exact: true })
+    .click();
+  await page.getByLabel("Payment date", { exact: true }).fill("2026-09-22");
+  await page
+    .getByLabel("Payment reference", { exact: true })
+    .fill("VENDOR-BANK-2");
+  await page
+    .getByRole("button", { name: "Record payment", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.getByText("Paid", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: "test-results/vendor-bill-paid.png",
+    fullPage: true,
+  });
+  for (const ref of ["VENDOR-BANK-1", "VENDOR-BANK-2"]) {
+    await page
+      .getByRole("row")
+      .filter({ hasText: ref })
+      .getByRole("button", { name: "Reverse", exact: true })
+      .click();
+    await page
+      .getByLabel("Reversal / cancellation date", { exact: true })
+      .fill("2026-09-23");
+    await page.getByLabel("Reason", { exact: true }).fill("QA correction");
+    await page
+      .getByRole("button", { name: "Record reversal", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+  }
+  await page.getByRole("button", { name: "Void bill", exact: true }).click();
+  await page
+    .getByLabel("Reversal / cancellation date", { exact: true })
+    .fill("2026-09-24");
+  await page.getByLabel("Reason", { exact: true }).fill("Cancelled purchase");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Void bill", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.getByText("Voided", { exact: true })).toBeVisible();
+  await page
+    .getByLabel("Legal entity view", { exact: true })
+    .selectOption({ label: "PVT · Sample Private Limited" });
+  await page.getByRole("link", { name: "Journals", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Bill STUDIO-BILL-101 · Studio Supplies Test",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Void bill STUDIO-BILL-101: Cancelled purchase",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Trial balance", exact: true }).click();
+  await expect(
+    page.getByRole("row").filter({ hasText: "Accounts payable" }),
+  ).toContainText("PKR 0.00");
   expect(errors).toEqual([]);
 });
 test("real UI lead-to-cash, project expense, persisted ledger and audit", async ({

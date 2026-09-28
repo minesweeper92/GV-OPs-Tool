@@ -236,7 +236,12 @@ export function Editor({
                   <input type="checkbox" name="customer" /> Customer
                 </label>
                 <label>
-                  <input type="checkbox" name="vendor" /> Vendor
+                  <input
+                    type="checkbox"
+                    name="vendor"
+                    defaultChecked={id === "vendor"}
+                  />{" "}
+                  Vendor
                 </label>
               </div>
               <details>

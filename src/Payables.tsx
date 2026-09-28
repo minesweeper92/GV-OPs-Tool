@@ -1,0 +1,1015 @@
+import { useState, useRef, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Heading,
+  Table,
+  Field,
+  Drawer,
+  ErrorBox,
+  Badge,
+  Empty,
+} from "./components";
+import { Timeline } from "./Records";
+import {
+  request,
+  day,
+  today,
+  money,
+  decimal,
+  rate,
+  type Data,
+  type Me,
+  type Bill,
+  type VendorPayment,
+  type Line,
+} from "./model";
+import { totals } from "../shared/money";
+
+const accounts = [
+  ["5000", "Operating expenses"],
+  ["5200", "Project production costs"],
+  ["1400", "Prepayments"],
+  ["1500", "Equipment"],
+] as const;
+const balance = (b: Bill) => BigInt(b.total_minor) - BigInt(b.paid_minor);
+function status(b: Bill) {
+  return b.status === "Open"
+    ? b.due_date < today()
+      ? "Overdue"
+      : BigInt(b.paid_minor) > 0n
+        ? "Partially paid"
+        : "Open"
+    : b.status;
+}
+type Editor = {
+  kind: "create" | "edit" | "pay" | "void" | "return" | "reverse";
+  bill?: Bill;
+  payment?: VendorPayment;
+};
+export function Payables({
+  data,
+  me,
+  entity,
+  view,
+  id,
+  newVendor,
+}: {
+  data: Data;
+  me: Me;
+  entity: string;
+  view: string;
+  id?: string;
+  newVendor: () => void;
+}) {
+  const cache = useQueryClient(),
+    [editor, setEditor] = useState<Editor | null>(null),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [filter, setFilter] = useState("all"),
+    [search, setSearch] = useState("");
+  const bills = (data.bills || []).filter(
+      (b) => entity === "all" || b.entity_id === entity,
+    ),
+    payments = data.vendorPayments || [];
+  async function save(c: Record<string, unknown>) {
+    const result = await request<{ id: string }>(
+      "commands",
+      "POST",
+      c,
+      me.csrf,
+    );
+    await Promise.all([
+      cache.invalidateQueries({ queryKey: ["data"] }),
+      cache.invalidateQueries({ queryKey: ["report"] }),
+    ]);
+    return result;
+  }
+  async function action(b: Bill, kind: "submit" | "approve") {
+    if (
+      kind === "approve" &&
+      !confirm(
+        `Approve ${b.reference} and post ${money(b.total_minor, b.currency)} to ${b.entity_name}?`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      await save({ action: `bill.${kind}`, id: b.id, version: b.version });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const entityCode = (id: string) =>
+    data.entities.find((e) => e.id === id)?.code || "";
+  const open = bills.filter((b) => b.status === "Open");
+  const totalOpen = open.reduce(
+      (n, b) => n + BigInt(b.base_minor) - BigInt(b.paid_base_minor),
+      0n,
+    ),
+    overdue = open
+      .filter((b) => b.due_date < today())
+      .reduce(
+        (n, b) => n + BigInt(b.base_minor) - BigInt(b.paid_base_minor),
+        0n,
+      );
+  function billTable(rows: Bill[]) {
+    return rows.length ? (
+      <Table
+        headers={[
+          "Bill / vendor",
+          "Entity / project",
+          "Due date",
+          "Total",
+          "Outstanding",
+          "Status",
+        ]}
+      >
+        {rows.map((b) => (
+          <tr key={b.id}>
+            <td>
+              <a href={`#bill/${b.id}`}>{b.reference}</a>
+              <small>{b.vendor_name}</small>
+            </td>
+            <td>
+              {entityCode(b.entity_id)}
+              <small>
+                {data.deals.find((d) => d.id === b.deal_id)?.name ||
+                  "General overhead"}
+              </small>
+            </td>
+            <td>{day(b.due_date)}</td>
+            <td className="num">{money(b.total_minor, b.currency)}</td>
+            <td className="num">
+              {b.status === "Draft" || b.status === "Pending approval"
+                ? "Not posted"
+                : b.status === "Voided"
+                  ? "—"
+                  : money(String(balance(b)), b.currency)}
+            </td>
+            <td>
+              <Badge>{status(b)}</Badge>
+            </td>
+          </tr>
+        ))}
+      </Table>
+    ) : (
+      <Empty title="No bills in this view">
+        Create a bill when a vendor invoices you. For costs already paid
+        directly, use Expenses—do not record both for the same purchase.
+      </Empty>
+    );
+  }
+  function paymentTable(rows: VendorPayment[]) {
+    return rows.length ? (
+      <Table
+        headers={[
+          "Payment reference",
+          "Bill / vendor",
+          "Payment date",
+          "Cash paid",
+          "Withheld",
+          "Bank charge",
+          "Status",
+          "Actions",
+        ]}
+      >
+        {rows.map((p) => {
+          const b = (data.bills || []).find((b) => b.id === p.bill_id)!;
+          return (
+            <tr key={p.id}>
+              <td>{p.reference}</td>
+              <td>
+                <a href={`#bill/${p.bill_id}`}>{b.reference}</a>
+                <small>
+                  {b.vendor_name} · {entityCode(p.entity_id)}
+                </small>
+              </td>
+              <td>{day(p.payment_date)}</td>
+              <td className="num">{money(p.amount_minor, b.currency)}</td>
+              <td className="num">{money(p.wht_minor, b.currency)}</td>
+              <td className="num">{money(p.fee_minor, b.currency)}</td>
+              <td>
+                {p.reversal_date
+                  ? `Reversed ${day(p.reversal_date)}`
+                  : "Recorded"}
+              </td>
+              <td>
+                {!p.reversal_date ? (
+                  <button
+                    onClick={() =>
+                      setEditor({ kind: "reverse", bill: b, payment: p })
+                    }
+                  >
+                    Reverse
+                  </button>
+                ) : (
+                  <small>{p.reversal_reason}</small>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </Table>
+    ) : (
+      <p className="muted">No payments recorded yet.</p>
+    );
+  }
+  let content;
+  if (view === "bill") {
+    const b = (data.bills || []).find((b) => b.id === id);
+    content = !b ? (
+      <Empty title="Bill unavailable">
+        Open a bill from Purchases → Bills.
+      </Empty>
+    ) : (
+      <>
+        <a href="#bills">← All bills</a>
+        <Heading
+          title={b.reference}
+          subtitle={`${b.vendor_name} · ${b.entity_name}`}
+        />
+        <div className="toolbar">
+          <Badge>{status(b)}</Badge>
+          <div className="row-actions">
+            {b.status === "Draft" ? (
+              <>
+                <button onClick={() => setEditor({ kind: "edit", bill: b })}>
+                  Edit draft
+                </button>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void action(b, "submit")}
+                >
+                  Submit for approval
+                </button>
+              </>
+            ) : null}
+            {b.status === "Pending approval" && me.user.role === "admin" ? (
+              <>
+                <button onClick={() => setEditor({ kind: "return", bill: b })}>
+                  Return to draft
+                </button>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void action(b, "approve")}
+                >
+                  Approve & post
+                </button>
+              </>
+            ) : null}
+            {b.status === "Open" ? (
+              <button
+                className="primary"
+                onClick={() => setEditor({ kind: "pay", bill: b })}
+              >
+                Record vendor payment
+              </button>
+            ) : null}
+            {b.status !== "Voided" &&
+            b.status !== "Paid" &&
+            BigInt(b.paid_minor) === 0n &&
+            (b.status !== "Open" || me.user.role === "admin") ? (
+              <button onClick={() => setEditor({ kind: "void", bill: b })}>
+                Void bill
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <section className="panel">
+          <div className="payable-metrics">
+            <div>
+              <span>Total bill</span>
+              <strong>{money(b.total_minor, b.currency)}</strong>
+            </div>
+            <div>
+              <span>Settled (cash + withholding)</span>
+              <strong>{money(b.paid_minor, b.currency)}</strong>
+            </div>
+            <div>
+              <span>Outstanding</span>
+              <strong>
+                {["Draft", "Pending approval"].includes(b.status)
+                  ? "Not posted"
+                  : b.status === "Voided"
+                    ? "—"
+                    : money(String(balance(b)), b.currency)}
+              </strong>
+            </div>
+          </div>
+          <dl className="bill-details">
+            <div>
+              <dt>Bill date</dt>
+              <dd>{day(b.bill_date)}</dd>
+            </div>
+            <div>
+              <dt>Due date</dt>
+              <dd>{day(b.due_date)}</dd>
+            </div>
+            <div>
+              <dt>Project</dt>
+              <dd>
+                {data.deals.find((d) => d.id === b.deal_id)?.name ||
+                  "General overhead"}
+              </dd>
+            </div>
+            <div>
+              <dt>Exchange rate</dt>
+              <dd>
+                1 {b.currency} = {rate(b.fx_micros)} PKR
+              </dd>
+            </div>
+          </dl>
+          <Table
+            headers={[
+              "Description",
+              "Account",
+              "Quantity",
+              "Unit cost",
+              "Tax %",
+              "Total",
+            ]}
+          >
+            {b.lines.map((l, i) => (
+              <tr key={i}>
+                <td>{l.description}</td>
+                <td>
+                  {accounts.find(([code]) => code === l.account_code)?.[1]}
+                </td>
+                <td>{l.quantity}</td>
+                <td>
+                  {l.price} {b.currency}
+                </td>
+                <td>{l.tax}</td>
+                <td className="num">
+                  {money(
+                    String(
+                      BigInt(l.subtotal || "0") + BigInt(l.taxMinor || "0"),
+                    ),
+                    b.currency,
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
+          <p>
+            Tax: {money(b.tax_minor, b.currency)} ·{" "}
+            {b.tax_treatment === "recoverable"
+              ? "Posted separately as input tax receivable"
+              : "Included in the expense or asset cost"}
+            .{" "}
+            {["Draft", "Pending approval"].includes(b.status)
+              ? "No ledger entry until approved."
+              : ""}
+          </p>
+          {b.notes ? <p>{b.notes}</p> : null}
+        </section>
+        <section className="panel">
+          <h2>Payments and corrections</h2>
+          {paymentTable(payments.filter((p) => p.bill_id === b.id))}
+        </section>
+        <section className="panel">
+          <h2>Bill activity</h2>
+          <Timeline events={data.events.filter((e) => e.record_id === b.id)} />
+        </section>
+      </>
+    );
+  } else if (view === "vendor-payments")
+    content = (
+      <>
+        <Heading
+          title="Payments made"
+          subtitle="Recorded vendor payments, withholding and reversals. No bank transfers are initiated here."
+        />
+        {paymentTable(
+          payments.filter((p) => entity === "all" || p.entity_id === entity),
+        )}
+      </>
+    );
+  else if (view === "payables") {
+    const vendors = [...new Set(open.map((b) => b.vendor_id))];
+    content = (
+      <>
+        <Heading
+          title="Payable balances"
+          subtitle="Approved unpaid bills at their remaining historical PKR carrying values—not closing-rate FX revaluations."
+        />
+        <div className="payable-metrics panel">
+          <div>
+            <span>Total outstanding</span>
+            <strong>{money(String(totalOpen), "PKR")}</strong>
+          </div>
+          <div>
+            <span>Overdue</span>
+            <strong>{money(String(overdue), "PKR")}</strong>
+          </div>
+          <div>
+            <span>Open bills</span>
+            <strong>{open.length}</strong>
+          </div>
+        </div>
+        <Table
+          headers={[
+            "Vendor",
+            "Open bills",
+            "Outstanding (PKR)",
+            "Overdue (PKR)",
+          ]}
+        >
+          {vendors.map((v) => {
+            const rows = open.filter((b) => b.vendor_id === v),
+              sum = (list: Bill[]) =>
+                money(
+                  String(
+                    list.reduce(
+                      (n, b) =>
+                        n + BigInt(b.base_minor) - BigInt(b.paid_base_minor),
+                      0n,
+                    ),
+                  ),
+                  "PKR",
+                );
+            return (
+              <tr key={v}>
+                <td>{rows[0].vendor_name}</td>
+                <td>{rows.length}</td>
+                <td className="num">{sum(rows)}</td>
+                <td className="num">
+                  {sum(rows.filter((b) => b.due_date < today()))}
+                </td>
+              </tr>
+            );
+          })}
+        </Table>
+        <h2 className="space-top">Outstanding bills</h2>
+        {billTable(open)}
+      </>
+    );
+  } else if (view === "vendors")
+    content = (
+      <>
+        <Heading
+          title="Vendors"
+          subtitle="Shared companies marked as vendors. One vendor can supply several legal entities."
+          action="New vendor"
+          onAction={newVendor}
+        />
+        <Table headers={["Vendor", "Tax reference", "Address", "Open bills"]}>
+          {data.companies
+            .filter((c) => c.vendor)
+            .map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <a href={`#company/${c.id}`}>{c.name}</a>
+                </td>
+                <td>{c.tax_id || "—"}</td>
+                <td>{c.address || "—"}</td>
+                <td>{open.filter((b) => b.vendor_id === c.id).length}</td>
+              </tr>
+            ))}
+        </Table>
+        <p>
+          <a href="#bills">Go to bills →</a>
+        </p>
+      </>
+    );
+  else
+    content = (
+      <>
+        <Heading
+          title="Bills"
+          subtitle="Capture vendor invoices, review them, then post and track payments. Drafts do not affect your books."
+          action="New bill"
+          onAction={() => setEditor({ kind: "create" })}
+        />
+        <div className="toolbar">
+          <Field label="Search bills">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Bill number or vendor"
+            />
+          </Field>
+          <Field label="Bill status">
+            <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+              {[
+                "all",
+                "Draft",
+                "Pending approval",
+                "Open",
+                "Partially paid",
+                "Overdue",
+                "Paid",
+                "Voided",
+              ].map((s) => (
+                <option key={s} value={s}>
+                  {s === "all" ? "All statuses" : s}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <a href="#payables">View payable balances →</a>
+        </div>
+        {billTable(
+          bills.filter(
+            (b) =>
+              (filter === "all" ||
+                status(b) === filter ||
+                (filter === "Open" && b.status === "Open")) &&
+              `${b.reference} ${b.vendor_name}`
+                .toLowerCase()
+                .includes(search.toLowerCase()),
+          ),
+        )}
+      </>
+    );
+  return (
+    <>
+      {error ? <ErrorBox error={error} /> : null}
+      {content}
+      {editor ? (
+        <PayableEditor
+          key={`${editor.kind}-${editor.bill?.id || ""}`}
+          editor={editor}
+          data={data}
+          entity={entity}
+          close={() => setEditor(null)}
+          save={save}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function PayableEditor({
+  editor,
+  data,
+  entity,
+  close,
+  save,
+}: {
+  editor: Editor;
+  data: Data;
+  entity: string;
+  close: () => void;
+  save: (c: Record<string, unknown>) => Promise<{ id: string }>;
+}) {
+  const b = editor.bill,
+    kind = editor.kind,
+    isDraft = kind === "create" || kind === "edit";
+  const [selectedEntity, setEntity] = useState(
+      b?.entity_id || (entity === "all" ? "" : entity),
+    ),
+    [vendor, setVendor] = useState(b?.vendor_id || ""),
+    [project, setProject] = useState(b?.deal_id || ""),
+    [currency, setCurrency] = useState(b?.currency || "PKR"),
+    [fx, setFx] = useState(b ? rate(b.fx_micros) : "1");
+  const [lines, setLines] = useState<(Line & { account_code: string })[]>(
+    b?.lines.map(({ description, quantity, price, tax, account_code }) => ({
+      description,
+      quantity,
+      price,
+      tax,
+      account_code,
+    })) || [
+      {
+        description: "",
+        quantity: "1",
+        price: "",
+        tax: "0",
+        account_code: "5000",
+      },
+    ],
+  );
+  const [taxTreatment, setTaxTreatment] = useState(
+      b?.tax_treatment || "expense",
+    ),
+    [dirty, setDirty] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [key] = useState(() => crypto.randomUUID());
+  let sum = "";
+  try {
+    sum = totals(lines).total;
+  } catch {
+    /* Incomplete input. */
+  }
+  const title = {
+    create: "New vendor bill",
+    edit: "Edit bill draft",
+    pay: "Record vendor payment",
+    void: "Void bill",
+    return: "Return bill to draft",
+    reverse: "Reverse vendor payment",
+  }[kind];
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) {
+      errorRef.current?.focus();
+      errorRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [error]);
+  function field(
+    label: string,
+    name: string,
+    value = "",
+    type = "text",
+    hint?: string,
+  ) {
+    return (
+      <Field label={label} hint={hint}>
+        <input
+          name={name}
+          defaultValue={value}
+          type={type}
+          required
+          maxLength={200}
+        />
+      </Field>
+    );
+  }
+  function changeLine(index: number, field: string, value: string) {
+    setLines((current) =>
+      current.map((line, i) =>
+        i === index ? { ...line, [field]: value } : line,
+      ),
+    );
+  }
+  return (
+    <Drawer title={title} close={close} dirty={dirty}>
+      <form
+        className="editor"
+        onChange={() => setDirty(true)}
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setError("");
+          const f = Object.fromEntries(new FormData(e.currentTarget));
+          try {
+            let c: Record<string, unknown>;
+            if (isDraft)
+              c = {
+                action: kind === "create" ? "bill.create" : "bill.edit",
+                ...(kind === "create"
+                  ? { entity_id: selectedEntity, request_key: key }
+                  : { id: b!.id, version: b!.version }),
+                vendor_id: vendor,
+                deal_id: project || null,
+                reference: f.reference,
+                bill_date: f.bill_date,
+                due_date: f.due_date,
+                currency,
+                fx,
+                lines,
+                tax_treatment: taxTreatment,
+                notes: f.notes,
+                acknowledge_duplicate: f.acknowledge_duplicate === "on",
+              };
+            else if (kind === "pay")
+              c = {
+                action: "vendor-payment.create",
+                bill_id: b!.id,
+                date: f.date,
+                amount: f.amount,
+                wht: f.wht,
+                fee: f.fee,
+                fx,
+                reference: f.reference,
+                request_key: key,
+              };
+            else if (kind === "reverse")
+              c = {
+                action: "vendor-payment.reverse",
+                id: editor.payment!.id,
+                date: f.date,
+                reason: f.reason,
+              };
+            else
+              c = {
+                action: `bill.${kind}`,
+                id: b!.id,
+                version: b!.version,
+                ...(kind === "void" ? { date: f.date } : {}),
+                reason: f.reason,
+              };
+            const result = await save(c);
+            close();
+            if (kind === "create") location.hash = `bill/${result.id}`;
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <div className="editor-body">
+          {error ? (
+            <div ref={errorRef} tabIndex={-1}>
+              <ErrorBox error={error} />
+            </div>
+          ) : null}
+          {isDraft ? (
+            <>
+              <Field
+                label="Legal entity"
+                hint={
+                  b
+                    ? "The legal entity cannot change on an existing bill. Void the draft and create a new bill if needed."
+                    : "Choose the legal entity that owes this vendor."
+                }
+              >
+                <select
+                  required
+                  disabled={!!b}
+                  value={selectedEntity}
+                  onChange={(e) => {
+                    setEntity(e.target.value);
+                    setProject("");
+                  }}
+                >
+                  <option value="">Choose legal entity</option>
+                  {data.entities.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name} ({e.code})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Vendor">
+                <select
+                  required
+                  value={vendor}
+                  onChange={(e) => setVendor(e.target.value)}
+                >
+                  <option value="">Choose vendor</option>
+                  {data.companies
+                    .filter((c) => c.vendor)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              {!data.companies.some((c) => c.vendor) ? (
+                <p>Create a vendor in Purchases → Vendors first.</p>
+              ) : null}
+              {field("Vendor bill number", "reference", b?.reference)}
+              <div className="form-row">
+                {field(
+                  "Bill date",
+                  "bill_date",
+                  b?.bill_date || today(),
+                  "date",
+                )}
+                {field("Due date", "due_date", b?.due_date || today(), "date")}
+              </div>
+              <Field label="Project (optional)">
+                <select
+                  value={project}
+                  onChange={(e) => setProject(e.target.value)}
+                >
+                  <option value="">General company overhead</option>
+                  {data.deals
+                    .filter((d) => d.entity_id === selectedEntity)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <div className="form-row">
+                <Field label="Bill currency">
+                  <select
+                    value={currency}
+                    onChange={(e) => {
+                      setCurrency(e.target.value);
+                      setFx(e.target.value === "PKR" ? "1" : "");
+                    }}
+                  >
+                    {["PKR", "USD", "AED", "EUR", "GBP"].map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={`PKR per 1 ${currency}`}>
+                  <input
+                    required
+                    value={fx}
+                    readOnly={currency === "PKR"}
+                    inputMode="decimal"
+                    onChange={(e) => setFx(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <h3>Bill lines</h3>
+              {lines.map((l, i) => (
+                <fieldset className="bill-line" key={i}>
+                  <legend>Line {i + 1}</legend>
+                  <Field label={`Description ${i + 1}`}>
+                    <input
+                      required
+                      maxLength={200}
+                      value={l.description}
+                      onChange={(e) =>
+                        changeLine(i, "description", e.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label={`Account ${i + 1}`}>
+                    <select
+                      value={l.account_code}
+                      onChange={(e) =>
+                        changeLine(i, "account_code", e.target.value)
+                      }
+                    >
+                      {accounts.map(([code, label]) => (
+                        <option key={code} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="form-row">
+                    {(["quantity", "price", "tax"] as const).map(
+                      (key, index) => (
+                        <Field
+                          key={key}
+                          label={`${["Quantity", "Unit cost before tax", "Tax %"][index]} ${i + 1}`}
+                        >
+                          <input
+                            required
+                            inputMode="decimal"
+                            value={l[key]}
+                            onChange={(e) => changeLine(i, key, e.target.value)}
+                          />
+                        </Field>
+                      ),
+                    )}
+                  </div>
+                  {lines.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLines(lines.filter((_, j) => j !== i));
+                        setDirty(true);
+                      }}
+                    >
+                      Remove line {i + 1}
+                    </button>
+                  ) : null}
+                </fieldset>
+              ))}
+              <button
+                type="button"
+                disabled={lines.length >= 100}
+                onClick={() => {
+                  setLines([
+                    ...lines,
+                    {
+                      description: "",
+                      quantity: "1",
+                      price: "",
+                      tax: "0",
+                      account_code: "5000",
+                    },
+                  ]);
+                  setDirty(true);
+                }}
+              >
+                Add bill line
+              </button>
+              <Field
+                label="Purchase tax treatment"
+                hint="Recoverable tax goes to Input tax receivable. Select it only when you have confirmed that this tax is recoverable; no statutory eligibility is inferred."
+              >
+                <select
+                  value={taxTreatment}
+                  onChange={(e) =>
+                    setTaxTreatment(e.target.value as "expense" | "recoverable")
+                  }
+                >
+                  <option value="expense">
+                    Include tax in expense / asset cost
+                  </option>
+                  <option value="recoverable">Recoverable input tax</option>
+                </select>
+              </Field>
+              <p>
+                <strong>
+                  Bill total:{" "}
+                  {sum ? money(sum, currency) : "Complete the lines"}
+                </strong>
+              </p>
+              <Field label="Notes">
+                <textarea
+                  name="notes"
+                  maxLength={4000}
+                  defaultValue={b?.notes || ""}
+                />
+              </Field>
+              <label className="checkbox">
+                <input type="checkbox" name="acknowledge_duplicate" /> I checked
+                matching vendor/date/amount records and confirm this is a
+                separate bill.
+              </label>
+              <p className="muted">
+                Saving creates a draft only. An administrator must approve it
+                before it posts to the books.
+              </p>
+            </>
+          ) : kind === "pay" ? (
+            <>
+              <p>
+                <strong>
+                  {b!.vendor_name} · {b!.reference}
+                </strong>
+                <br />
+                {b!.entity_name}
+                <br />
+                Outstanding: {money(String(balance(b!)), currency)}
+              </p>
+              {field("Payment date", "date", today(), "date")}
+              {field(
+                `Cash paid to vendor (${currency})`,
+                "amount",
+                decimal(String(balance(b!))),
+              )}
+              {field(`Withholding deducted (${currency})`, "wht", "0")}
+              {field(
+                `Bank charge (${currency})`,
+                "fee",
+                "0",
+                "text",
+                "Charged in addition to the payment; does not reduce the bill balance.",
+              )}
+              <Field label={`Payment FX: PKR per 1 ${currency}`}>
+                <input
+                  required
+                  value={fx}
+                  readOnly={currency === "PKR"}
+                  onChange={(e) => setFx(e.target.value)}
+                  inputMode="decimal"
+                />
+              </Field>
+              {field("Payment reference", "reference")}
+              <p>
+                Cash + withholding settles the bill. Cash and charges post
+                through Bank and cash (1000). This records an existing payment;
+                it does not transfer money. Do not also record it as a direct
+                expense.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                {b!.reference} · {b!.vendor_name}
+              </p>
+              {kind !== "return"
+                ? field("Reversal / cancellation date", "date", today(), "date")
+                : null}
+              {field("Reason", "reason")}
+              <p>
+                {kind === "return"
+                  ? "The draft can be edited and resubmitted. No ledger entry has been posted."
+                  : kind === "reverse"
+                    ? "This creates a reversing journal and restores the bill balance. It does not undo an actual bank transfer."
+                    : "An unpaid posted bill is reversed in the selected period. Its original entries and history remain. Draft cancellations do not post a journal."}
+              </p>
+            </>
+          )}
+        </div>
+        <div className="editor-footer">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (!dirty || confirm("Discard your unsaved changes?")) close();
+            }}
+          >
+            Cancel
+          </button>
+          <button className="primary" disabled={busy}>
+            {busy
+              ? "Saving…"
+              : isDraft
+                ? "Save bill draft"
+                : kind === "pay"
+                  ? "Record payment"
+                  : kind === "reverse"
+                    ? "Record reversal"
+                    : kind === "return"
+                      ? "Return to draft"
+                      : "Void bill"}
+          </button>
+        </div>
+      </form>
+    </Drawer>
+  );
+}

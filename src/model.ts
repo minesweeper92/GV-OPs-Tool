@@ -138,6 +138,8 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  bills: Bill[];
+  vendorPayments: VendorPayment[];
   entities: Entity[];
   companies: Company[];
   contacts: Contact[];
@@ -150,6 +152,44 @@ export interface Data {
   payments: Payment[];
   expenses: Expense[];
   events: Event[];
+}
+export interface Bill {
+  id: string;
+  entity_id: string;
+  vendor_id: string;
+  deal_id: string | null;
+  vendor_name: string;
+  entity_name: string;
+  reference: string;
+  bill_date: string;
+  due_date: string;
+  currency: string;
+  fx_micros: string;
+  lines: (Line & { account_code: string })[];
+  tax_treatment: "expense" | "recoverable";
+  net_minor: string;
+  tax_minor: string;
+  total_minor: string;
+  base_minor: string;
+  paid_minor: string;
+  paid_base_minor: string;
+  status: "Draft" | "Pending approval" | "Open" | "Paid" | "Voided";
+  version: number;
+  notes: string;
+  last_activity_on: string;
+}
+export interface VendorPayment {
+  id: string;
+  entity_id: string;
+  bill_id: string;
+  payment_date: string;
+  amount_minor: string;
+  wht_minor: string;
+  fee_minor: string;
+  fx_micros: string;
+  reference: string;
+  reversal_date: string | null;
+  reversal_reason: string | null;
 }
 export interface Me {
   user: { id: string; name: string; role: string; email: string };
