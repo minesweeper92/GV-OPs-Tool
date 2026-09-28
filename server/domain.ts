@@ -424,7 +424,10 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           l.owner_id,
         ],
       );
-      await tx.query("UPDATE leads SET status='Converted' WHERE id=$1", [l.id]);
+      await tx.query(
+        "UPDATE leads SET status='Converted',next_action=NULL,due_date=NULL WHERE id=$1",
+        [l.id],
+      );
       break;
     }
     case "deal.follow-up":

@@ -970,6 +970,25 @@ tbody tr:hover {
   margin: 0;
   min-width: 0;
 }
+.crm-filters {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.crm-filters .field {
+  flex: 1;
+  min-width: 150px;
+}
+.crm-channel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.crm-channel .field {
+  flex: 1;
+  min-width: 120px;
+}
 .actions {
   display: flex;
   gap: 8px;

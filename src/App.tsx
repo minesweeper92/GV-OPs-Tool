@@ -38,6 +38,14 @@ import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
 import { Banking } from "./Banking";
 import { Projects } from "./Projects";
+import type { CrmEditorState, CrmOpen } from "./Crm";
+const CrmEditor = lazy(() =>
+  import("./Crm").then((m) => ({ default: m.CrmEditor })),
+);
+const Tasks = lazy(() => import("./Crm").then((m) => ({ default: m.Tasks })));
+const LeadRecord = lazy(() =>
+  import("./Crm").then((m) => ({ default: m.LeadRecord })),
+);
 const Credits = lazy(() =>
   import("./Billing").then((m) => ({ default: m.Credits })),
 );
@@ -77,6 +85,7 @@ const groups = [
       ["companies", "Companies", Building2],
       ["leads", "Leads", Target],
       ["deals", "Deals", PanelsTopLeft],
+      ["tasks", "Tasks", BookOpen],
     ],
   },
   {
@@ -250,6 +259,7 @@ export default function App() {
   const [entity, setEntity] = useState("all"),
     [search, setSearch] = useState(""),
     [editor, setEditor] = useState<EditorState | null>(null),
+    [crmEditor, setCrmEditor] = useState<CrmEditorState | null>(null),
     [menu, setMenu] = useState(false),
     [toast, setToast] = useState(""),
     [error, setError] = useState(""),
@@ -266,6 +276,11 @@ export default function App() {
     retry: false,
   });
   const me = meQuery.data;
+  useEffect(() => {
+    setEditor(null);
+    setCrmEditor(null);
+    setEntity("all");
+  }, [me?.organization.id, me?.user.id]);
   useEffect(() => {
     if (!me) return;
     const intended = sessionStorage.getItem("gv-signin-return");
@@ -376,8 +391,22 @@ export default function App() {
       const c = contacts.find((c) => c.id === id);
       return c ? `${c.first_name} ${c.last_name}` : "Unknown contact";
     };
-  const props = data ? { data, me, edit, run } : null;
+  const crmEdit: CrmOpen = (mode, record_type, record_id, id) =>
+    setCrmEditor({
+      mode,
+      record_type,
+      record_id,
+      id,
+      key: crypto.randomUUID(),
+    });
+  const props = data ? { data, me, edit, run, crmEdit } : null;
   function content() {
+    if (view === "tasks")
+      return <Tasks data={data!} me={me!} open={crmEdit} entity={entity} />;
+    if (view === "lead")
+      return (
+        <LeadRecord data={data!} me={me!} open={crmEdit} id={id} run={run} />
+      );
     if (view === "organizations" || view === "join")
       return <Organizations me={me!} />;
     if (view === "team") return <Team me={me!} />;
@@ -485,7 +514,22 @@ export default function App() {
       const open = deals
           .filter((d) => !["Won", "Lost"].includes(d.stage))
           .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
-        due = invoices.filter((i) => i.status === "Issued");
+        due = invoices.filter((i) => i.status === "Issued"),
+        myTasks = data.crmTasks
+          .filter((t) => {
+            const root =
+              t.record_type === "lead"
+                ? data.leads.find((l) => l.id === t.record_id)
+                : t.record_type === "deal"
+                  ? data.deals.find((d) => d.id === t.record_id)
+                  : null;
+            return (
+              t.status === "Open" &&
+              t.assignee_id === me!.user.id &&
+              (!root || inEntity(root.entity_id))
+            );
+          })
+          .sort((a, b) => a.due_at.localeCompare(b.due_at));
       return (
         <>
           <Heading
@@ -498,6 +542,42 @@ export default function App() {
           />
           <div className="home-columns">
             <section>
+              <div className="section-title">
+                <h2>My tasks</h2>
+                <a href="#tasks">
+                  All tasks <ArrowRight size={15} />
+                </a>
+              </div>
+              {myTasks.length ? (
+                myTasks.slice(0, 5).map((t) => (
+                  <a
+                    className="work-item"
+                    href={`#${t.record_type}/${t.record_id}`}
+                    key={t.id}
+                  >
+                    <div>
+                      <strong>{t.title}</strong>
+                      <small>{t.priority} priority</small>
+                    </div>
+                    <span
+                      className={
+                        new Date(t.due_at).getTime() < Date.now()
+                          ? "overdue"
+                          : ""
+                      }
+                    >
+                      {new Date(t.due_at).toLocaleString("en-GB", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                  </a>
+                ))
+              ) : (
+                <Empty title="No open tasks assigned to you">
+                  Add a task from a contact, company, lead or deal.
+                </Empty>
+              )}
               <div className="section-title">
                 <h2>Follow-ups</h2>
                 <a href="#deals">
@@ -533,18 +613,22 @@ export default function App() {
                 </Empty>
               )}
               <div className="section-title space-top">
-                <h2>New leads</h2>
+                <h2>Lead follow-ups</h2>
                 <a href="#leads">
                   Open leads
                   <ArrowRight size={15} />
                 </a>
               </div>
               {data.leads
-                .filter((l) => l.status === "New" && inEntity(l.entity_id))
+                .filter(
+                  (l) =>
+                    !["Converted", "Disqualified"].includes(l.status) &&
+                    inEntity(l.entity_id),
+                )
                 .map((l) => (
                   <div className="work-item" key={l.id}>
                     <div>
-                      <strong>{l.title}</strong>
+                      <a href={`#lead/${l.id}`}>{l.title}</a>
                       <p>
                         {companyName(l.company_id)} · {l.next_action}
                       </p>
@@ -692,10 +776,21 @@ export default function App() {
             headers={["Contact", "Company", "Email", "Title", "Lifecycle"]}
           >
             {contacts
-              .filter((c) => match(c.first_name, c.last_name, c.email))
+              .filter((c) =>
+                match(
+                  c.first_name,
+                  c.last_name,
+                  c.email,
+                  c.phone,
+                  c.tags.join(" "),
+                  c.additional_emails.map((e) => e.value).join(" "),
+                  c.additional_phones.map((p) => p.value).join(" "),
+                ),
+              )
               .filter(
                 (c) =>
                   entity === "all" ||
+                  c.service_entity_id === entity ||
                   data.affiliations.some(
                     (a) =>
                       a.contact_id === c.id &&
@@ -759,7 +854,7 @@ export default function App() {
               .map((l) => (
                 <tr key={l.id}>
                   <td>
-                    <strong>{l.title}</strong>
+                    <a href={`#lead/${l.id}`}>{l.title}</a>
                     <small>{l.source}</small>
                   </td>
                   <td>
@@ -768,16 +863,23 @@ export default function App() {
                   </td>
                   <td>{entityCode(l.entity_id)}</td>
                   <td>
-                    {l.status === "Converted" ? "Moved to deal" : l.next_action}
+                    {l.status === "Converted"
+                      ? "Moved to deal"
+                      : l.status === "Disqualified"
+                        ? l.disqualified_reason
+                        : l.next_action}
                     <small>
-                      {l.status === "Converted" ? "" : day(l.due_date)}
+                      {["Converted", "Disqualified"].includes(l.status)
+                        ? ""
+                        : day(l.due_date)}
                     </small>
                   </td>
                   <td>
                     <Badge>{l.status}</Badge>
                   </td>
                   <td>
-                    {canCRM && l.status === "New" ? (
+                    {canCRM &&
+                    !["Converted", "Disqualified"].includes(l.status) ? (
                       <button
                         disabled={busy}
                         onClick={() =>
@@ -792,6 +894,11 @@ export default function App() {
                       >
                         View deal
                       </a>
+                    ) : null}
+                    {canCRM && l.status !== "Converted" ? (
+                      <button onClick={() => crmEdit("lead", "lead", l.id)}>
+                        Update lead
+                      </button>
                     ) : null}
                   </td>
                 </tr>
@@ -1469,6 +1576,18 @@ export default function App() {
         <div className="toast" role="status">
           {toast}
         </div>
+      ) : null}
+      {crmEditor && data ? (
+        <Suspense fallback={<p role="status">Opening editor…</p>}>
+          <CrmEditor
+            key={crmEditor.key}
+            state={crmEditor}
+            data={data}
+            me={me}
+            save={run}
+            close={() => setCrmEditor(null)}
+          />
+        </Suspense>
       ) : null}
       {editor && data ? (
         <Editor

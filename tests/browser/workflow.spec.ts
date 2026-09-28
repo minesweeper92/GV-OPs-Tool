@@ -35,6 +35,7 @@ test("first render, accessible navigation, themes, and responsive screens", asyn
       "contacts",
       "companies",
       "leads",
+      "tasks",
       "deals",
       "quotes",
       "invoices",

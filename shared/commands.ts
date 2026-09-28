@@ -3,6 +3,7 @@ import { bankCommands } from "./banking.ts";
 import { projectCommands } from "./projects.ts";
 import { billingCommands } from "./billing.ts";
 import { recurringCommands } from "./recurring.ts";
+import { crmCommands } from "./crm.ts";
 const id = z.uuid(),
   text = z.string().trim().min(1).max(200),
   optional = z.string().trim().max(4000).default("");
@@ -29,6 +30,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   ...projectCommands,
   ...billingCommands,
   ...recurringCommands,
+  ...crmCommands,
   z.strictObject({
     action: z.literal("bill.create"),
     entity_id: id,

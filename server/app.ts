@@ -14,6 +14,7 @@ import { bankAccounts, bankDetail, executeBank } from "./banking.ts";
 import { projectSnapshot, executeProject } from "./projects.ts";
 import { creditSnapshot, executeCredit } from "./credits.ts";
 import { recurringSnapshot, executeRecurring } from "./recurring.ts";
+import { crmSnapshot, executeCrm } from "./crm.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -216,6 +217,12 @@ export function createApp(
   );
   app.get("/api/data", async (req) => {
     const ctx = access.context(sessions.get(req)!);
+    const crmMembers = (
+      await db.query(
+        "SELECT u.id,u.name,m.role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 AND m.active AND ($2::text<>'sales' OR u.id=$3) ORDER BY u.name",
+        [ctx.tenantId, ctx.role, ctx.userId],
+      )
+    ).rows;
     return inTenant(
       db,
       ctx.tenantId,
@@ -226,6 +233,8 @@ export function createApp(
         ...(await projectSnapshot(tx, ctx)),
         ...(await creditSnapshot(tx, ctx)),
         ...(await recurringSnapshot(tx, ctx)),
+        ...(await crmSnapshot(tx, ctx)),
+        crmMembers,
       }),
       true,
     );
@@ -279,19 +288,21 @@ export function createApp(
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) =>
-      c.action.startsWith("recurring.")
-        ? executeRecurring(tx, ctx, c)
-        : c.action.startsWith("credit.")
-          ? executeCredit(tx, ctx, c)
-          : c.action.startsWith("project.") ||
-              ["invoice.cancel", "invoice.recognise"].includes(c.action)
-            ? executeProject(tx, ctx, c)
-            : c.action.startsWith("bank.")
-              ? executeBank(tx, ctx, c)
-              : c.action.startsWith("bill.") ||
-                  c.action.startsWith("vendor-payment.")
-                ? executePayable(tx, ctx, c)
-                : execute(tx, ctx, c),
+      c.action.startsWith("crm.")
+        ? executeCrm(tx, ctx, c)
+        : c.action.startsWith("recurring.")
+          ? executeRecurring(tx, ctx, c)
+          : c.action.startsWith("credit.")
+            ? executeCredit(tx, ctx, c)
+            : c.action.startsWith("project.") ||
+                ["invoice.cancel", "invoice.recognise"].includes(c.action)
+              ? executeProject(tx, ctx, c)
+              : c.action.startsWith("bank.")
+                ? executeBank(tx, ctx, c)
+                : c.action.startsWith("bill.") ||
+                    c.action.startsWith("vendor-payment.")
+                  ? executePayable(tx, ctx, c)
+                  : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

@@ -74,7 +74,11 @@ export function Editor({
     [selectedEntity, setSelectedEntity] = useState(
       entityId === "all" ? "" : entityId,
     );
-  const [currency, setCurrency] = useState(initialQuote?.currency || "PKR");
+  const [currency, setCurrency] = useState(
+    initialQuote?.currency ||
+      data.contacts.find((c) => c.id === initialDeal?.contact_id)?.currency ||
+      "PKR",
+  );
   const [lines, setLines] = useState<Line[]>(
     initialQuote?.lines.map(({ description, quantity, price, tax }) => ({
       description,
@@ -152,7 +156,15 @@ export function Editor({
     ? BigInt(invoice.net_minor) -
       data.recognitions
         .filter((r) => r.invoice_id === invoice.id)
-        .reduce((s, r) => s + BigInt(r.net_minor), 0n) - data.credits.filter(c=>c.invoice_id===invoice.id&&!c.reversal_date&&c.treatment==='deferred').reduce((s,c)=>s+BigInt(c.net_minor),0n)
+        .reduce((s, r) => s + BigInt(r.net_minor), 0n) -
+      data.credits
+        .filter(
+          (c) =>
+            c.invoice_id === invoice.id &&
+            !c.reversal_date &&
+            c.treatment === "deferred",
+        )
+        .reduce((s, c) => s + BigInt(c.net_minor), 0n)
     : 0n;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -628,10 +640,7 @@ export function Editor({
               <p className="context-label">
                 {invoice?.number} · Balance{" "}
                 {invoice
-                  ? money(
-                      invoiceBalance(invoice),
-                      invoice.currency,
-                    )
+                  ? money(invoiceBalance(invoice), invoice.currency)
                   : ""}
               </p>
               {text("date", "Payment date", true, today(), "date")}
@@ -639,11 +648,7 @@ export function Editor({
                 "amount",
                 `Money received (${invoice?.currency})`,
                 true,
-                invoice
-                  ? decimal(
-                      invoiceBalance(invoice),
-                    )
-                  : "",
+                invoice ? decimal(invoiceBalance(invoice)) : "",
               )}
               {text(
                 "wht",

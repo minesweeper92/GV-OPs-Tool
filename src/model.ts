@@ -8,6 +8,10 @@ export interface Entity {
   lock_date: string | null;
 }
 export interface Company {
+  version: number;
+  trading_name: string;
+  shipping_address: string;
+  size: string;
   id: string;
   name: string;
   domain: string;
@@ -20,6 +24,17 @@ export interface Company {
   owner_id: string;
 }
 export interface Contact {
+  version: number;
+  additional_emails: { label: string; value: string }[];
+  additional_phones: { label: string; value: string }[];
+  address: string;
+  social_url: string;
+  tags: string[];
+  currency: string;
+  service_entity_id: string | null;
+  marketing_consent: string;
+  consent_date: string | null;
+  consent_source: string;
   id: string;
   first_name: string;
   last_name: string;
@@ -41,6 +56,9 @@ export interface Affiliation {
   ended_on: string | null;
 }
 export interface Lead {
+  owner_id: string;
+  version: number;
+  disqualified_reason: string;
   id: string;
   company_id: string;
   contact_id: string;
@@ -48,10 +66,11 @@ export interface Lead {
   title: string;
   source: string;
   status: string;
-  next_action: string;
-  due_date: string;
+  next_action: string | null;
+  due_date: string | null;
 }
 export interface Deal {
+  owner_id: string;
   id: string;
   company_id: string;
   contact_id: string;
@@ -136,6 +155,7 @@ export interface Expense {
   reference: string;
 }
 export interface Event {
+  actor_id: string;
   id: string;
   record_id: string;
   action: string;
@@ -143,6 +163,9 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  crmActivities: import("../shared/crm").CrmActivity[];
+  crmTasks: import("../shared/crm").CrmTask[];
+  crmMembers: { id: string; name: string; role: string }[];
   recurringProfiles: import("../shared/recurring").RecurringProfile[];
   recurringOccurrences: import("../shared/recurring").RecurringOccurrence[];
   credits: import("../shared/billing").CreditNote[];
@@ -231,7 +254,12 @@ export interface Report {
 }
 export type Editor = { kind: string; id?: string };
 export const today = () => new Date().toLocaleDateString("en-CA");
-export const invoiceBalance=(i:Invoice)=>['Voided','Cancelled'].includes(i.status)?0n:BigInt(i.total_minor)-BigInt(i.paid_minor)-BigInt(i.credited_minor||'0');
+export const invoiceBalance = (i: Invoice) =>
+  ["Voided", "Cancelled"].includes(i.status)
+    ? 0n
+    : BigInt(i.total_minor) -
+      BigInt(i.paid_minor) -
+      BigInt(i.credited_minor || "0");
 export const day = (value: string | null) =>
   value
     ? new Date(value.slice(0, 10) + "T12:00:00").toLocaleDateString("en-GB", {

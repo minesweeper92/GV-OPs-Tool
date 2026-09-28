@@ -2,15 +2,27 @@ import type { Data, Deal, Editor, Invoice, Me, Report } from "./model";
 import { day, money, invoiceBalance } from "./model";
 import { Badge, Empty, Heading, Table } from "./components";
 import { ArrowLeft, ArrowUpRight, Plus } from "lucide-react";
+import { lazy, Suspense } from "react";
+import type { CrmOpen } from "./Crm";
+const CrmPanel = lazy(() =>
+  import("./Crm").then((m) => ({ default: m.CrmPanel })),
+);
 type Props = {
   data: Data;
   me: Me;
   edit: (e: Editor) => void;
   run: (c: Record<string, unknown>) => Promise<void>;
+  crmEdit: CrmOpen;
 };
 const finance = (me: Me) => ["admin", "finance"].includes(me.user.role),
   sales = (me: Me) => ["admin", "sales"].includes(me.user.role);
-export function DealRecord({ deal, data, me, edit }: Props & { deal: Deal }) {
+export function DealRecord({
+  deal,
+  data,
+  me,
+  edit,
+  crmEdit,
+}: Props & { deal: Deal }) {
   const company = data.companies.find((c) => c.id === deal.company_id),
     contact = data.contacts.find((c) => c.id === deal.contact_id),
     entity = data.entities.find((e) => e.id === deal.entity_id);
@@ -42,8 +54,8 @@ export function DealRecord({ deal, data, me, edit }: Props & { deal: Deal }) {
         <span>{entity?.name}</span>
       </div>
       <div className="record-layout">
-        <aside className="properties">
-          <h3>Deal details</h3>
+        <aside className="properties" aria-label="Deal details">
+          <h2>Deal details</h2>
           <dl>
             <dt>Company</dt>
             <dd>
@@ -157,18 +169,18 @@ export function DealRecord({ deal, data, me, edit }: Props & { deal: Deal }) {
               option as the brief changes.
             </Empty>
           )}
-          <div className="section-title space-top">
-            <h2>Activity</h2>
-            {sales(me) ? (
-              <button onClick={() => edit({ kind: "note", id: deal.id })}>
-                <Plus size={15} />
-                Add note
-              </button>
-            ) : null}
-          </div>
-          <Timeline events={events} />
+          <Suspense fallback={<p>Loading activity…</p>}>
+            <CrmPanel
+              data={data}
+              me={me}
+              open={crmEdit}
+              type="deal"
+              id={deal.id}
+              events={events}
+            />
+          </Suspense>
         </section>
-        <aside className="associations">
+        <aside className="associations" aria-label="Linked commercial records">
           {finance(me) && deal.accepted_quote_id ? (
             <>
               <h3>Delivery & profitability</h3>
@@ -272,6 +284,7 @@ export function PersonRecord({
   data,
   me,
   edit,
+  crmEdit,
 }: Props & { type: string; id: string }) {
   const contact =
       type === "contact" ? data.contacts.find((c) => c.id === id) : null,
@@ -319,8 +332,15 @@ export function PersonRecord({
         onAction={() => edit({ kind: "note", id })}
       />
       <div className="record-layout">
-        <aside className="properties">
-          <h3>Properties</h3>
+        <aside className="properties" aria-label="Profile properties">
+          <h2>Properties</h2>
+          {me.user.role !== "viewer" ? (
+            <button
+              onClick={() => crmEdit(contact ? "contact" : "company", type, id)}
+            >
+              Edit {contact ? "contact" : "company"}
+            </button>
+          ) : null}
           <dl>
             {contact ? (
               <>
@@ -336,6 +356,54 @@ export function PersonRecord({
                 <dd>{contact.lifecycle}</dd>
                 <dt>Notes</dt>
                 <dd>{contact.notes || "No notes"}</dd>
+                <dt>Additional emails</dt>
+                <dd>
+                  {contact.additional_emails.map((e) => (
+                    <div key={e.value}>
+                      {e.label}: {e.value}
+                    </div>
+                  ))}
+                </dd>
+                <dt>Additional phones</dt>
+                <dd>
+                  {contact.additional_phones.map((p, n) => (
+                    <div key={n}>
+                      {p.label}: {p.value}
+                    </div>
+                  ))}
+                </dd>
+                <dt>Address</dt>
+                <dd>{contact.address || "Not provided"}</dd>
+                <dt>Tags</dt>
+                <dd>{contact.tags.join(", ") || "None"}</dd>
+                <dt>Default currency</dt>
+                <dd>{contact.currency}</dd>
+                <dt>Usually serviced by</dt>
+                <dd>
+                  {data.entities.find((e) => e.id === contact.service_entity_id)
+                    ?.name || "Choose for each project"}
+                </dd>
+                <dt>Marketing consent</dt>
+                <dd>
+                  {contact.marketing_consent}
+                  {contact.consent_date
+                    ? ` · ${day(contact.consent_date)}`
+                    : ""}
+                </dd>
+                {contact.social_url ? (
+                  <>
+                    <dt>Social profile</dt>
+                    <dd>
+                      <a
+                        href={contact.social_url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Open profile ↗
+                      </a>
+                    </dd>
+                  </>
+                ) : null}
               </>
             ) : (
               <>
@@ -353,6 +421,12 @@ export function PersonRecord({
                 <dd>{company!.tax_id || "Not provided"}</dd>
                 <dt>Billing address</dt>
                 <dd>{company!.address || "Not provided"}</dd>
+                <dt>Trading name</dt>
+                <dd>{company!.trading_name || "Not provided"}</dd>
+                <dt>Company size</dt>
+                <dd>{company!.size || "Not provided"}</dd>
+                <dt>Shipping address</dt>
+                <dd>{company!.shipping_address || "Not provided"}</dd>
               </>
             )}
           </dl>
@@ -378,10 +452,18 @@ export function PersonRecord({
           ) : (
             <p className="muted">No projects linked yet.</p>
           )}
-          <h2 className="space-top">Activity</h2>
-          <Timeline events={events} />
+          <Suspense fallback={<p>Loading activity…</p>}>
+            <CrmPanel
+              data={data}
+              me={me}
+              open={crmEdit}
+              type={type}
+              id={id}
+              events={events}
+            />
+          </Suspense>
         </section>
-        <aside className="associations">
+        <aside className="associations" aria-label="Profile associations">
           <h3>{contact ? "Company history" : "People"}</h3>
           {links.map((a) => (
             <div className="association-item" key={a.id}>
