@@ -1,4 +1,5 @@
 import { randomUUID as uuid } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { SQL, Row } from "./db.ts";
 import { Problem, audit, post, type Context } from "./domain.ts";
 import { minor, round, baseAmount } from "../shared/money.ts";
@@ -31,10 +32,8 @@ async function openDate(tx: SQL, entity: string, day: string) {
   return e;
 }
 function samePayload(a: Row, b: Row) {
-  return (
-    JSON.stringify(Object.entries(a).sort()) ===
-    JSON.stringify(Object.entries(b).sort())
-  );
+  // jsonb normalizes object-key order, including nested document details.
+  return isDeepStrictEqual(a, JSON.parse(JSON.stringify(b)));
 }
 async function activeInvoices(tx: SQL, deal: string) {
   return (
@@ -89,6 +88,13 @@ export function allocateInvoice(q: Row, existing: Row[], amount: bigint) {
       throw new Problem(409, "The remaining tax allocation needs review.");
     const price = `${part / 100n}.${String(part % 100n).padStart(2, "0")}`;
     lines.push({
+      unit: l.unit || "",
+      section: l.section || "",
+      discount_type:
+        part === lineNet && used[n].net === 0n ? l.discount_type : "percent",
+      discount: part === lineNet && used[n].net === 0n ? l.discount : "0",
+      discountMinor:
+        part === lineNet && used[n].net === 0n ? l.discountMinor : "0",
       quoteLine: n,
       description: l.description,
       quantity: part === lineNet && used[n].net === 0n ? l.quantity : "1",
@@ -218,8 +224,8 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
   if (baseAmount(BigInt(calculated.net), BigInt(q.fx_micros)) <= 0n)
     throw new Problem(400, "The invoice subtotal rounds to zero in PKR.");
   await tx.query(
-    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros,details)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
     [
       id,
       ctx.tenantId,
@@ -239,6 +245,7 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
       JSON.stringify(c),
       q.currency,
       q.fx_micros,
+      JSON.stringify(c.details || q.details || {}),
     ],
   );
   await audit(tx, ctx, id, "invoice.create", { ...c, deal_id: d.id });
@@ -390,8 +397,7 @@ export async function executeProject(tx: SQL, ctx: Context, c: Row) {
       throw new Problem(409, "Only an unissued draft can be cancelled.");
     await tx.query("UPDATE invoices SET status='Cancelled' WHERE id=$1", [id]);
   } else if (c.action === "invoice.recognise") {
-    const i = await get(tx, "invoices", id),
-      q = await get(tx, "quotes", i.quote_id, false);
+    const i = await get(tx, "invoices", id);
     const prior = (
       await tx.query(
         "SELECT id,request_payload FROM revenue_recognitions WHERE request_key=$1",

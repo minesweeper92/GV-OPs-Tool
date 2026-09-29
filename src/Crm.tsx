@@ -1,6 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { type Data, type Me, day, today } from "./model";
 import {
+  contactProfile,
+  companyProfile,
+  commercialProfile,
+} from "../shared/profiles";
+import {
+  ProfileFields,
+  type ProfileValue,
+  ProfileSummary,
+} from "./ProfileFields";
+import {
   Heading,
   Table,
   Badge,
@@ -10,7 +20,7 @@ import {
   ErrorBox,
 } from "./components";
 export type CrmEditorState = {
-  mode: "contact" | "company" | "lead" | "activity" | "task";
+  mode: "contact" | "company" | "lead" | "deal" | "activity" | "task";
   record_type: string;
   record_id: string;
   id?: string;
@@ -78,6 +88,12 @@ export function CrmPanel({
     keys = related(data, type, id),
     activities = data.crmActivities.filter((a) => keys.has(a.record_id)),
     tasks = data.crmTasks.filter((t) => keys.has(t.record_id));
+  const lastContact = activities
+    .filter((a) => ["Call", "Meeting", "Email"].includes(a.kind))
+    .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))[0];
+  const nextTask = tasks
+    .filter((t) => t.status === "Open")
+    .sort((a, b) => a.due_at.localeCompare(b.due_at))[0];
   const timeline = [
     ...activities.map((a) => ({
       id: a.id,
@@ -122,6 +138,19 @@ export function CrmPanel({
             </button>
           </div>
         ) : null}
+      </div>
+      <div className="project-metrics">
+        <div>
+          <span>Last recorded contact</span>
+          <strong>
+            {lastContact ? when(lastContact.occurred_at) : "Not recorded"}
+          </strong>
+        </div>
+        <div>
+          <span>Next open task</span>
+          <strong>{nextTask?.title || "No open tasks"}</strong>
+          {nextTask ? <small>{when(nextTask.due_at)}</small> : null}
+        </div>
       </div>
       {tasks.length ? (
         <Table headers={["Task", "Due", "Assignee", "Status", "Action"]}>
@@ -390,6 +419,7 @@ export function LeadRecord({
           </button>
         ) : null}
       </div>
+      <ProfileSummary value={l.profile || {}} data={data} />
       <CrmPanel
         {...{ data, me, open, type: "lead", id }}
         events={data.events.filter((e) => e.record_id === id)}
@@ -410,10 +440,92 @@ export function CrmEditor({
   save: (c: Record<string, unknown>) => Promise<void>;
   close: () => void;
 }) {
-  const contact = data.contacts.find((c) => c.id === state.record_id),
-    company = data.companies.find((c) => c.id === state.record_id),
-    lead = data.leads.find((l) => l.id === state.record_id),
+  const isNew = !state.record_id;
+  const contact =
+      data.contacts.find((c) => c.id === state.record_id) ||
+      (state.mode === "contact"
+        ? {
+            id: "",
+            version: 1,
+            first_name: "",
+            last_name: "",
+            email: "",
+            phone: "",
+            title: "",
+            source: "",
+            notes: "",
+            lifecycle: "Lead",
+            additional_emails: [],
+            additional_phones: [],
+            address: "",
+            social_url: "",
+            tags: [],
+            currency: "PKR",
+            service_entity_id: null,
+            marketing_consent: "Unknown",
+            consent_date: null,
+            consent_source: "",
+            owner_id: me.user.id,
+            profile: {},
+          }
+        : undefined),
+    company =
+      data.companies.find((c) => c.id === state.record_id) ||
+      (state.mode === "company"
+        ? {
+            id: "",
+            version: 1,
+            name: "",
+            trading_name: "",
+            domain: "",
+            industry: "",
+            size: "",
+            tax_id: "",
+            address: "",
+            shipping_address: "",
+            customer: false,
+            vendor: state.id === "vendor",
+            service_entity_id: null,
+            owner_id: me.user.id,
+            profile: {},
+          }
+        : undefined),
+    lead =
+      data.leads.find((l) => l.id === state.record_id) ||
+      (state.mode === "lead"
+        ? {
+            id: "",
+            version: 1,
+            title: "",
+            source: "",
+            status: "New",
+            disqualified_reason: "",
+            next_action: "",
+            due_date: today(),
+            company_id: "",
+            contact_id: "",
+            entity_id: "",
+            owner_id: me.user.id,
+            profile: {},
+          }
+        : undefined),
+    deal = data.deals.find((d) => d.id === state.record_id),
     task = data.crmTasks.find((t) => t.id === state.id);
+  const profileMode = ["contact", "company", "lead", "deal"].includes(
+    state.mode,
+  );
+  const [profile, setProfile] = useState<ProfileValue>(() =>
+    state.mode === "contact"
+      ? contactProfile.parse(contact?.profile || {})
+      : state.mode === "company"
+        ? companyProfile.parse(company?.profile || {})
+        : commercialProfile.parse(
+            (state.mode === "deal" ? deal?.profile : lead?.profile) || {},
+          ),
+  );
+  const [selectedCompany, setSelectedCompany] = useState(
+    lead?.company_id || "",
+  );
   const [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -430,8 +542,10 @@ export function CrmEditor({
           ? "Review task"
           : "New task"
         : state.mode === "lead"
-          ? "Update lead"
-          : `Edit ${state.mode}`;
+          ? isNew
+            ? "New lead"
+            : "Update lead"
+          : `${isNew ? "New" : "Edit"} ${state.mode}`;
   const input = (
     name: string,
     label: string,
@@ -463,6 +577,21 @@ export function CrmEditor({
       (m.role !== "sales" || !root || root.owner_id === m.id),
   );
   const selectedAssignee = task?.assignee_id || me.user.id;
+  const currentOwner =
+    (state.mode === "contact"
+      ? contact
+      : state.mode === "company"
+        ? company
+        : state.mode === "lead"
+          ? lead
+          : deal
+    )?.owner_id || me.user.id;
+  const owners = data.crmMembers.filter(
+    (m) =>
+      m.role !== "viewer" &&
+      (!["lead", "deal"].includes(state.mode) || m.role !== "finance") &&
+      (me.user.role === "admin" || m.id === currentOwner),
+  );
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
@@ -473,9 +602,10 @@ export function CrmEditor({
       let c: Record<string, unknown>;
       if (state.mode === "contact")
         c = {
-          action: "crm.contact-edit",
-          id: contact!.id,
-          version: contact!.version,
+          action: "profile.contact",
+          ...(isNew ? {} : { id: contact!.id, version: contact!.version }),
+          company_id: isNew ? v("company_id") || null : null,
+          role: v("role") || "Contact",
           ...Object.fromEntries(
             [
               "first_name",
@@ -504,9 +634,8 @@ export function CrmEditor({
         };
       else if (state.mode === "company")
         c = {
-          action: "crm.company-edit",
-          id: company!.id,
-          version: company!.version,
+          action: "profile.company",
+          ...(isNew ? {} : { id: company!.id, version: company!.version }),
           ...Object.fromEntries(
             [
               "name",
@@ -525,15 +654,24 @@ export function CrmEditor({
         };
       else if (state.mode === "lead")
         c = {
-          action: "crm.lead-edit",
-          id: lead!.id,
-          version: lead!.version,
+          action: "profile.lead",
+          ...(isNew ? {} : { id: lead!.id, version: lead!.version }),
+          company_id: isNew ? v("company_id") : lead!.company_id,
+          contact_id: isNew ? v("contact_id") : lead!.contact_id,
+          entity_id: isNew ? v("entity_id") : lead!.entity_id,
           title: v("title"),
           source: v("source"),
           status: leadStatus,
           next_action: v("next_action"),
           due_date: v("due_date") || null,
           reason: v("reason"),
+        };
+      else if (state.mode === "deal")
+        c = {
+          action: "profile.deal",
+          id: deal!.id,
+          version: deal!.version,
+          name: v("name"),
         };
       else if (state.mode === "activity")
         c = {
@@ -560,6 +698,10 @@ export function CrmEditor({
           priority: v("priority"),
           assignee_id: v("assignee_id"),
         };
+      if (profileMode) {
+        c.profile = profile;
+        c.owner_id = v("owner_id");
+      }
       await save(c);
       close();
     } catch (e) {
@@ -592,200 +734,222 @@ export function CrmEditor({
               {input("title", "Job title", contact.title)}
               {input("email", "Primary email", contact.email, false, "email")}
               {input("phone", "Primary phone", contact.phone)}
-              <h3>Additional email addresses</h3>
-              {emails.map((email, n) => (
-                <div className="crm-channel" key={n}>
-                  <Field label={`Email ${n + 2} label`}>
-                    <input
-                      value={email.label}
-                      required
-                      maxLength={200}
-                      onChange={(e) =>
-                        setEmails(
-                          emails.map((x, i) =>
-                            i === n ? { ...x, label: e.target.value } : x,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field label={`Email ${n + 2}`}>
-                    <input
-                      type="email"
-                      value={email.value}
-                      required
-                      onChange={(e) =>
-                        setEmails(
-                          emails.map((x, i) =>
-                            i === n ? { ...x, value: e.target.value } : x,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                  <button
-                    type="button"
-                    aria-label={`Remove email ${n + 2}`}
-                    onClick={() => {
-                      setEmails(emails.filter((_, i) => i !== n));
-                      setDirty(true);
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                disabled={emails.length >= 10}
-                onClick={() => {
-                  setEmails([...emails, { label: "Work", value: "" }]);
-                  setDirty(true);
-                }}
-              >
-                Add email
-              </button>
-              <h3>Additional phone numbers</h3>
-              {phones.map((phone, n) => (
-                <div className="crm-channel" key={n}>
-                  <Field label={`Phone ${n + 2} type`}>
-                    <select
-                      value={phone.label}
-                      onChange={(e) =>
-                        setPhones(
-                          phones.map((x, i) =>
-                            i === n ? { ...x, label: e.target.value } : x,
-                          ),
-                        )
-                      }
-                    >
-                      {["Work", "Mobile", "Home", "Other"].map((k) => (
-                        <option key={k}>{k}</option>
+              {isNew ? (
+                <>
+                  <Field label="Company">
+                    <select name="company_id">
+                      <option value="">No company yet</option>
+                      {data.companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
                       ))}
                     </select>
                   </Field>
-                  <Field label={`Phone ${n + 2}`}>
-                    <input
-                      value={phone.value}
-                      required
-                      maxLength={80}
-                      onChange={(e) =>
-                        setPhones(
-                          phones.map((x, i) =>
-                            i === n ? { ...x, value: e.target.value } : x,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                  <button
-                    type="button"
-                    aria-label={`Remove phone ${n + 2}`}
-                    onClick={() => {
-                      setPhones(phones.filter((_, i) => i !== n));
-                      setDirty(true);
-                    }}
+                  {input("role", "Relationship role", "Contact")}
+                </>
+              ) : null}
+              <details open={!isNew}>
+                <summary>Communication, relationship and preferences</summary>
+                <h3>Additional email addresses</h3>
+                {emails.map((email, n) => (
+                  <div className="crm-channel" key={n}>
+                    <Field label={`Email ${n + 2} label`}>
+                      <input
+                        value={email.label}
+                        required
+                        maxLength={200}
+                        onChange={(e) =>
+                          setEmails(
+                            emails.map((x, i) =>
+                              i === n ? { ...x, label: e.target.value } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label={`Email ${n + 2}`}>
+                      <input
+                        type="email"
+                        value={email.value}
+                        required
+                        onChange={(e) =>
+                          setEmails(
+                            emails.map((x, i) =>
+                              i === n ? { ...x, value: e.target.value } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <button
+                      type="button"
+                      aria-label={`Remove email ${n + 2}`}
+                      onClick={() => {
+                        setEmails(emails.filter((_, i) => i !== n));
+                        setDirty(true);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={emails.length >= 10}
+                  onClick={() => {
+                    setEmails([...emails, { label: "Work", value: "" }]);
+                    setDirty(true);
+                  }}
+                >
+                  Add email
+                </button>
+                <h3>Additional phone numbers</h3>
+                {phones.map((phone, n) => (
+                  <div className="crm-channel" key={n}>
+                    <Field label={`Phone ${n + 2} type`}>
+                      <select
+                        value={phone.label}
+                        onChange={(e) =>
+                          setPhones(
+                            phones.map((x, i) =>
+                              i === n ? { ...x, label: e.target.value } : x,
+                            ),
+                          )
+                        }
+                      >
+                        {["Work", "Mobile", "Home", "Other"].map((k) => (
+                          <option key={k}>{k}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label={`Phone ${n + 2}`}>
+                      <input
+                        value={phone.value}
+                        required
+                        maxLength={80}
+                        onChange={(e) =>
+                          setPhones(
+                            phones.map((x, i) =>
+                              i === n ? { ...x, value: e.target.value } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <button
+                      type="button"
+                      aria-label={`Remove phone ${n + 2}`}
+                      onClick={() => {
+                        setPhones(phones.filter((_, i) => i !== n));
+                        setDirty(true);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={phones.length >= 10}
+                  onClick={() => {
+                    setPhones([...phones, { label: "Mobile", value: "" }]);
+                    setDirty(true);
+                  }}
+                >
+                  Add phone
+                </button>
+                <h3>Relationship</h3>
+                <Field label="Lifecycle stage">
+                  <select name="lifecycle" defaultValue={contact.lifecycle}>
+                    {[
+                      "Subscriber",
+                      "Lead",
+                      "MQL",
+                      "SQL",
+                      "Opportunity",
+                      "Customer",
+                      "Evangelist",
+                    ].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                </Field>
+                {input("source", "Lead source", contact.source)}
+                {input(
+                  "tags",
+                  "Tags (comma separated)",
+                  contact.tags.join(", "),
+                )}
+                <Field label="Address">
+                  <textarea
+                    name="address"
+                    defaultValue={contact.address}
+                    maxLength={4000}
+                  />
+                </Field>
+                {input(
+                  "social_url",
+                  "Social profile (HTTPS)",
+                  contact.social_url,
+                  false,
+                  "url",
+                )}
+                <Field label="Default currency">
+                  <select name="currency" defaultValue={contact.currency}>
+                    {["PKR", "USD", "AED", "EUR", "GBP"].map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Usually serviced by">
+                  <select
+                    name="service_entity_id"
+                    defaultValue={contact.service_entity_id || ""}
                   >
-                    Remove
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                disabled={phones.length >= 10}
-                onClick={() => {
-                  setPhones([...phones, { label: "Mobile", value: "" }]);
-                  setDirty(true);
-                }}
-              >
-                Add phone
-              </button>
-              <h3>Relationship</h3>
-              <Field label="Lifecycle stage">
-                <select name="lifecycle" defaultValue={contact.lifecycle}>
-                  {[
-                    "Subscriber",
-                    "Lead",
-                    "MQL",
-                    "SQL",
-                    "Opportunity",
-                    "Customer",
-                    "Evangelist",
-                  ].map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </Field>
-              {input("source", "Lead source", contact.source)}
-              {input("tags", "Tags (comma separated)", contact.tags.join(", "))}
-              <Field label="Address">
-                <textarea
-                  name="address"
-                  defaultValue={contact.address}
-                  maxLength={4000}
-                />
-              </Field>
-              {input(
-                "social_url",
-                "Social profile (HTTPS)",
-                contact.social_url,
-                false,
-                "url",
-              )}
-              <Field label="Default currency">
-                <select name="currency" defaultValue={contact.currency}>
-                  {["PKR", "USD", "AED", "EUR", "GBP"].map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Usually serviced by">
-                <select
-                  name="service_entity_id"
-                  defaultValue={contact.service_entity_id || ""}
-                >
-                  <option value="">Choose for each project</option>
-                  {data.entities.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <p className="muted">
-                This is a preference, not a restriction. Existing deals and
-                financial documents keep their issuing entity.
-              </p>
-              <h3>Communication preference</h3>
-              <Field label="Marketing consent">
-                <select
-                  name="marketing_consent"
-                  defaultValue={contact.marketing_consent}
-                >
-                  {["Unknown", "Opted in", "Opted out"].map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </Field>
-              {input(
-                "consent_date",
-                "Consent date",
-                contact.consent_date?.slice(0, 10) || "",
-                false,
-                "date",
-              )}
-              {input(
-                "consent_source",
-                "Consent source / evidence",
-                contact.consent_source,
-              )}
-              <Field label="Contact notes">
-                <textarea
-                  name="notes"
-                  defaultValue={contact.notes}
-                  maxLength={4000}
-                />
-              </Field>
+                    <option value="">Choose for each project</option>
+                    {data.entities.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <p className="muted">
+                  This is a preference, not a restriction. Existing deals and
+                  financial documents keep their issuing entity.
+                </p>
+                <h3>Communication preference</h3>
+                <Field label="Marketing consent">
+                  <select
+                    name="marketing_consent"
+                    defaultValue={contact.marketing_consent}
+                  >
+                    {["Unknown", "Opted in", "Opted out"].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                </Field>
+                {input(
+                  "consent_date",
+                  "Consent date",
+                  contact.consent_date?.slice(0, 10) || "",
+                  false,
+                  "date",
+                )}
+                {input(
+                  "consent_source",
+                  "Consent source / evidence",
+                  contact.consent_source,
+                )}
+                <Field label="Contact notes">
+                  <textarea
+                    name="notes"
+                    defaultValue={contact.notes}
+                    maxLength={4000}
+                  />
+                </Field>
+              </details>
             </>
           ) : state.mode === "company" && company ? (
             <>
@@ -847,6 +1011,54 @@ export function CrmEditor({
             </>
           ) : state.mode === "lead" && lead ? (
             <>
+              {isNew ? (
+                <>
+                  <Field label="Company">
+                    <select
+                      name="company_id"
+                      required
+                      value={selectedCompany}
+                      onChange={(e) => setSelectedCompany(e.target.value)}
+                    >
+                      <option value="">Choose company</option>
+                      {data.companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Contact">
+                    <select name="contact_id" required key={selectedCompany}>
+                      <option value="">Choose associated contact</option>
+                      {data.contacts
+                        .filter((c) =>
+                          data.affiliations.some(
+                            (a) =>
+                              a.company_id === selectedCompany &&
+                              a.contact_id === c.id &&
+                              !a.ended_on,
+                          ),
+                        )
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.first_name} {c.last_name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  <Field label="Legal entity">
+                    <select name="entity_id" required>
+                      <option value="">Choose explicitly</option>
+                      {data.entities.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name} ({e.code})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              ) : null}
               {input("title", "Lead title", lead.title, true)}
               {input("source", "Lead source", lead.source)}
               <Field label="Lead status">
@@ -890,6 +1102,8 @@ export function CrmEditor({
                 </>
               )}
             </>
+          ) : state.mode === "deal" && deal ? (
+            input("name", "Deal name", deal.name, true)
           ) : (
             <>
               {state.record_id ? (
@@ -1031,6 +1245,37 @@ export function CrmEditor({
               )}
             </>
           )}
+          {profileMode ? (
+            <>
+              <Field label="Record owner">
+                <select name="owner_id" defaultValue={currentOwner}>
+                  {!owners.some((m) => m.id === currentOwner) ? (
+                    <option value={currentOwner}>
+                      Current owner (unavailable; ask an administrator to
+                      reassign)
+                    </option>
+                  ) : null}
+                  {owners.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <details open={!isNew}>
+                <summary>Full details and custom fields</summary>
+                <ProfileFields
+                  kind={state.mode}
+                  value={profile}
+                  onChange={(v) => {
+                    setProfile(v);
+                    setDirty(true);
+                  }}
+                  data={data}
+                />
+              </details>
+            </>
+          ) : null}
           <button type="submit" className="primary">
             {busy
               ? "Saving…"
@@ -1038,7 +1283,9 @@ export function CrmEditor({
                 ? "Save activity"
                 : state.mode === "task"
                   ? "Save task"
-                  : "Save changes"}
+                  : isNew
+                    ? "Save"
+                    : "Save changes"}
           </button>
         </fieldset>
       </form>

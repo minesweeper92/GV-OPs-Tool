@@ -162,7 +162,7 @@ test("lead closure, manual correspondence and tasks survive conversion and compl
     page.getByText("Director options discussed", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Prepare two director costs", { exact: true }),
+    page.getByRole("row").filter({ hasText: "Prepare two director costs" }),
   ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({

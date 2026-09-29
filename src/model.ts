@@ -8,6 +8,7 @@ export interface Entity {
   lock_date: string | null;
 }
 export interface Company {
+  profile: Partial<import("../shared/profiles").CompanyProfile>;
   version: number;
   trading_name: string;
   shipping_address: string;
@@ -24,6 +25,7 @@ export interface Company {
   owner_id: string;
 }
 export interface Contact {
+  profile: Partial<import("../shared/profiles").ContactProfile>;
   version: number;
   additional_emails: { label: string; value: string }[];
   additional_phones: { label: string; value: string }[];
@@ -56,6 +58,7 @@ export interface Affiliation {
   ended_on: string | null;
 }
 export interface Lead {
+  profile: Partial<import("../shared/profiles").CommercialProfile>;
   owner_id: string;
   version: number;
   disqualified_reason: string;
@@ -70,6 +73,8 @@ export interface Lead {
   due_date: string | null;
 }
 export interface Deal {
+  profile: Partial<import("../shared/profiles").CommercialProfile>;
+  version: number;
   owner_id: string;
   id: string;
   company_id: string;
@@ -83,6 +88,11 @@ export interface Deal {
   accepted_quote_id: string | null;
 }
 export interface Line {
+  unit?: string;
+  section?: string;
+  discount_type?: "percent" | "amount";
+  discount?: string;
+  discountMinor?: string;
   description: string;
   quantity: string;
   price: string;
@@ -91,6 +101,9 @@ export interface Line {
   taxMinor?: string;
 }
 export interface Quote {
+  details: Partial<import("../shared/documents").DocumentDetails>;
+  issuer_address: string;
+  issuer_tax_id: string;
   id: string;
   deal_id: string;
   entity_id: string;
@@ -108,6 +121,9 @@ export interface Quote {
   created_at: string;
 }
 export interface Invoice {
+  details: Partial<import("../shared/documents").DocumentDetails>;
+  company_id: string;
+  version: number;
   credited_minor: string;
   credited_base_minor: string;
   billing_kind: "earned" | "advance";
@@ -115,8 +131,8 @@ export interface Invoice {
   milestone_id: string | null;
   id: string;
   entity_id: string;
-  deal_id: string;
-  quote_id: string;
+  deal_id: string | null;
+  quote_id: string | null;
   number: string | null;
   status: string;
   issue_date: string;
@@ -163,6 +179,13 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  catalogItems: {
+    id: string;
+    name: string;
+    currency: string;
+    line: Line;
+    created_by: string;
+  }[];
   crmActivities: import("../shared/crm").CrmActivity[];
   crmTasks: import("../shared/crm").CrmTask[];
   crmMembers: { id: string; name: string; role: string }[];

@@ -119,11 +119,13 @@ export function Drawer({
   children,
   close,
   dirty,
+  wide = false,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   dirty: boolean;
+  wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null),
     previous = useRef<HTMLElement | null>(null);
@@ -147,7 +149,7 @@ export function Drawer({
   return (
     <dialog
       ref={ref}
-      className="drawer"
+      className={`drawer${wide ? " document-editor" : ""}`}
       aria-labelledby="editor-title"
       onCancel={(e) => {
         e.preventDefault();

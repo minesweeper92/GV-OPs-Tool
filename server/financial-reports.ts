@@ -53,7 +53,7 @@ async function ageing(
     SELECT p.bill_id,j.id,p.amount_minor+p.wht_minor FROM vendor_payments p JOIN vendor_payment_reversals r ON r.payment_id=p.id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'`;
   const documents =
     kind === "ar"
-      ? `SELECT i.id,i.entity_id,d.company_id AS party_id,q.customer_name AS party,i.number,i.issue_date AS date,i.due_date,i.currency FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id`
+      ? `SELECT i.id,i.entity_id,i.company_id AS party_id,i.customer_name AS party,i.number,i.issue_date AS date,i.due_date,i.currency FROM invoices i`
       : `SELECT id,entity_id,vendor_id AS party_id,vendor_name AS party,reference AS number,bill_date AS date,due_date,currency FROM bills`;
   const rows = (
     await tx.query(

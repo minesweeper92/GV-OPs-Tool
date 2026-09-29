@@ -14,6 +14,8 @@ import {
   type Me,
 } from "./model";
 import { totals } from "../shared/money";
+import { documentDetails } from "../shared/documents";
+import { DocumentFields } from "./DocumentFields";
 const titles: Record<string, string> = {
   company: "New company",
   contact: "New contact",
@@ -25,6 +27,8 @@ const titles: Record<string, string> = {
   accept: "Accept this quote",
   share: "Mark quote as shared",
   invoice: "Create invoice draft",
+  "direct-invoice": "New invoice",
+  "edit-invoice": "Edit invoice draft",
   "milestone-invoice": "Invoice milestone",
   "cancel-invoice": "Cancel invoice draft",
   recognise: "Recognise delivered work",
@@ -70,24 +74,106 @@ export function Editor({
       (d) => d.id === (initialQuote?.deal_id || id),
     ),
     invoice = data.invoices.find((i) => i.id === id);
-  const [selectedCompany, setSelectedCompany] = useState(""),
+  const customer = data.companies.find(
+    (c) => c.id === (invoice?.company_id || initialDeal?.company_id),
+  );
+  const defaults = (company: typeof customer) =>
+    documentDetails.parse({
+      quote_date: today(),
+      billing_address: company?.address || "",
+      shipping_address: company?.shipping_address || "",
+      customer_tax_id: company?.tax_id || "",
+      recipients: company?.profile.billing_recipients || [],
+      payment_terms: `Net ${company?.profile.payment_days ?? 30} days`,
+      customer_notes: company?.profile.document_notes || "",
+    });
+  const [details, setDetails] = useState(() =>
+    documentDetails.parse(
+      invoice?.details ||
+        (initialQuote
+          ? {
+              ...initialQuote.details,
+              quote_date: initialQuote.details?.quote_date || today(),
+            }
+          : defaults(customer)),
+    ),
+  );
+  const [selectedCompany, setSelectedCompany] = useState(customer?.id || ""),
     [selectedEntity, setSelectedEntity] = useState(
       entityId === "all" ? "" : entityId,
     );
   const [currency, setCurrency] = useState(
     initialQuote?.currency ||
+      customer?.profile.currency ||
       data.contacts.find((c) => c.id === initialDeal?.contact_id)?.currency ||
       "PKR",
   );
   const [lines, setLines] = useState<Line[]>(
-    initialQuote?.lines.map(({ description, quantity, price, tax }) => ({
-      description,
-      quantity,
-      price,
-      tax,
-    })) || [{ description: "", quantity: "1", price: "", tax: "0" }],
+    initialQuote?.lines.map(
+      ({
+        description,
+        quantity,
+        price,
+        tax,
+        unit,
+        section,
+        discount_type,
+        discount,
+      }) => ({
+        description,
+        quantity,
+        price,
+        tax,
+        unit,
+        section,
+        discount_type,
+        discount,
+      }),
+    ) || [{ description: "", quantity: "1", price: "", tax: "0" }],
   );
+  const [fx, setFx] = useState(
+    initialQuote ? rate(initialQuote.fx_micros) : currency === "PKR" ? "1" : "",
+  );
+  const [issueDate, setIssueDate] = useState(
+    invoice?.issue_date.slice(0, 10) || today(),
+  );
+  const addDays = (date: string, days: number) => {
+    const d = new Date(`${date}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  };
+  const [dueDate, setDueDate] = useState(
+    invoice?.due_date.slice(0, 10) ||
+      addDays(today(), customer?.profile.payment_days ?? 30),
+  );
+  const documentMode = [
+    "quote",
+    "invoice",
+    "milestone-invoice",
+    "direct-invoice",
+    "edit-invoice",
+  ].includes(kind);
   const [requestKey] = useState(() => crypto.randomUUID());
+  const [itemNotice, setItemNotice] = useState("");
+  const [itemBusy, setItemBusy] = useState(false);
+  async function saveItem(line: Line) {
+    setItemBusy(true);
+    setError("");
+    try {
+      await onSave({
+        action: "document.item-save",
+        name: line.description.slice(0, 200),
+        currency,
+        line,
+        request_key: crypto.randomUUID(),
+      });
+      setItemNotice("Item saved to this workspace's reusable item library.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setItemBusy(false);
+    }
+  }
   let total = "";
   try {
     total = totals(lines).total;
@@ -196,6 +282,7 @@ export function Editor({
           ...f,
           deal_id: initialDeal?.id,
           lines,
+          details,
         };
         break;
       case "accept":
@@ -212,6 +299,25 @@ export function Editor({
           ...f,
           request_key: requestKey,
           ...(milestone ? { milestone_id: milestone.id } : {}),
+          details,
+        };
+        break;
+      case "direct-invoice":
+        command = {
+          action: "document.invoice-create",
+          ...f,
+          lines,
+          details,
+          request_key: requestKey,
+        };
+        break;
+      case "edit-invoice":
+        command = {
+          action: "document.invoice-edit",
+          ...f,
+          id,
+          version: invoice?.version,
+          details,
         };
         break;
       case "cancel-invoice":
@@ -282,7 +388,14 @@ export function Editor({
     }
   }
   return (
-    <Drawer title={titles[kind] || kind} close={onClose} dirty={dirty}>
+    <Drawer
+      title={titles[kind] || kind}
+      close={() => {
+        if (!busy) onClose();
+      }}
+      dirty={dirty}
+      wide={documentMode}
+    >
       <form className="editor" onSubmit={save} onChange={() => setDirty(true)}>
         <div className="editor-body">
           {kind === "company" ? (
@@ -385,56 +498,175 @@ export function Editor({
               {text("due_date", "Follow-up date", true, today(), "date")}
             </>
           ) : null}
-          {kind === "quote" ? (
-            <>
-              <p className="context-label">
-                {initialDeal?.name} ·{" "}
-                {
-                  data.entities.find((e) => e.id === initialDeal?.entity_id)
-                    ?.code
-                }
+          {kind === "direct-invoice" ? (
+            <section>
+              <p className="muted">
+                Invoice an existing customer without creating a lead or deal.
+                Choose the issuing legal entity explicitly. Use the accepted
+                quote's invoice action for project billing.
               </p>
-              {text(
-                "option_name",
-                "Named option",
-                true,
-                initialQuote?.option_name || "",
-                "text",
-                "Use names such as Baku or Director Ali. The same name creates the next revision.",
-              )}
+              <div className="form-row">
+                {entityField}
+                <Field label="Customer">
+                  <select
+                    name="company_id"
+                    required
+                    value={selectedCompany}
+                    onChange={(e) => {
+                      const company = data.companies.find(
+                        (c) => c.id === e.target.value,
+                      );
+                      setSelectedCompany(e.target.value);
+                      setDetails(defaults(company));
+                      const cur = company?.profile.currency || "PKR";
+                      setCurrency(cur);
+                      setFx(cur === "PKR" ? "1" : "");
+                      setDueDate(
+                        addDays(issueDate, company?.profile.payment_days ?? 30),
+                      );
+                    }}
+                  >
+                    <option value="">Choose customer</option>
+                    {companyOptions}
+                  </select>
+                </Field>
+              </div>
+              {text("label", "Billing stage", true, "Direct invoice")}
+              <Field label="Revenue treatment">
+                <select name="billing_kind">
+                  <option value="earned">
+                    Delivered work — earned revenue
+                  </option>
+                  <option value="advance">Advance — deferred revenue</option>
+                </select>
+              </Field>
+            </section>
+          ) : null}
+          {kind === "quote" || kind === "direct-invoice" ? (
+            <>
+              {initialDeal ? (
+                <p className="context-label">
+                  {initialDeal?.name} ·{" "}
+                  {
+                    data.entities.find((e) => e.id === initialDeal?.entity_id)
+                      ?.code
+                  }
+                </p>
+              ) : null}
+              {kind === "quote"
+                ? text(
+                    "option_name",
+                    "Named option",
+                    true,
+                    initialQuote?.option_name || "",
+                    "text",
+                    "Use names such as Baku or Director Ali. The same name creates the next revision.",
+                  )
+                : null}
               <div className="form-row">
                 <Field label="Currency">
                   <select
                     name="currency"
                     value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
+                    onChange={(e) => {
+                      setCurrency(e.target.value);
+                      setFx(e.target.value === "PKR" ? "1" : "");
+                    }}
                   >
                     {["PKR", "USD", "AED", "EUR", "GBP"].map((c) => (
                       <option key={c}>{c}</option>
                     ))}
                   </select>
                 </Field>
-                {text(
-                  "fx",
-                  "PKR per 1 unit",
-                  true,
-                  currency === "PKR"
-                    ? "1"
-                    : initialQuote
-                      ? rate(initialQuote.fx_micros)
-                      : "",
-                  "text",
-                  "Manual document-date exchange rate.",
-                )}
+                <Field
+                  label="PKR per 1 unit"
+                  hint="Manual document-date exchange rate."
+                >
+                  <input
+                    name="fx"
+                    required
+                    value={fx}
+                    readOnly={currency === "PKR"}
+                    onChange={(e) => setFx(e.target.value)}
+                  />
+                </Field>
               </div>
               <h3>Line items</h3>
+              <Field
+                label="Add saved item"
+                hint="Only items in this document's currency are shown. Review the rate and tax before saving."
+              >
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const item = data.catalogItems.find(
+                      (i) => i.id === e.target.value,
+                    );
+                    if (item) {
+                      setLines((old) =>
+                        old.length === 1 && !old[0].description
+                          ? [{ ...item.line }]
+                          : [...old, { ...item.line }],
+                      );
+                      setDirty(true);
+                    }
+                  }}
+                >
+                  <option value="">Choose from the item library</option>
+                  {data.catalogItems
+                    .filter((i) => i.currency === currency)
+                    .map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              {itemNotice ? <p role="status">{itemNotice}</p> : null}
+              {data.catalogItems.length ? (
+                <details>
+                  <summary>Manage saved items</summary>
+                  <p className="muted">
+                    Archiving removes a reusable item from future choices.
+                    Existing quotes and invoices keep their own copy.
+                  </p>
+                  {data.catalogItems.map((item) => (
+                    <p key={item.id}>
+                      {item.name} · {item.currency} {item.line.price}{" "}
+                      {me.user.role === "admin" ||
+                      item.created_by === me.user.id ? (
+                        <button
+                          type="button"
+                          disabled={itemBusy}
+                          onClick={async () => {
+                            setItemBusy(true);
+                            setError("");
+                            try {
+                              await onSave({
+                                action: "document.item-archive",
+                                id: item.id,
+                              });
+                            } catch (e) {
+                              setError((e as Error).message);
+                            } finally {
+                              setItemBusy(false);
+                            }
+                          }}
+                        >
+                          Archive {item.name}
+                        </button>
+                      ) : null}
+                    </p>
+                  ))}
+                </details>
+              ) : null}
               {lines.map((line, i) => (
                 <div className="line-editor" key={i}>
                   <Field label={`Description ${i + 1}`}>
-                    <input
+                    <textarea
                       required
                       value={line.description}
-                      maxLength={200}
+                      maxLength={2000}
                       onChange={(e) =>
                         setLines((old) =>
                           old.map((l, j) =>
@@ -444,6 +676,34 @@ export function Editor({
                       }
                     />
                   </Field>
+                  <div className="form-row">
+                    <Field label={`Unit ${i + 1}`}>
+                      <input
+                        value={line.unit || ""}
+                        placeholder="days, hours, project…"
+                        onChange={(e) =>
+                          setLines((old) =>
+                            old.map((l, n) =>
+                              n === i ? { ...l, unit: e.target.value } : l,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label={`Section ${i + 1}`}>
+                      <input
+                        value={line.section || ""}
+                        placeholder="Production, post-production…"
+                        onChange={(e) =>
+                          setLines((old) =>
+                            old.map((l, n) =>
+                              n === i ? { ...l, section: e.target.value } : l,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                  </div>
                   <div className="line-numbers">
                     {(["quantity", "price", "tax"] as const).map((key) => (
                       <Field
@@ -476,6 +736,52 @@ export function Editor({
                       <Trash2 size={17} />
                     </button>
                   </div>
+                  <div className="form-row">
+                    <Field label={`Discount type ${i + 1}`}>
+                      <select
+                        value={line.discount_type || "percent"}
+                        onChange={(e) =>
+                          setLines((old) =>
+                            old.map((l, n) =>
+                              n === i
+                                ? {
+                                    ...l,
+                                    discount_type: e.target.value as
+                                      "percent" | "amount",
+                                  }
+                                : l,
+                            ),
+                          )
+                        }
+                      >
+                        <option value="percent">Percentage</option>
+                        <option value="amount">Line amount ({currency})</option>
+                      </select>
+                    </Field>
+                    <Field
+                      label={`Discount ${i + 1}`}
+                      hint="Applied before tax to this line."
+                    >
+                      <input
+                        inputMode="decimal"
+                        value={line.discount || "0"}
+                        onChange={(e) =>
+                          setLines((old) =>
+                            old.map((l, n) =>
+                              n === i ? { ...l, discount: e.target.value } : l,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={itemBusy || !line.description || !line.price}
+                    onClick={() => saveItem(line)}
+                  >
+                    Save line {i + 1} to item library
+                  </button>
                 </div>
               ))}
               <button
@@ -581,8 +887,6 @@ export function Editor({
                   </Field>
                 </>
               )}
-              {text("issue_date", "Invoice date", true, today(), "date")}
-              {text("due_date", "Due date", true, today(), "date")}
               <p className="muted">
                 Partial amounts are distributed across the remaining quote
                 lines, preserving their tax rates. Drafts reserve the amount;
@@ -590,6 +894,70 @@ export function Editor({
                 amounts separately.
               </p>
             </>
+          ) : null}
+          {kind === "edit-invoice" ? (
+            <>
+              <p className="context-label">
+                {invoice?.issuer_name} · {invoice?.customer_name} ·{" "}
+                {invoice ? money(invoice.total_minor, invoice.currency) : ""}
+              </p>
+              <p className="muted">
+                Update dates and document details before issuing. Amounts,
+                entity and the approved quote allocation stay fixed; cancel and
+                replace the draft if its scope changes.
+              </p>
+              <Field label="Terms">
+                <textarea
+                  name="terms"
+                  defaultValue={invoice?.terms || ""}
+                  maxLength={4000}
+                />
+              </Field>
+            </>
+          ) : null}
+          {documentMode && kind !== "quote" ? (
+            <div className="form-row">
+              <Field label="Invoice date">
+                <input
+                  name="issue_date"
+                  type="date"
+                  required
+                  value={issueDate}
+                  onChange={(e) => {
+                    setIssueDate(e.target.value);
+                    if (kind !== "edit-invoice")
+                      setDueDate(
+                        addDays(
+                          e.target.value,
+                          data.companies.find((c) => c.id === selectedCompany)
+                            ?.profile.payment_days ?? 30,
+                        ),
+                      );
+                  }}
+                />
+              </Field>
+              <Field label="Due date">
+                <input
+                  name="due_date"
+                  type="date"
+                  required
+                  min={issueDate}
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </Field>
+            </div>
+          ) : null}
+          {documentMode ? (
+            <DocumentFields
+              key={selectedCompany}
+              value={details}
+              quote={kind === "quote"}
+              onChange={(v) => {
+                setDetails(v);
+                setDirty(true);
+              }}
+            />
           ) : null}
           {kind === "issue" ? (
             <div className="posting-notice">
@@ -791,12 +1159,14 @@ export function Editor({
         </div>
         <div className="editor-footer">
           <span className="muted">{me.user.name}</span>
-          <button className="primary" disabled={busy}>
+          <button className="primary" disabled={busy || itemBusy}>
             {busy
               ? "Saving…"
               : kind === "quote"
                 ? "Save quote version"
-                : kind === "invoice" || kind === "milestone-invoice"
+                : kind === "invoice" ||
+                    kind === "milestone-invoice" ||
+                    kind === "direct-invoice"
                   ? "Save invoice draft"
                   : kind === "issue"
                     ? "Issue and post"

@@ -15,9 +15,11 @@ export const minor = (value: string) => scaled(value, 2);
 export const round = (numerator: bigint, denominator: bigint) =>
   (numerator + denominator / 2n) / denominator;
 export function baseAmount(amount: bigint, fx: bigint) {
-  const result=round(amount * fx,1_000_000n);
-  if(amount<0n || fx<=0n || result>9_000_000_000_000_000n)
-    throw new RangeError('The converted amount is outside the supported range. Check the amount and exchange rate.');
+  const result = round(amount * fx, 1_000_000n);
+  if (amount < 0n || fx <= 0n || result > 9_000_000_000_000_000n)
+    throw new RangeError(
+      "The converted amount is outside the supported range. Check the amount and exchange rate.",
+    );
   return result;
 }
 export function totals(
@@ -26,6 +28,8 @@ export function totals(
     quantity: string;
     price: string;
     tax: string;
+    discount_type?: "percent" | "amount";
+    discount?: string;
   }[],
 ) {
   let net = 0n,
@@ -36,11 +40,26 @@ export function totals(
       bps = scaled(line.tax, 2);
     if (quantity <= 0n || bps > 10000n)
       throw new Error("Quantity must be positive and tax between 0 and 100%.");
-    const subtotal = round(quantity * rate, 1000n),
+    const gross = round(quantity * rate, 1000n);
+    const discountValue = minor(line.discount || "0");
+    if (line.discount_type !== "amount" && discountValue > 10000n)
+      throw new Error("Percentage discount must be between 0 and 100%.");
+    const discountMinor =
+      line.discount_type === "amount"
+        ? discountValue
+        : round(gross * discountValue, 10000n);
+    if (discountMinor > gross)
+      throw new Error("Discount cannot exceed the line amount.");
+    const subtotal = gross - discountMinor,
       taxMinor = round(subtotal * bps, 10000n);
     net += subtotal;
     tax += taxMinor;
-    return { ...line, subtotal: String(subtotal), taxMinor: String(taxMinor) };
+    return {
+      ...line,
+      discountMinor: String(discountMinor),
+      subtotal: String(subtotal),
+      taxMinor: String(taxMinor),
+    };
   });
   if (net + tax <= 0n || net + tax > 9_000_000_000_000_000n)
     throw new Error("Document total is outside the supported range.");

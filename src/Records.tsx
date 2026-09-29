@@ -4,6 +4,8 @@ import { Badge, Empty, Heading, Table } from "./components";
 import { ArrowLeft, ArrowUpRight, Plus } from "lucide-react";
 import { lazy, Suspense } from "react";
 import type { CrmOpen } from "./Crm";
+import { ProfileSummary } from "./ProfileFields";
+import { DocumentExtras } from "./DocumentFields";
 const CrmPanel = lazy(() =>
   import("./Crm").then((m) => ({ default: m.CrmPanel })),
 );
@@ -52,7 +54,13 @@ export function DealRecord({
       <div className="record-summary">
         <Badge>{deal.stage}</Badge>
         <span>{entity?.name}</span>
+        {sales(me) ? (
+          <button onClick={() => crmEdit("deal", "deal", deal.id)}>
+            Edit deal details
+          </button>
+        ) : null}
       </div>
+      <ProfileSummary value={deal.profile || {}} data={data} />
       <div className="record-layout">
         <aside className="properties" aria-label="Deal details">
           <h2>Deal details</h2>
@@ -303,7 +311,11 @@ export function PersonRecord({
       contact ? d.contact_id === id : d.company_id === id,
     ),
     ids = new Set(deals.map((d) => d.id)),
-    invoices = data.invoices.filter((i) => ids.has(i.deal_id));
+    invoices = data.invoices.filter(
+      (i) =>
+        (i.deal_id && ids.has(i.deal_id)) ||
+        (company && i.company_id === company.id),
+    );
   const events = data.events.filter(
     (e) =>
       e.record_id === id ||
@@ -331,6 +343,7 @@ export function PersonRecord({
         action={sales(me) ? "Add note" : undefined}
         onAction={() => edit({ kind: "note", id })}
       />
+      <ProfileSummary value={(contact || company)?.profile || {}} data={data} />
       <div className="record-layout">
         <aside className="properties" aria-label="Profile properties">
           <h2>Properties</h2>
@@ -588,15 +601,15 @@ export function DocumentRecord({
         }
       />
       <div className="document-layout">
-        <article className="document">
+        <article
+          className={`document ${doc.details?.template === "Compact" ? "compact-document" : ""}`}
+        >
           <div className="document-masthead">
             <div>
               <p className="eyebrow">{invoice ? "INVOICE" : "QUOTE"}</p>
               <h2>{doc.issuer_name}</h2>
-              <p>{invoice?.issuer_address || entity?.address}</p>
-              {invoice?.issuer_tax_id || entity?.tax_id ? (
-                <p>Tax ID: {invoice?.issuer_tax_id || entity?.tax_id}</p>
-              ) : null}
+              <p>{doc.issuer_address}</p>
+              {doc.issuer_tax_id ? <p>Tax ID: {doc.issuer_tax_id}</p> : null}
             </div>
             <Badge>
               {invoice?.status ||
@@ -607,7 +620,11 @@ export function DocumentRecord({
             <div>
               <small>Bill to</small>
               <h3>{doc.customer_name}</h3>
-              <a href={`#deal/${doc.deal_id}`}>{deal?.name}</a>
+              {deal ? (
+                <a href={`#deal/${deal.id}`}>{deal.name}</a>
+              ) : (
+                <span>Direct customer invoice</span>
+              )}
             </div>
             {invoice ? (
               <dl>
@@ -637,17 +654,24 @@ export function DocumentRecord({
               "Description",
               "Quantity",
               "Unit price",
+              "Discount",
               "Tax %",
               "Total",
             ]}
           >
             {doc.lines.map((l, i) => (
               <tr key={i}>
-                <td>{l.description}</td>
-                <td>{l.quantity}</td>
+                <td className="preserve">
+                  {l.section ? <small>{l.section}</small> : null}
+                  {l.description}
+                </td>
+                <td>
+                  {l.quantity} {l.unit}
+                </td>
                 <td>
                   {doc.currency} {l.price}
                 </td>
+                <td>{money(l.discountMinor || "0", doc.currency)}</td>
                 <td>{l.tax}%</td>
                 <td className="num">
                   {money(
@@ -678,6 +702,7 @@ export function DocumentRecord({
               </>
             ) : null}
           </dl>
+          <DocumentExtras details={doc.details || {}} />
           {doc.terms ? (
             <>
               <h3>Terms</h3>
@@ -685,7 +710,7 @@ export function DocumentRecord({
             </>
           ) : null}
           <p className="muted small">
-            {invoice
+            {invoice?.quote_id
               ? "Partial billing allocates tax from the accepted quote, including any final rounding remainder. "
               : ""}
             Sample build. Not a tax-compliance-certified document. No email is
@@ -706,6 +731,11 @@ export function DocumentRecord({
                     {c.reversal_date ? " · Reversed" : ""}
                   </a>
                 ))}
+              {invoice.status === "Draft" ? (
+                <button onClick={() => edit({ kind: "edit-invoice", id })}>
+                  Edit draft details
+                </button>
+              ) : null}
               {invoice.status === "Draft" ? (
                 <button onClick={() => edit({ kind: "cancel-invoice", id })}>
                   Cancel draft
@@ -750,7 +780,13 @@ export function DocumentRecord({
             </div>
           ) : null}
           <h3>Linked records</h3>
-          <a href={`#deal/${doc.deal_id}`}>{deal?.name}</a>
+          {deal ? (
+            <a href={`#deal/${deal.id}`}>{deal.name}</a>
+          ) : invoice ? (
+            <a href={`#company/${invoice.company_id}`}>
+              {invoice.customer_name}
+            </a>
+          ) : null}
           <p>{entity?.code} · base PKR</p>
           {invoice ? (
             <>

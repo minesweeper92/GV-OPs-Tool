@@ -3,6 +3,7 @@ import type { SQL, Row } from "./db.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { createProjectInvoice } from "./projects.ts";
+import { detailsSnapshot } from "./documents.ts";
 export type Context = {
   tenantId: string;
   userId: string;
@@ -181,11 +182,10 @@ export async function snapshot(tx: SQL, ctx: Context) {
   ).rows;
   const invoices = (
     await tx.query(
-      `SELECT i.*,q.customer_name,q.issuer_name,
-    q.issuer_address,q.issuer_tax_id,q.terms,d.name AS deal_name,e.code AS entity_code
-    FROM invoices i JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id JOIN entities e ON e.id=i.entity_id
-    WHERE i.deal_id=ANY($1::uuid[]) ORDER BY i.created_at DESC`,
-      [dealIds],
+      `SELECT i.*,d.name AS deal_name,e.code AS entity_code
+    FROM invoices i LEFT JOIN deals d ON d.id=i.deal_id JOIN entities e ON e.id=i.entity_id
+    WHERE (NOT $2::boolean OR i.deal_id=ANY($1::uuid[])) ORDER BY i.created_at DESC`,
+      [dealIds, own],
     )
   ).rows;
   const affiliations = (
@@ -226,6 +226,11 @@ export async function snapshot(tx: SQL, ctx: Context) {
     : [];
   return {
     entities,
+    catalogItems: (
+      await tx.query(
+        "SELECT * FROM catalog_items WHERE active ORDER BY name,id",
+      )
+    ).rows,
     companies,
     contacts,
     affiliations,
@@ -332,7 +337,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
       break;
     }
     case "contact.create": {
-      await record(tx, "companies", c.company_id, ctx, true);
+      if (c.company_id) await record(tx, "companies", c.company_id, ctx, true);
       await tx.query(
         "INSERT INTO contacts(id,tenant_id,first_name,last_name,email,phone,title,source,notes,owner_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         [
@@ -348,10 +353,11 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           ctx.userId,
         ],
       );
-      await tx.query(
-        "INSERT INTO affiliations(id,tenant_id,contact_id,company_id,role,started_on) VALUES($1,$2,$3,$4,$5,CURRENT_DATE)",
-        [uuid(), t, id, c.company_id, c.role],
-      );
+      if (c.company_id)
+        await tx.query(
+          "INSERT INTO affiliations(id,tenant_id,contact_id,company_id,role,started_on) VALUES($1,$2,$3,$4,$5,CURRENT_DATE)",
+          [uuid(), t, id, c.company_id, c.role],
+        );
       break;
     }
     case "contact.associate": {
@@ -428,6 +434,10 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         "UPDATE leads SET status='Converted',next_action=NULL,due_date=NULL WHERE id=$1",
         [l.id],
       );
+      await tx.query("UPDATE deals SET profile=$2 WHERE id=$1", [
+        id,
+        JSON.stringify(l.profile || {}),
+      ]);
       break;
     }
     case "deal.follow-up":
@@ -479,8 +489,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         ).rows[0].n,
       );
       await tx.query(
-        `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by,details)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           id,
           t,
@@ -500,6 +510,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           e.tax_id,
           c.terms,
           ctx.userId,
+          JSON.stringify(detailsSnapshot(company, c.details)),
         ],
       );
       await tx.query("UPDATE deals SET stage='Proposal' WHERE id=$1", [d.id]);
@@ -546,13 +557,12 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           return { id: i.id };
         reject(409, "This invoice cannot be issued.");
       }
-      const q = await record(tx, "quotes", i.quote_id, ctx),
-        e = await entityDate(
-          tx,
-          i.entity_id,
-          String(i.issue_date).slice(0, 10),
-          ctx,
-        );
+      const e = await entityDate(
+        tx,
+        i.entity_id,
+        String(i.issue_date).slice(0, 10),
+        ctx,
+      );
       const number = `${e.code}-INV-${String(e.next_invoice).padStart(5, "0")}`;
       await tx.query(
         "UPDATE entities SET next_invoice=next_invoice+1 WHERE id=$1",
@@ -609,7 +619,6 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           409,
           "Only an issued invoice with a balance can receive payment.",
         );
-      const q = await record(tx, "quotes", i.quote_id, ctx);
       await entityDate(tx, i.entity_id, c.date, ctx);
       const bankCode = await cashAccount(
         tx,

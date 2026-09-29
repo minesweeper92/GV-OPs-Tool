@@ -49,12 +49,7 @@ export async function invoiceCredits(tx: SQL, id: string) {
   ).rows;
 }
 async function invoice(tx: SQL, id: string): Promise<Row> {
-  const i = await get(tx, "invoices", id),
-    d = await get(tx, "deals", i.deal_id, false);
-  return {
-    ...i,
-    company_id: d.company_id,
-  };
+  return get(tx, "invoices", id);
 }
 async function activeCredit(tx: SQL, id: string) {
   const c = await get(tx, "credit_notes", id);
@@ -540,9 +535,9 @@ export async function creditSnapshot(tx: SQL, ctx: Context) {
   if (!["admin", "finance"].includes(ctx.role))
     return { credits: [], creditApplications: [], customerRefunds: [] };
   const credits = (
-    await tx.query(`SELECT c.*,i.currency,i.fx_micros,q.customer_name,d.company_id,i.number AS invoice_number,r.reversal_date,
+    await tx.query(`SELECT c.*,i.currency,i.fx_micros,i.customer_name,i.company_id,i.number AS invoice_number,r.reversal_date,
  (CASE WHEN r.id IS NOT NULL THEN 0 ELSE c.total_minor-(SELECT coalesce(sum(a.amount_minor),0) FROM credit_applications a WHERE a.credit_id=c.id AND NOT EXISTS(SELECT 1 FROM application_reversals x WHERE x.application_id=a.id))-(SELECT coalesce(sum(f.amount_minor),0) FROM customer_refunds f WHERE f.credit_id=c.id AND NOT EXISTS(SELECT 1 FROM refund_reversals x WHERE x.refund_id=f.id)) END)::text AS available
- FROM credit_notes c JOIN invoices i ON i.id=c.invoice_id JOIN quotes q ON q.id=i.quote_id JOIN deals d ON d.id=i.deal_id LEFT JOIN credit_reversals r ON r.credit_id=c.id ORDER BY c.created_at DESC`)
+ FROM credit_notes c JOIN invoices i ON i.id=c.invoice_id LEFT JOIN credit_reversals r ON r.credit_id=c.id ORDER BY c.created_at DESC`)
   ).rows;
   const creditApplications = (
     await tx.query(

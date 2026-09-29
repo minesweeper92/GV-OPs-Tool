@@ -15,6 +15,8 @@ import { projectSnapshot, executeProject } from "./projects.ts";
 import { creditSnapshot, executeCredit } from "./credits.ts";
 import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 import { crmSnapshot, executeCrm } from "./crm.ts";
+import { executeProfile } from "./profiles.ts";
+import { executeDocument } from "./documents.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -288,21 +290,25 @@ export function createApp(
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) =>
-      c.action.startsWith("crm.")
-        ? executeCrm(tx, ctx, c)
-        : c.action.startsWith("recurring.")
-          ? executeRecurring(tx, ctx, c)
-          : c.action.startsWith("credit.")
-            ? executeCredit(tx, ctx, c)
-            : c.action.startsWith("project.") ||
-                ["invoice.cancel", "invoice.recognise"].includes(c.action)
-              ? executeProject(tx, ctx, c)
-              : c.action.startsWith("bank.")
-                ? executeBank(tx, ctx, c)
-                : c.action.startsWith("bill.") ||
-                    c.action.startsWith("vendor-payment.")
-                  ? executePayable(tx, ctx, c)
-                  : execute(tx, ctx, c),
+      c.action.startsWith("document.")
+        ? executeDocument(tx, ctx, c)
+        : c.action.startsWith("profile.")
+          ? executeProfile(tx, ctx, c)
+          : c.action.startsWith("crm.")
+            ? executeCrm(tx, ctx, c)
+            : c.action.startsWith("recurring.")
+              ? executeRecurring(tx, ctx, c)
+              : c.action.startsWith("credit.")
+                ? executeCredit(tx, ctx, c)
+                : c.action.startsWith("project.") ||
+                    ["invoice.cancel", "invoice.recognise"].includes(c.action)
+                  ? executeProject(tx, ctx, c)
+                  : c.action.startsWith("bank.")
+                    ? executeBank(tx, ctx, c)
+                    : c.action.startsWith("bill.") ||
+                        c.action.startsWith("vendor-payment.")
+                      ? executePayable(tx, ctx, c)
+                      : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

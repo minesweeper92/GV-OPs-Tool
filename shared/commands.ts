@@ -4,6 +4,12 @@ import { projectCommands } from "./projects.ts";
 import { billingCommands } from "./billing.ts";
 import { recurringCommands } from "./recurring.ts";
 import { crmCommands } from "./crm.ts";
+import { profileCommands } from "./profiles.ts";
+import {
+  documentCommands,
+  documentDetails,
+  documentLine,
+} from "./documents.ts";
 const id = z.uuid(),
   text = z.string().trim().min(1).max(200),
   optional = z.string().trim().max(4000).default("");
@@ -31,6 +37,8 @@ export const commandSchema = z.discriminatedUnion("action", [
   ...billingCommands,
   ...recurringCommands,
   ...crmCommands,
+  ...profileCommands,
+  ...documentCommands,
   z.strictObject({
     action: z.literal("bill.create"),
     entity_id: id,
@@ -134,7 +142,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     title: optional,
     source: optional,
     notes: optional,
-    company_id: id,
+    company_id: id.nullable(),
     role: text,
   }),
   z.strictObject({
@@ -174,7 +182,8 @@ export const commandSchema = z.discriminatedUnion("action", [
     option_name: text,
     currency: z.enum(["PKR", "USD", "AED", "EUR", "GBP"]),
     fx,
-    lines: z.array(line).min(1).max(100),
+    lines: z.array(documentLine).min(1).max(100),
+    details: documentDetails.optional(),
     terms: optional,
   }),
   z.strictObject({ action: z.literal("quote.share"), id, reference: text }),
@@ -189,6 +198,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     label: text.default("Accepted quote"),
     milestone_id: id.nullable().optional(),
     request_key: id.optional(),
+    details: documentDetails.optional(),
   }),
   z.strictObject({ action: z.literal("invoice.issue"), id }),
   z.strictObject({ action: z.literal("invoice.void"), id, reason: text, date }),

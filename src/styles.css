@@ -1594,3 +1594,53 @@ details[open] summary {
 .project-finance {
   margin-top: 28px;
 }
+.drawer.document-editor {
+  width: min(1120px, 100vw);
+}
+.document-editor .editor-body {
+  padding: 28px clamp(18px, 4vw, 60px);
+}
+.document-fields {
+  border-top: 1px solid var(--border);
+  margin-top: 28px;
+  padding-top: 12px;
+}
+.document-extras dl > div,
+.profile-summary > div {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+.document-extras dt,
+.profile-summary dt {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.document-extras dd,
+.profile-summary dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.compact-document {
+  padding: 24px;
+  font-size: 12px;
+}
+.compact-document .document-extras dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+}
+.billing-editor .profile-group {
+  border: 1px solid var(--border);
+  padding: 16px;
+  margin: 16px 0;
+}
+.form-row > *,
+.line-numbers > * {
+  min-width: 0;
+}
+@media (max-width: 600px) {
+  .compact-document .document-extras dl {
+    grid-template-columns: 1fr;
+  }
+}

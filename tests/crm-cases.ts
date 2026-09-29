@@ -434,4 +434,457 @@ export async function verifyCrm(t: TestContext, db: Database) {
       );
     },
   );
+  await t.test(
+    "full profiles create without a company, persist typed fields and reject stale or inaccessible edits",
+    async () => {
+      const create = {
+        ...edit,
+        action: "profile.contact",
+        id: undefined,
+        version: undefined,
+        first_name: "Independent",
+        email: "independent@crm.test",
+        additional_emails: [],
+        company_id: null,
+        owner_id: admin,
+        profile: {
+          department: "Marketing",
+          preferred_channel: "Email",
+          timezone: "Asia/Karachi",
+          location: { city: "Lahore" },
+          custom_fields: [{ label: "Client tier", type: "Text", value: "A" }],
+        },
+      };
+      const id = (await cmd(create)).id;
+      let d = await data(),
+        c = d.contacts.find((r: any) => r.id === id);
+      assert.equal(c.profile.department, "Marketing");
+      assert.equal(c.profile.location.city, "Lahore");
+      assert.equal(c.additional_phones.length, 1);
+      assert.equal(
+        d.affiliations.filter((r: any) => r.contact_id === id).length,
+        0,
+      );
+      const updated = {
+        ...create,
+        id,
+        version: c.version,
+        profile: { ...create.profile, department: "Production" },
+      };
+      await cmd(updated);
+      await cmd(updated, 409);
+      await read("/api/commands", create, 403);
+      await rep("/api/commands", { ...updated, version: c.version + 2 }, 404);
+      await cmd(
+        {
+          ...create,
+          email: "bad@crm.test",
+          profile: { timezone: "Not/a_timezone" },
+        },
+        400,
+      );
+      await cmd(
+        {
+          ...create,
+          email: "bad@crm.test",
+          profile: {
+            custom_fields: [{ label: "Number", type: "Number", value: "abc" }],
+          },
+        },
+        400,
+      );
+      await cmd(
+        {
+          ...create,
+          email: "bad@crm.test",
+          profile: {
+            custom_fields: [
+              { label: "A", type: "Text", value: "1" },
+              { label: "a", type: "Text", value: "2" },
+            ],
+          },
+        },
+        400,
+      );
+      d = await data();
+      assert.ok(!d.contacts.some((c: any) => c.email === "bad@crm.test"));
+      await cmd({ ...updated, version: c.version + 2, owner_id: uuid() }, 400);
+    },
+  );
+  await t.test(
+    "company defaults and entity registrations persist; commercial context carries through qualification",
+    async () => {
+      const companyCommand = {
+        action: "profile.company",
+        owner_id: admin,
+        name: "Profile customer",
+        trading_name: "",
+        domain: "",
+        industry: "",
+        size: "",
+        tax_id: "QA-TAX",
+        address: "Billing QA",
+        shipping_address: "Delivery QA",
+        customer: true,
+        vendor: false,
+        service_entity_id: null,
+        profile: {
+          currency: "USD",
+          payment_days: 45,
+          credit_limit: "5000",
+          billing_recipients: ["accounts@crm.test"],
+          registrations: [
+            {
+              entity_id: entity,
+              code: "V-123",
+              status: "Active",
+              instructions: "PO required",
+              reference_url: "https://example.test/registration",
+            },
+          ],
+        },
+      };
+      const co = (await cmd(companyCommand)).id;
+      let d = await data(),
+        companyRecord = d.companies.find((c: any) => c.id === co);
+      assert.equal(companyRecord.profile.payment_days, 45);
+      assert.equal(companyRecord.profile.registrations[0].code, "V-123");
+      await cmd(
+        {
+          ...companyCommand,
+          id: co,
+          version: companyRecord.version,
+          profile: { parent_company_id: co },
+        },
+        400,
+      );
+      await cmd(
+        {
+          ...companyCommand,
+          id: co,
+          version: companyRecord.version,
+          profile: {
+            registrations: [
+              ...companyCommand.profile.registrations,
+              ...companyCommand.profile.registrations,
+            ],
+          },
+        },
+        400,
+      );
+      const person = (
+        await cmd({
+          action: "contact.create",
+          first_name: "Project buyer",
+          email: "",
+          company_id: co,
+          role: "Buyer",
+        })
+      ).id;
+      const leadCommand = {
+        action: "profile.lead",
+        owner_id: admin,
+        company_id: co,
+        contact_id: person,
+        entity_id: entity,
+        title: "Full project",
+        source: "Referral",
+        status: "Connected",
+        next_action: "Discuss proposal",
+        due_date: "2026-10-01",
+        reason: "",
+        profile: {
+          brief: "Brand film",
+          estimated_value: "12500",
+          currency: "USD",
+          end_client_id: company,
+          stakeholders: [{ contact_id: person, role: "Approver" }],
+          decision_process: "Board review",
+          custom_fields: [{ label: "Shoot days", type: "Number", value: "3" }],
+        },
+      };
+      const le = (await cmd(leadCommand)).id;
+      const lr = (await data()).leads.find((l: any) => l.id === le);
+      await cmd(
+        { ...leadCommand, id: le, version: lr.version, company_id: company },
+        409,
+      );
+      const converted = (await cmd({ action: "lead.convert", id: le })).id;
+      const dr = (await data()).deals.find((d: any) => d.id === converted);
+      assert.equal(dr.profile.brief, "Brand film");
+      assert.equal(dr.profile.stakeholders[0].contact_id, person);
+      await cmd({
+        action: "profile.deal",
+        id: converted,
+        version: dr.version,
+        owner_id: admin,
+        name: "Full project revised",
+        profile: { ...dr.profile, priority: "High" },
+      });
+      await cmd(
+        {
+          action: "profile.deal",
+          id: converted,
+          version: dr.version,
+          owner_id: admin,
+          name: "Stale",
+          profile: {},
+        },
+        409,
+      );
+    },
+  );
+  await t.test(
+    "direct invoice snapshots, discounts, retry protection, draft versions, credits and ledger agree",
+    async () => {
+      const details = {
+        purchase_order: "PO-100",
+        billing_address: "Frozen address",
+        custom_fields: [{ label: "Campaign", type: "Text", value: "Launch" }],
+      };
+      const c = {
+        action: "document.invoice-create",
+        entity_id: entity,
+        company_id: company,
+        issue_date: "2026-09-01",
+        due_date: "2026-10-01",
+        currency: "PKR",
+        fx: "1",
+        billing_kind: "earned",
+        label: "Standalone web work",
+        terms: "QA terms",
+        details,
+        lines: [
+          {
+            description: "Design",
+            quantity: "2",
+            price: "100",
+            tax: "18",
+            unit: "days",
+            section: "Creative",
+            discount_type: "percent",
+            discount: "10",
+          },
+        ],
+        request_key: uuid(),
+      };
+      await rep("/api/commands", c, 403);
+      await read("/api/commands", c, 403);
+      await cmd({ ...c, company_id: uuid() }, 404);
+      await cmd({ ...c, lines: [{ ...c.lines[0], discount: "101" }] }, 400);
+      const id = (await cmd(c)).id;
+      assert.equal((await cmd(c)).id, id);
+      await cmd({ ...c, label: "Changed" }, 409);
+      let i = (await data()).invoices.find((i: any) => i.id === id);
+      assert.equal(i.deal_id, null);
+      assert.equal(i.quote_id, null);
+      assert.equal(i.net_minor, "18000");
+      assert.equal(i.tax_minor, "3240");
+      assert.equal(i.total_minor, "21240");
+      assert.equal(i.lines[0].discountMinor, "2000");
+      assert.equal(i.company_id, company);
+      assert.equal(i.details.purchase_order, "PO-100");
+      const change = {
+        action: "document.invoice-edit",
+        id,
+        version: i.version,
+        issue_date: "2026-09-02",
+        due_date: "2026-10-02",
+        terms: "Revised QA terms",
+        details: { ...details, reference: "Updated before issue" },
+      };
+      await cmd(change);
+      await cmd(change, 409);
+      await cmd({ action: "invoice.issue", id });
+      i = (await data()).invoices.find((i: any) => i.id === id);
+      await cmd({ ...change, version: i.version }, 409);
+      await assert.rejects(
+        () =>
+          inTenant(db, tenant, (tx) =>
+            tx.query("UPDATE invoices SET details='{}' WHERE id=$1", [id]),
+          ),
+        /immutable/,
+      );
+      const ledger = await inTenant(db, tenant, (tx) =>
+        tx.query(
+          "SELECT account_code,debit_minor,credit_minor FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_id=$1",
+          [id],
+        ),
+      );
+      assert.equal(
+        ledger.rows.find((r) => r.account_code === "1100")?.debit_minor,
+        "21240",
+      );
+      assert.equal(
+        ledger.rows.find((r) => r.account_code === "4000")?.credit_minor,
+        "18000",
+      );
+      const credit = (
+        await cmd({
+          action: "credit.create",
+          invoice_id: id,
+          date: "2026-09-03",
+          lines: [{ index: 0, amount: "20" }],
+          treatment: "earned",
+          reason: "QA credit",
+          request_key: uuid(),
+        })
+      ).id;
+      assert.ok((await data()).credits.some((c: any) => c.id === credit));
+      await cmd({
+        action: "payment.create",
+        invoice_id: id,
+        date: "2026-09-04",
+        amount: "10",
+        wht: "0",
+        fx: "1",
+        reference: "QA payment",
+        request_key: uuid(),
+      });
+      assert.equal(
+        (await data()).invoices.find((i: any) => i.id === id).paid_minor,
+        "1000",
+      );
+      const reports = await call(
+        `/api/financial-reports?entityId=${entity}&from=2026-09-01&to=2026-09-30`,
+      );
+      assert.equal(reports.receivables.difference, "0");
+      assert.equal(
+        reports.receivables.documents.find((d: any) => d.id === id).outstanding,
+        "20240",
+      );
+      assert.equal(
+        (await rep("/api/data")).invoices.some((i: any) => i.id === id),
+        false,
+      );
+      assert.equal(
+        (
+          await inTenant(db, outsider, (tx) =>
+            tx.query("SELECT * FROM invoices WHERE id=$1", [id]),
+          )
+        ).rows.length,
+        0,
+      );
+    },
+  );
+  await t.test(
+    "saved items stay tenant-scoped and discounted quote versions preserve scope through partial invoicing",
+    async () => {
+      const line = {
+        description: "Production",
+        quantity: "2",
+        price: "100",
+        tax: "18",
+        unit: "days",
+        section: "Production",
+        discount_type: "amount",
+        discount: "10",
+      };
+      const itemCommand = {
+        action: "document.item-save",
+        name: "Production day",
+        currency: "PKR",
+        line,
+        request_key: uuid(),
+      };
+      const item = (await cmd(itemCommand)).id;
+      assert.equal((await cmd(itemCommand)).id, item);
+      await cmd({ ...itemCommand, name: "Other" }, 409);
+      await read("/api/commands", itemCommand, 403);
+      await rep(
+        "/api/commands",
+        { action: "document.item-archive", id: item },
+        403,
+      );
+      assert.equal(
+        (
+          await inTenant(db, outsider, (tx) =>
+            tx.query("SELECT * FROM catalog_items"),
+          )
+        ).rows.length,
+        0,
+      );
+      const current = (await data()).deals.find(
+        (d: any) => d.name === "Full project revised",
+      );
+      const q = {
+        action: "quote.create",
+        deal_id: current.id,
+        option_name: "Director A",
+        currency: "PKR",
+        fx: "1",
+        lines: [line],
+        details: {
+          quote_date: "2026-09-01",
+          valid_until: "2026-10-01",
+          purchase_order: "FROZEN-PO",
+          inclusions: "One film",
+        },
+      };
+      await cmd(
+        { ...q, details: { ...q.details, valid_until: "2026-08-01" } },
+        400,
+      );
+      const quote = (await cmd(q)).id;
+      await cmd({
+        action: "quote.accept",
+        id: quote,
+        reference: "QA acceptance",
+      });
+      const invoice = (
+        await cmd({
+          action: "invoice.create",
+          quote_id: quote,
+          issue_date: "2026-09-01",
+          due_date: "2026-10-01",
+          amount: "90",
+          request_key: uuid(),
+        })
+      ).id;
+      const i = (await data()).invoices.find((i: any) => i.id === invoice);
+      assert.equal(i.net_minor, "9000");
+      assert.equal(i.tax_minor, "1620");
+      assert.equal(i.details.purchase_order, "FROZEN-PO");
+      assert.equal(i.lines[0].section, "Production");
+      assert.equal(i.lines[0].price, "90.00");
+      assert.equal(i.lines[0].discount, "0");
+      await cmd({ action: "document.item-archive", id: item });
+      assert.ok(!(await data()).catalogItems.some((x: any) => x.id === item));
+      assert.equal(
+        (await data()).quotes.find((x: any) => x.id === quote).lines[0].price,
+        "100",
+      );
+      const direct = (
+        await cmd({
+          action: "document.invoice-create",
+          entity_id: entity,
+          company_id: company,
+          issue_date: "2026-09-01",
+          due_date: "2026-10-01",
+          currency: "PKR",
+          fx: "1",
+          billing_kind: "advance",
+          label: "Deposit",
+          terms: "",
+          details: {},
+          lines: [line],
+          request_key: uuid(),
+        })
+      ).id;
+      await cmd({ action: "invoice.issue", id: direct });
+      await cmd({
+        action: "invoice.recognise",
+        id: direct,
+        date: "2026-09-05",
+        amount: "50",
+        reference: "Delivered",
+        request_key: uuid(),
+      });
+      assert.equal(
+        (await data()).recognitions.find((r: any) => r.invoice_id === direct)
+          .net_minor,
+        "5000",
+      );
+    },
+  );
 }

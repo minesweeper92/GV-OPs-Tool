@@ -32,7 +32,9 @@ import {
   type Report,
 } from "./model";
 import { Heading, Badge, Table, Empty, ErrorBox } from "./components";
-import { Editor } from "./Editor";
+const Editor = lazy(() =>
+  import("./Editor").then((m) => ({ default: m.Editor })),
+);
 import { Organizations, Team, Onboarding } from "./Access";
 import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
@@ -373,6 +375,16 @@ export default function App() {
   if (me.onboarding) return <Onboarding me={me} />;
   const edit = (value: EditorState) => {
     setError("");
+    if (["contact", "company", "lead"].includes(value.kind)) {
+      setCrmEditor({
+        mode: value.kind as "contact" | "company" | "lead",
+        record_type: value.kind,
+        record_id: "",
+        id: value.id,
+        key: crypto.randomUUID(),
+      });
+      return;
+    }
     setEditor(value);
   };
   const match = (...values: unknown[]) =>
@@ -1071,6 +1083,8 @@ export default function App() {
           <Heading
             title="Invoices"
             subtitle="Drafts stay out of the ledger until they are issued."
+            action={canFinance ? "New invoice" : undefined}
+            onAction={() => edit({ kind: "direct-invoice" })}
           />
           {toolbar()}
           <Table
@@ -1120,7 +1134,7 @@ export default function App() {
           </Table>
           {!invoices.length ? (
             <Empty
-              title="Your first invoice starts with an accepted quote"
+              title="Create an invoice directly or from an accepted quote"
               action="Open quotes"
               onAction={() => (location.hash = "quotes")}
             >
@@ -1590,15 +1604,17 @@ export default function App() {
         </Suspense>
       ) : null}
       {editor && data ? (
-        <Editor
-          key={editor.kind + editor.id}
-          editor={editor}
-          data={data}
-          me={me}
-          entityId={entity}
-          onClose={() => setEditor(null)}
-          onSave={run}
-        />
+        <Suspense fallback={<p role="status">Opening editor…</p>}>
+          <Editor
+            key={editor.kind + editor.id}
+            editor={editor}
+            data={data}
+            me={me}
+            entityId={entity}
+            onClose={() => setEditor(null)}
+            onSave={run}
+          />
+        </Suspense>
       ) : null}
     </div>
   );
