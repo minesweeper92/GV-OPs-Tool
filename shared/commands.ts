@@ -124,6 +124,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   }),
   z.strictObject({
     action: z.literal("company.create"),
+    request_key: id.optional(),
     name: text,
     domain: optional,
     industry: optional,

@@ -19,6 +19,7 @@ import {
   Plus,
   Sun,
   Moon,
+  ChevronDown,
 } from "lucide-react";
 import {
   request,
@@ -40,6 +41,7 @@ import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
 import { Banking } from "./Banking";
 import { Projects } from "./Projects";
+import { QuoteStarter } from "./QuoteStarter";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
   import("./Crm").then((m) => ({ default: m.CrmEditor })),
@@ -79,7 +81,7 @@ function useRoute() {
   return route;
 }
 const groups = [
-  { label: "Workspace", items: [["home", "My day", LayoutDashboard]] },
+  { label: "Home", items: [["home", "My day", LayoutDashboard]] },
   {
     label: "CRM",
     items: [
@@ -111,15 +113,18 @@ const groups = [
       ["recurring-expenses", "Recurring expenses", Receipt],
     ],
   },
+  { label: "Banking", items: [["banking", "Banking", Wallet]] },
   {
-    label: "Accounting",
+    label: "Accountant",
     items: [
-      ["banking", "Banking", Wallet],
+      ["journals", "Manual journals", BookOpen],
       ["accounts", "Chart of accounts", BookOpen],
-      ["journals", "Journals", BookOpen],
       ["reports", "Trial balance", BookOpen],
-      ["financial-reports", "Financial reports", BookOpen],
     ],
+  },
+  {
+    label: "Reports",
+    items: [["financial-reports", "Financial reports", BookOpen]],
   },
   {
     label: "Delivery",
@@ -261,6 +266,9 @@ export default function App() {
   const [entity, setEntity] = useState("all"),
     [search, setSearch] = useState(""),
     [editor, setEditor] = useState<EditorState | null>(null),
+    [quoteStarter, setQuoteStarter] = useState(false),
+    [quoteFilter, setQuoteFilter] = useState("All"),
+    [openGroups, setOpenGroups] = useState<string[]>(["CRM", "Sales"]),
     [crmEditor, setCrmEditor] = useState<CrmEditorState | null>(null),
     [menu, setMenu] = useState(false),
     [toast, setToast] = useState(""),
@@ -317,6 +325,20 @@ export default function App() {
     document.getElementById("main")?.focus();
   }, [route]);
   useEffect(() => {
+    const group = groups.find((g) =>
+      g.items.some(
+        ([key]) =>
+          key === view ||
+          (key === "quotes" && view === "quote") ||
+          (key === "invoices" && view === "invoice"),
+      ),
+    );
+    if (group && !["Home", "Banking", "Reports"].includes(group.label))
+      setOpenGroups((old) =>
+        old.includes(group.label) ? old : [...old, group.label],
+      );
+  }, [view]);
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("gv-workspace-theme-v1", theme);
   }, [theme]);
@@ -325,11 +347,16 @@ export default function App() {
     const t = setTimeout(() => setToast(""), 4000);
     return () => clearTimeout(t);
   }, [toast]);
-  async function run(command: Record<string, unknown>) {
+  async function runWithResult(command: Record<string, unknown>) {
     setError("");
     setBusy(true);
     try {
-      await request("commands", "POST", command, me!.csrf);
+      const result = await request<{ id: string }>(
+        "commands",
+        "POST",
+        command,
+        me!.csrf,
+      );
       await Promise.all([
         cache.invalidateQueries({ queryKey: ["data"] }),
         cache.invalidateQueries({ queryKey: ["report"] }),
@@ -338,12 +365,16 @@ export default function App() {
         cache.invalidateQueries({ queryKey: ["banking"] }),
       ]);
       setToast("Saved");
+      return result;
     } catch (e) {
       setError((e as Error).message);
       throw e;
     } finally {
       setBusy(false);
     }
+  }
+  async function run(command: Record<string, unknown>) {
+    await runWithResult(command);
   }
   const invoke = (command: Record<string, unknown>) => {
     void run(command).catch(() => {});
@@ -521,7 +552,78 @@ export default function App() {
     if (view === "company" || view === "contact")
       return <PersonRecord {...props!} type={view} id={id} />;
     if (view === "quote" || view === "invoice")
-      return <DocumentRecord {...props!} type={view} id={id} />;
+      return (
+        <div className="quote-workspace">
+          <aside
+            className="quote-workspace-list"
+            aria-label={view === "quote" ? "Other quotes" : "Other invoices"}
+          >
+            <div className="quote-workspace-list-head">
+              <a href={view === "quote" ? "#quotes" : "#invoices"}>
+                {view === "quote" ? "All quotes" : "All invoices"}
+              </a>
+              {view === "quote" && canCRM ? (
+                <button
+                  aria-label="Quick add quote from navigation"
+                  onClick={() => setQuoteStarter(true)}
+                >
+                  <Plus size={16} />
+                </button>
+              ) : null}
+              {view === "invoice" && canFinance ? (
+                <button
+                  aria-label="Quick add invoice from document list"
+                  onClick={() => edit({ kind: "direct-invoice" })}
+                >
+                  <Plus size={16} />
+                </button>
+              ) : null}
+            </div>
+            {view === "quote"
+              ? data.quotes
+                  .filter((q) => inEntity(q.entity_id))
+                  .map((q) => (
+                    <a
+                      className={q.id === id ? "selected" : ""}
+                      href={`#quote/${q.id}`}
+                      key={q.id}
+                      aria-current={q.id === id ? "page" : undefined}
+                    >
+                      <strong>{q.customer_name}</strong>
+                      <span>
+                        {entityCode(q.entity_id)} ·{" "}
+                        {q.number || `${q.option_name} · v${q.revision}`}
+                      </span>
+                      <small>
+                        {q.option_name} · {money(q.total_minor, q.currency)}
+                      </small>
+                    </a>
+                  ))
+              : data.invoices
+                  .filter((i) => inEntity(i.entity_id))
+                  .map((i) => (
+                    <a
+                      className={i.id === id ? "selected" : ""}
+                      href={`#invoice/${i.id}`}
+                      key={i.id}
+                      aria-current={i.id === id ? "page" : undefined}
+                    >
+                      <strong>{i.customer_name}</strong>
+                      <span>
+                        {entityCode(i.entity_id)} ·{" "}
+                        {i.number || "Draft invoice"}
+                      </span>
+                      <small>
+                        {i.status} · {money(i.total_minor, i.currency)}
+                      </small>
+                    </a>
+                  ))}
+          </aside>
+          <div className="quote-workspace-detail">
+            <DocumentRecord {...props!} type={view} id={id} />
+          </div>
+        </div>
+      );
     if (view === "home") {
       const open = deals
           .filter((d) => !["Won", "Lost"].includes(d.stage))
@@ -1029,13 +1131,33 @@ export default function App() {
         <>
           <Heading
             title="Quotes"
-            subtitle="All alternatives and versions, with explicit acceptance."
+            subtitle="Customer quotes, options and revisions in one place."
+            action={canCRM ? "New quote" : undefined}
+            onAction={() => setQuoteStarter(true)}
           />
-          {toolbar()}
+          <div className="toolbar">
+            {searchControl()}
+            <label className="quote-status-filter">
+              Status{" "}
+              <select
+                aria-label="Quote status"
+                value={quoteFilter}
+                onChange={(e) => setQuoteFilter(e.target.value)}
+              >
+                {["All", "Draft", "Shared", "Accepted"].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <span className="muted">
+              {entity === "all" ? "All legal entities" : entityCode(entity)}
+            </span>
+          </div>
           <Table
             headers={[
-              "Option / version",
-              "Project",
+              "Date",
+              "Quote",
+              "Customer / project",
               "Entity",
               "Total",
               "Status",
@@ -1045,19 +1167,36 @@ export default function App() {
               .filter(
                 (q) =>
                   inEntity(q.entity_id) &&
-                  match(q.option_name, q.customer_name),
+                  match(
+                    q.option_name,
+                    q.customer_name,
+                    q.number || "",
+                    q.details?.reference || "",
+                  ) &&
+                  (quoteFilter === "All" ||
+                    quoteFilter ===
+                      (data.deals.some((d) => d.accepted_quote_id === q.id)
+                        ? "Accepted"
+                        : data.quoteEvents.some(
+                              (e) => e.quote_id === q.id && e.kind === "Shared",
+                            )
+                          ? "Shared"
+                          : "Draft")),
               )
               .map((q) => (
                 <tr key={q.id}>
+                  <td>{day(q.details?.quote_date || q.created_at)}</td>
                   <td>
-                    <a href={`#quote/${q.id}`}>{q.option_name}</a>
-                    <small>Version {q.revision}</small>
+                    <a href={`#quote/${q.id}`}>{q.number || q.option_name}</a>
+                    <small>
+                      {q.option_name} · version {q.revision}
+                    </small>
                   </td>
                   <td>
-                    <a href={`#deal/${q.deal_id}`}>
+                    {q.customer_name}
+                    <small>
                       {data.deals.find((d) => d.id === q.deal_id)?.name}
-                    </a>
-                    <small>{q.customer_name}</small>
+                    </small>
                   </td>
                   <td>{entityCode(q.entity_id)}</td>
                   <td className="num">{money(q.total_minor, q.currency)}</td>
@@ -1461,52 +1600,133 @@ export default function App() {
             .filter(
               (g) =>
                 canFinance ||
-                !["Purchases", "Accounting", "Delivery"].includes(g.label),
+                ![
+                  "Purchases",
+                  "Banking",
+                  "Accountant",
+                  "Reports",
+                  "Delivery",
+                ].includes(g.label),
             )
-            .map((g) => (
-              <section className="nav-group" key={g.label}>
-                <h2>{g.label}</h2>
-                {g.items
-                  .filter(([key]) => key !== "team" || me.user.role === "admin")
-                  .filter(
-                    ([key]) =>
-                      canFinance ||
-                      !["credits", "recurring", "recurring-expenses"].includes(
-                        key,
-                      ),
-                  )
-                  .map(([key, label, Icon]) => (
-                    <a
-                      key={key}
-                      href={`/?view=${key}`}
-                      onClick={(e) => {
-                        if (
-                          e.button === 0 &&
-                          !e.ctrlKey &&
-                          !e.metaKey &&
-                          !e.shiftKey &&
-                          !e.altKey
-                        ) {
-                          e.preventDefault();
-                          history.pushState(null, "", `/?view=${key}`);
-                          window.dispatchEvent(new PopStateEvent("popstate"));
-                        }
-                      }}
-                      aria-label={label}
-                      aria-current={view === key ? "page" : undefined}
+            .map((g) => {
+              const items = g.items
+                .filter(([key]) => key !== "team" || me.user.role === "admin")
+                .filter(
+                  ([key]) =>
+                    canFinance ||
+                    !["credits", "recurring", "recurring-expenses"].includes(
+                      key,
+                    ),
+                );
+              const simple = ["Home", "Banking", "Reports"].includes(g.label);
+              const groupOpen = openGroups.includes(g.label);
+              const groupIcon =
+                g.label === "CRM"
+                  ? Users
+                  : g.label === "Sales"
+                    ? Receipt
+                    : g.label === "Purchases"
+                      ? Wallet
+                      : g.label === "Accountant"
+                        ? BookOpen
+                        : g.label === "Delivery"
+                          ? PanelsTopLeft
+                          : Settings;
+              const GroupIcon = groupIcon;
+              return (
+                <section
+                  className={`nav-group ${simple ? "nav-simple" : ""}`}
+                  key={g.label}
+                >
+                  {!simple ? (
+                    <button
+                      className="nav-group-toggle"
+                      aria-expanded={groupOpen}
+                      aria-controls={`nav-${g.label}`}
+                      onClick={() =>
+                        setOpenGroups((old) =>
+                          old.includes(g.label)
+                            ? old.filter((x) => x !== g.label)
+                            : [...old, g.label],
+                        )
+                      }
                     >
-                      <Icon size={17} />
-                      <span>{label}</span>
-                      {key === "leads" &&
-                      data?.leads.filter((l) => l.status === "New").length ? (
-                        <span className="nav-count">
-                          {data.leads.filter((l) => l.status === "New").length}
-                        </span>
-                      ) : null}
-                    </a>
-                  ))}
-              </section>
-            ))}
+                      <ChevronDown
+                        className={groupOpen ? "" : "collapsed"}
+                        size={16}
+                      />
+                      <GroupIcon size={19} />
+                      <span>{g.label}</span>
+                    </button>
+                  ) : null}
+                  {simple || groupOpen ? (
+                    <div className="nav-group-items" id={`nav-${g.label}`}>
+                      {items.map(([key, label, Icon]) => (
+                        <div className="nav-item" key={key}>
+                          <a
+                            href={`/?view=${key}`}
+                            onClick={(e) => {
+                              if (
+                                e.button === 0 &&
+                                !e.ctrlKey &&
+                                !e.metaKey &&
+                                !e.shiftKey &&
+                                !e.altKey
+                              ) {
+                                e.preventDefault();
+                                history.pushState(null, "", `/?view=${key}`);
+                                window.dispatchEvent(
+                                  new PopStateEvent("popstate"),
+                                );
+                              }
+                            }}
+                            aria-label={label}
+                            aria-current={
+                              view === key ||
+                              (key === "quotes" && view === "quote") ||
+                              (key === "invoices" && view === "invoice")
+                                ? "page"
+                                : undefined
+                            }
+                          >
+                            {simple ? <Icon size={19} /> : null}
+                            <span>{label}</span>
+                            {key === "leads" &&
+                            data?.leads.filter((l) => l.status === "New")
+                              .length ? (
+                              <span className="nav-count">
+                                {
+                                  data.leads.filter((l) => l.status === "New")
+                                    .length
+                                }
+                              </span>
+                            ) : null}
+                          </a>
+                          {key === "quotes" && canCRM ? (
+                            <button
+                              className="nav-quick-add"
+                              aria-label="Quick add quote from navigation"
+                              onClick={() => setQuoteStarter(true)}
+                            >
+                              <Plus size={16} />
+                            </button>
+                          ) : null}
+                          {key === "invoices" && canFinance ? (
+                            <button
+                              className="nav-quick-add"
+                              aria-label="Quick add invoice from navigation"
+                              onClick={() => edit({ kind: "direct-invoice" })}
+                            >
+                              <Plus size={16} />
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
         </nav>
         <div className="profile">
           <span className="avatar">{me.user.name[0]}</span>
@@ -1599,9 +1819,25 @@ export default function App() {
             data={data}
             me={me}
             save={run}
+            createCompany={runWithResult}
             close={() => setCrmEditor(null)}
           />
         </Suspense>
+      ) : null}
+      {quoteStarter && data ? (
+        <QuoteStarter
+          data={data}
+          entity={entity}
+          close={() => setQuoteStarter(false)}
+          start={(dealId) => {
+            setQuoteStarter(false);
+            edit({ kind: "quote", id: dealId });
+          }}
+          newLead={() => {
+            setQuoteStarter(false);
+            edit({ kind: "lead" });
+          }}
+        />
       ) : null}
       {editor && data ? (
         <Suspense fallback={<p role="status">Opening editor…</p>}>

@@ -75,6 +75,56 @@ export async function verifyCrm(t: TestContext, db: Database) {
     read = await login(viewer),
     cmd = (c: Record<string, unknown>, s = 200) => call("/api/commands", c, s),
     data = () => call("/api/data");
+  await t.test(
+    "inline company creation retries are idempotent, scoped and audited once",
+    async () => {
+      const payload = {
+        action: "company.create",
+        name: "Inline company",
+        domain: "inline.example.test",
+        customer: false,
+        vendor: false,
+        service_entity_id: null,
+        request_key: uuid(),
+      };
+      const first = await cmd(payload);
+      const retry = await cmd(payload);
+      assert.equal(first.id, retry.id);
+      await cmd({ ...payload, name: "Different company" }, 409);
+      await read("/api/commands", payload, 403);
+      await rep("/api/commands", payload, 409);
+      const snapshot = await data();
+      assert.equal(
+        snapshot.companies.filter((c: any) => c.name === payload.name).length,
+        1,
+      );
+      assert.equal(
+        snapshot.events.filter(
+          (e: any) => e.record_id === first.id && e.action === "company.create",
+        ).length,
+        1,
+      );
+      const salesPayload = {
+        ...payload,
+        request_key: uuid(),
+        name: "Sales inline company",
+      };
+      const owned = await rep("/api/commands", salesPayload);
+      assert.equal((await rep("/api/commands", salesPayload)).id, owned.id);
+      const person = await rep("/api/commands", {
+        action: "contact.create",
+        first_name: "Inline contact",
+        company_id: owned.id,
+        role: "Director",
+        email: "",
+      });
+      assert.ok(
+        (await data()).affiliations.some(
+          (a: any) => a.contact_id === person.id && a.company_id === owned.id,
+        ),
+      );
+    },
+  );
   const company = (
       await cmd({
         action: "company.create",
@@ -377,6 +427,10 @@ export async function verifyCrm(t: TestContext, db: Database) {
           ],
         })
       ).id;
+      assert.match(
+        (await data()).quotes.find((q: any) => q.id === quote).number,
+        /^QT-\d{6}$/,
+      );
       const editCompany = {
         action: "crm.company-edit",
         id: company,

@@ -2,7 +2,7 @@ import type { Data, Deal, Editor, Invoice, Me, Report } from "./model";
 import { day, money, invoiceBalance } from "./model";
 import { Badge, Empty, Heading, Table } from "./components";
 import { ArrowLeft, ArrowUpRight, Plus } from "lucide-react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { CrmOpen } from "./Crm";
 import { ProfileSummary } from "./ProfileFields";
 import { DocumentExtras } from "./DocumentFields";
@@ -564,6 +564,7 @@ export function DocumentRecord({
   me,
   edit,
 }: Props & { type: string; id: string }) {
+  const [quoteTab, setQuoteTab] = useState<"details" | "activity">("details");
   const invoice =
       type === "invoice" ? data.invoices.find((i) => i.id === id) : undefined,
     quote = type === "quote" ? data.quotes.find((q) => q.id === id) : undefined,
@@ -576,6 +577,17 @@ export function DocumentRecord({
     );
   const deal = data.deals.find((d) => d.id === doc.deal_id),
     entity = data.entities.find((e) => e.id === doc.entity_id);
+  const quoteEvents = quote
+    ? data.quoteEvents.filter((e) => e.quote_id === id)
+    : [];
+  const quoteStatus =
+    deal?.accepted_quote_id === id
+      ? "Accepted"
+      : quoteEvents.some((e) => e.kind === "Shared")
+        ? "Shared"
+        : "Draft";
+  const canChangeQuote =
+    !!quote && sales(me) && !["Won", "Lost"].includes(deal?.stage || "");
   const action = invoice
     ? invoice.status === "Draft"
       ? "Issue invoice"
@@ -593,264 +605,333 @@ export function DocumentRecord({
         title={
           invoice
             ? invoice.number || "Invoice draft"
-            : `${quote!.option_name} · v${quote!.revision}`
+            : quote!.number || `${quote!.option_name} · v${quote!.revision}`
+        }
+        subtitle={
+          quote
+            ? `${quote.customer_name} · ${deal?.name || "Project"} · ${quote.option_name} (version ${quote.revision})`
+            : undefined
         }
         action={finance(me) ? action : undefined}
         onAction={() =>
           edit({ kind: invoice?.status === "Draft" ? "issue" : "payment", id })
         }
       />
-      <div className="document-layout">
-        <article
-          className={`document ${doc.details?.template === "Compact" ? "compact-document" : ""}`}
-        >
-          <div className="document-masthead">
-            <div>
-              <p className="eyebrow">{invoice ? "INVOICE" : "QUOTE"}</p>
-              <h2>{doc.issuer_name}</h2>
-              <p>{doc.issuer_address}</p>
-              {doc.issuer_tax_id ? <p>Tax ID: {doc.issuer_tax_id}</p> : null}
-            </div>
-            <Badge>
-              {invoice?.status ||
-                (deal?.accepted_quote_id === id ? "Accepted" : "Quote version")}
-            </Badge>
+      {invoice ? (
+        <div className="quote-action-bar" aria-label="Invoice actions">
+          <Badge>{invoice.status}</Badge>
+          <button onClick={() => window.print()}>PDF / Print</button>
+        </div>
+      ) : null}
+      {quote ? (
+        <>
+          <div className="quote-action-bar" aria-label="Quote actions">
+            <Badge>{quoteStatus}</Badge>
+            {canChangeQuote ? (
+              <button onClick={() => edit({ kind: "quote", id })}>
+                Create revision
+              </button>
+            ) : null}
+            {canChangeQuote ? (
+              <button onClick={() => edit({ kind: "share", id })}>
+                Mark as shared
+              </button>
+            ) : null}
+            {canChangeQuote ? (
+              <button
+                className="primary"
+                onClick={() => edit({ kind: "accept", id })}
+              >
+                Accept this version
+              </button>
+            ) : null}
+            {finance(me) &&
+            deal?.accepted_quote_id === id &&
+            !data.invoices.some((i) => i.deal_id === doc.deal_id) ? (
+              <button onClick={() => edit({ kind: "invoice", id })}>
+                Create invoice
+              </button>
+            ) : null}
+            <button onClick={() => window.print()}>PDF / Print</button>
           </div>
-          <div className="document-parties">
-            <div>
-              <small>Bill to</small>
-              <h3>{doc.customer_name}</h3>
-              {deal ? (
-                <a href={`#deal/${deal.id}`}>{deal.name}</a>
+          {quoteStatus === "Draft" && canChangeQuote ? (
+            <p className="quote-next-step">
+              Next step: share this quote with the customer, then record the
+              email or message reference using “Mark as shared”.
+            </p>
+          ) : null}
+          <div
+            className="quote-detail-tabs"
+            role="tablist"
+            aria-label="Quote information"
+          >
+            <button
+              role="tab"
+              aria-selected={quoteTab === "details"}
+              onClick={() => setQuoteTab("details")}
+            >
+              Quote details
+            </button>
+            <button
+              role="tab"
+              aria-selected={quoteTab === "activity"}
+              onClick={() => setQuoteTab("activity")}
+            >
+              Activity
+            </button>
+          </div>
+        </>
+      ) : null}
+      {quote && quoteTab === "activity" ? (
+        <section className="quote-activity" role="tabpanel">
+          <h2>Quote activity</h2>
+          {quoteEvents.length ? (
+            <ol>
+              {quoteEvents.map((e, i) => (
+                <li key={i}>
+                  <Badge>{e.kind}</Badge>
+                  <strong>{e.reference}</strong>
+                  {e.created_at ? <small>{day(e.created_at)}</small> : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p>No sharing or acceptance recorded yet.</p>
+          )}
+        </section>
+      ) : (
+        <div className="document-layout">
+          <article
+            className={`document ${doc.details?.template === "Compact" ? "compact-document" : ""}`}
+          >
+            <div className="document-masthead">
+              <div>
+                <p className="eyebrow">{invoice ? "INVOICE" : "QUOTE"}</p>
+                <h2>{doc.issuer_name}</h2>
+                <p className="document-number">
+                  {invoice
+                    ? invoice.number || "Invoice draft"
+                    : quote?.number ||
+                      `${quote?.option_name} · v${quote?.revision}`}
+                </p>
+                <p>{doc.issuer_address}</p>
+                {doc.issuer_tax_id ? <p>Tax ID: {doc.issuer_tax_id}</p> : null}
+              </div>
+              <Badge>{invoice?.status || quoteStatus}</Badge>
+            </div>
+            <div className="document-parties">
+              <div>
+                <small>Bill to</small>
+                <h3>{doc.customer_name}</h3>
+                {deal ? (
+                  <a href={`#deal/${deal.id}`}>{deal.name}</a>
+                ) : (
+                  <span>Direct customer invoice</span>
+                )}
+              </div>
+              {invoice ? (
+                <dl>
+                  <dt>Billing stage</dt>
+                  <dd>{invoice.label}</dd>
+                  <dt>Revenue treatment</dt>
+                  <dd>
+                    {invoice.billing_kind === "advance"
+                      ? "Advance / deferred revenue"
+                      : "Delivered work"}
+                  </dd>
+                  <dt>Invoice date</dt>
+                  <dd>{day(invoice.issue_date)}</dd>
+                  <dt>Due date</dt>
+                  <dd>{day(invoice.due_date)}</dd>
+                </dl>
               ) : (
-                <span>Direct customer invoice</span>
+                <p>
+                  Option: {quote?.option_name}
+                  <br />
+                  Version {quote?.revision}
+                </p>
               )}
             </div>
-            {invoice ? (
-              <dl>
-                <dt>Billing stage</dt>
-                <dd>{invoice.label}</dd>
-                <dt>Revenue treatment</dt>
-                <dd>
-                  {invoice.billing_kind === "advance"
-                    ? "Advance / deferred revenue"
-                    : "Delivered work"}
-                </dd>
-                <dt>Invoice date</dt>
-                <dd>{day(invoice.issue_date)}</dd>
-                <dt>Due date</dt>
-                <dd>{day(invoice.due_date)}</dd>
-              </dl>
-            ) : (
-              <p>
-                Option: {quote?.option_name}
-                <br />
-                Version {quote?.revision}
-              </p>
-            )}
-          </div>
-          <Table
-            headers={[
-              "Description",
-              "Quantity",
-              "Unit price",
-              "Discount",
-              "Tax %",
-              "Total",
-            ]}
-          >
-            {doc.lines.map((l, i) => (
-              <tr key={i}>
-                <td className="preserve">
-                  {l.section ? <small>{l.section}</small> : null}
-                  {l.description}
-                </td>
-                <td>
-                  {l.quantity} {l.unit}
-                </td>
-                <td>
-                  {doc.currency} {l.price}
-                </td>
-                <td>{money(l.discountMinor || "0", doc.currency)}</td>
-                <td>{l.tax}%</td>
-                <td className="num">
-                  {money(
-                    BigInt(l.subtotal || "0") + BigInt(l.taxMinor || "0"),
-                    doc.currency,
-                  )}
-                </td>
-              </tr>
-            ))}
-          </Table>
-          <dl className="totals">
-            <dt>Subtotal</dt>
-            <dd>{money(doc.net_minor, doc.currency)}</dd>
-            <dt>Tax</dt>
-            <dd>{money(doc.tax_minor, doc.currency)}</dd>
-            <dt>Total</dt>
-            <dd>
-              <strong>{money(doc.total_minor, doc.currency)}</strong>
-            </dd>
-            {invoice ? (
-              <>
-                <dt>Settled (cash + withholding)</dt>
-                <dd>{money(invoice.paid_minor, invoice.currency)}</dd>
-                <dt>Credit applied</dt>
-                <dd>{money(invoice.credited_minor, invoice.currency)}</dd>
-                <dt>Balance</dt>
-                <dd>{money(invoiceBalance(invoice), invoice.currency)}</dd>
-              </>
-            ) : null}
-          </dl>
-          <DocumentExtras details={doc.details || {}} />
-          {doc.terms ? (
-            <>
-              <h3>Terms</h3>
-              <p className="preserve">{doc.terms}</p>
-            </>
-          ) : null}
-          <p className="muted small">
-            {invoice?.quote_id
-              ? "Partial billing allocates tax from the accepted quote, including any final rounding remainder. "
-              : ""}
-            Sample build. Not a tax-compliance-certified document. No email is
-            sent from this preview.
-          </p>
-        </article>
-        <aside className="document-context">
-          {invoice && finance(me) ? (
-            <div className="vertical-actions">
-              {["Issued", "Paid", "Settled"].includes(invoice.status) ? (
-                <a href={`#credits/${invoice.id}`}>Create credit note</a>
-              ) : null}
-              {data.credits
-                .filter((c) => c.invoice_id === id)
-                .map((c) => (
-                  <a key={c.id} href={`#credit/${c.id}`}>
-                    {c.number} · {money(c.total_minor, c.currency)}
-                    {c.reversal_date ? " · Reversed" : ""}
-                  </a>
-                ))}
-              {invoice.status === "Draft" ? (
-                <button onClick={() => edit({ kind: "edit-invoice", id })}>
-                  Edit draft details
-                </button>
-              ) : null}
-              {invoice.status === "Draft" ? (
-                <button onClick={() => edit({ kind: "cancel-invoice", id })}>
-                  Cancel draft
-                </button>
-              ) : null}
-              {invoice.billing_kind === "advance" &&
-              ["Issued", "Paid", "Settled"].includes(invoice.status) ? (
-                <>
-                  <h3>Revenue recognition</h3>
-                  <p>
-                    Deferred subtotal:{" "}
+            <Table
+              headers={[
+                "Description",
+                "Quantity",
+                "Unit price",
+                "Discount",
+                "Tax %",
+                "Total",
+              ]}
+            >
+              {doc.lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="preserve">
+                    {l.section ? <small>{l.section}</small> : null}
+                    {l.description}
+                  </td>
+                  <td>
+                    {l.quantity} {l.unit}
+                  </td>
+                  <td>
+                    {doc.currency} {l.price}
+                  </td>
+                  <td>{money(l.discountMinor || "0", doc.currency)}</td>
+                  <td>{l.tax}%</td>
+                  <td className="num">
                     {money(
-                      BigInt(invoice.net_minor) -
-                        data.recognitions
-                          .filter((r) => r.invoice_id === id)
-                          .reduce((s, r) => s + BigInt(r.net_minor), 0n) -
-                        data.credits
-                          .filter(
-                            (c) =>
-                              c.invoice_id === id &&
-                              c.treatment === "deferred" &&
-                              !c.reversal_date,
-                          )
-                          .reduce((s, c) => s + BigInt(c.net_minor), 0n),
-                      invoice.currency,
+                      BigInt(l.subtotal || "0") + BigInt(l.taxMinor || "0"),
+                      doc.currency,
                     )}
-                  </p>
-                  <button onClick={() => edit({ kind: "recognise", id })}>
-                    Recognise delivered work
-                  </button>
-                  {data.recognitions
-                    .filter((r) => r.invoice_id === id)
-                    .map((r) => (
-                      <p key={r.id}>
-                        {day(r.recognition_date)} ·{" "}
-                        {money(r.net_minor, invoice.currency)}
-                        <small>{r.reference}</small>
-                      </p>
-                    ))}
+                  </td>
+                </tr>
+              ))}
+            </Table>
+            <dl className="totals">
+              <dt>Subtotal</dt>
+              <dd>{money(doc.net_minor, doc.currency)}</dd>
+              <dt>Tax</dt>
+              <dd>{money(doc.tax_minor, doc.currency)}</dd>
+              <dt>Total</dt>
+              <dd>
+                <strong>{money(doc.total_minor, doc.currency)}</strong>
+              </dd>
+              {invoice ? (
+                <>
+                  <dt>Settled (cash + withholding)</dt>
+                  <dd>{money(invoice.paid_minor, invoice.currency)}</dd>
+                  <dt>Credit applied</dt>
+                  <dd>{money(invoice.credited_minor, invoice.currency)}</dd>
+                  <dt>Balance</dt>
+                  <dd>{money(invoiceBalance(invoice), invoice.currency)}</dd>
                 </>
               ) : null}
-            </div>
-          ) : null}
-          <h3>Linked records</h3>
-          {deal ? (
-            <a href={`#deal/${deal.id}`}>{deal.name}</a>
-          ) : invoice ? (
-            <a href={`#company/${invoice.company_id}`}>
-              {invoice.customer_name}
-            </a>
-          ) : null}
-          <p>{entity?.code} · base PKR</p>
-          {invoice ? (
-            <>
-              <h3 className="space-top">Payments</h3>
-              {data.payments
-                .filter((p) => p.invoice_id === id)
-                .map((p) => (
-                  <div className="association-item" key={p.id}>
-                    <strong>{money(p.amount_minor, invoice.currency)}</strong>
-                    <span>{p.reference}</span>
-                    <small>{day(p.payment_date)}</small>
-                  </div>
-                ))}
-              {invoice.status === "Issued" &&
-              invoice.paid_minor === "0" &&
-              invoice.credited_minor === "0" &&
-              finance(me) ? (
-                <button onClick={() => edit({ kind: "void", id })}>
-                  Void unpaid invoice
-                </button>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <h3 className="space-top">Sharing and acceptance</h3>
-              {data.quoteEvents
-                .filter((e) => e.quote_id === id)
-                .map((e, i) => (
-                  <p key={i}>
-                    <Badge>{e.kind}</Badge>
-                    <br />
-                    {e.reference}
-                  </p>
-                ))}
-              {sales(me) && !["Won", "Lost"].includes(deal?.stage || "") ? (
-                <div className="vertical-actions">
-                  <button onClick={() => edit({ kind: "quote", id })}>
-                    Create revision
+            </dl>
+            <DocumentExtras details={doc.details || {}} />
+            {doc.terms ? (
+              <>
+                <h3>Terms</h3>
+                <p className="preserve">{doc.terms}</p>
+              </>
+            ) : null}
+            <p className="muted small">
+              {invoice?.quote_id
+                ? "Partial billing allocates tax from the accepted quote, including any final rounding remainder. "
+                : ""}
+              Sample build. Not a tax-compliance-certified document. No email is
+              sent from this preview.
+            </p>
+          </article>
+          <aside className="document-context">
+            {invoice && finance(me) ? (
+              <div className="vertical-actions">
+                {["Issued", "Paid", "Settled"].includes(invoice.status) ? (
+                  <a href={`#credits/${invoice.id}`}>Create credit note</a>
+                ) : null}
+                {data.credits
+                  .filter((c) => c.invoice_id === id)
+                  .map((c) => (
+                    <a key={c.id} href={`#credit/${c.id}`}>
+                      {c.number} · {money(c.total_minor, c.currency)}
+                      {c.reversal_date ? " · Reversed" : ""}
+                    </a>
+                  ))}
+                {invoice.status === "Draft" ? (
+                  <button onClick={() => edit({ kind: "edit-invoice", id })}>
+                    Edit draft details
                   </button>
-                  <button onClick={() => edit({ kind: "share", id })}>
-                    Mark shared
+                ) : null}
+                {invoice.status === "Draft" ? (
+                  <button onClick={() => edit({ kind: "cancel-invoice", id })}>
+                    Cancel draft
                   </button>
-                  <button
-                    className="primary"
-                    onClick={() => edit({ kind: "accept", id })}
-                  >
-                    Accept this version
+                ) : null}
+                {invoice.billing_kind === "advance" &&
+                ["Issued", "Paid", "Settled"].includes(invoice.status) ? (
+                  <>
+                    <h3>Revenue recognition</h3>
+                    <p>
+                      Deferred subtotal:{" "}
+                      {money(
+                        BigInt(invoice.net_minor) -
+                          data.recognitions
+                            .filter((r) => r.invoice_id === id)
+                            .reduce((s, r) => s + BigInt(r.net_minor), 0n) -
+                          data.credits
+                            .filter(
+                              (c) =>
+                                c.invoice_id === id &&
+                                c.treatment === "deferred" &&
+                                !c.reversal_date,
+                            )
+                            .reduce((s, c) => s + BigInt(c.net_minor), 0n),
+                        invoice.currency,
+                      )}
+                    </p>
+                    <button onClick={() => edit({ kind: "recognise", id })}>
+                      Recognise delivered work
+                    </button>
+                    {data.recognitions
+                      .filter((r) => r.invoice_id === id)
+                      .map((r) => (
+                        <p key={r.id}>
+                          {day(r.recognition_date)} ·{" "}
+                          {money(r.net_minor, invoice.currency)}
+                          <small>{r.reference}</small>
+                        </p>
+                      ))}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            <h3>Linked records</h3>
+            {deal ? (
+              <a href={`#deal/${deal.id}`}>{deal.name}</a>
+            ) : invoice ? (
+              <a href={`#company/${invoice.company_id}`}>
+                {invoice.customer_name}
+              </a>
+            ) : null}
+            <p>{entity?.code} · base PKR</p>
+            {invoice ? (
+              <>
+                <h3 className="space-top">Payments</h3>
+                {data.payments
+                  .filter((p) => p.invoice_id === id)
+                  .map((p) => (
+                    <div className="association-item" key={p.id}>
+                      <strong>{money(p.amount_minor, invoice.currency)}</strong>
+                      <span>{p.reference}</span>
+                      <small>{day(p.payment_date)}</small>
+                    </div>
+                  ))}
+                {invoice.status === "Issued" &&
+                invoice.paid_minor === "0" &&
+                invoice.credited_minor === "0" &&
+                finance(me) ? (
+                  <button onClick={() => edit({ kind: "void", id })}>
+                    Void unpaid invoice
                   </button>
-                </div>
-              ) : null}
-              {finance(me) &&
-              deal?.accepted_quote_id === id &&
-              !data.invoices.some((i) => i.deal_id === doc.deal_id) ? (
-                <button
-                  className="primary"
-                  onClick={() => edit({ kind: "invoice", id })}
-                >
-                  Create invoice
-                </button>
-              ) : null}
-            </>
-          )}
-        </aside>
-      </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <h3 className="space-top">Sharing and acceptance</h3>
+                {data.quoteEvents
+                  .filter((e) => e.quote_id === id)
+                  .map((e, i) => (
+                    <p key={i}>
+                      <Badge>{e.kind}</Badge>
+                      <br />
+                      {e.reference}
+                    </p>
+                  ))}
+                <p className="small muted">
+                  Sharing is logged manually until email sending is connected.
+                </p>
+              </>
+            )}
+          </aside>
+        </div>
+      )}
     </>
   );
 }

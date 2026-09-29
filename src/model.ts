@@ -101,6 +101,7 @@ export interface Line {
   taxMinor?: string;
 }
 export interface Quote {
+  number: string | null;
   details: Partial<import("../shared/documents").DocumentDetails>;
   issuer_address: string;
   issuer_tax_id: string;
@@ -207,7 +208,12 @@ export interface Data {
   leads: Lead[];
   deals: Deal[];
   quotes: Quote[];
-  quoteEvents: { quote_id: string; kind: string; reference: string }[];
+  quoteEvents: {
+    quote_id: string;
+    kind: string;
+    reference: string;
+    created_at: string;
+  }[];
   invoices: Invoice[];
   payments: Payment[];
   expenses: Expense[];

@@ -318,8 +318,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
     case "company.create": {
       if (c.service_entity_id)
         await record(tx, "entities", c.service_entity_id, ctx);
-      await tx.query(
-        "INSERT INTO companies(id,tenant_id,name,domain,industry,tax_id,address,customer,vendor,service_entity_id,owner_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+      const inserted = await tx.query(
+        "INSERT INTO companies(id,tenant_id,name,domain,industry,tax_id,address,customer,vendor,service_entity_id,owner_id,creation_request_key,creation_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(tenant_id,creation_request_key) DO NOTHING RETURNING id",
         [
           id,
           t,
@@ -332,8 +332,28 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           c.vendor,
           c.service_entity_id,
           ctx.userId,
+          c.request_key || null,
+          c.request_key ? JSON.stringify(c) : null,
         ],
       );
+      if (!inserted.rows.length) {
+        const prior = (
+          await tx.query(
+            "SELECT id,owner_id,creation_payload=$2::jsonb AS same FROM companies WHERE creation_request_key=$1",
+            [c.request_key, JSON.stringify(c)],
+          )
+        ).rows[0];
+        if (
+          !prior ||
+          !prior.same ||
+          (ctx.role === "sales" && prior.owner_id !== ctx.userId)
+        )
+          reject(
+            409,
+            "This retry key belongs to a different company creation. Refresh and try again.",
+          );
+        return { id: prior.id };
+      }
       break;
     }
     case "contact.create": {
@@ -488,9 +508,18 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           )
         ).rows[0].n,
       );
+      const nextNumber = Number(
+        (
+          await tx.query(
+            "UPDATE entities SET next_quote_number=next_quote_number+1 WHERE id=$1 RETURNING next_quote_number-1 AS n",
+            [e.id],
+          )
+        ).rows[0].n,
+      );
+      const number = `QT-${String(nextNumber).padStart(6, "0")}`;
       await tx.query(
-        `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by,details)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by,details,number)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
           id,
           t,
@@ -511,6 +540,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           c.terms,
           ctx.userId,
           JSON.stringify(detailsSnapshot(company, c.details)),
+          number,
         ],
       );
       await tx.query("UPDATE deals SET stage='Proposal' WHERE id=$1", [d.id]);

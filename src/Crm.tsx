@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ContactCompanyField } from "./ContactCompanyField";
 import { type Data, type Me, day, today } from "./model";
 import {
   contactProfile,
@@ -432,15 +433,19 @@ export function CrmEditor({
   data,
   me,
   save,
+  createCompany,
   close,
 }: {
   state: CrmEditorState;
   data: Data;
   me: Me;
   save: (c: Record<string, unknown>) => Promise<void>;
+  createCompany: (c: Record<string, unknown>) => Promise<{ id: string }>;
   close: () => void;
 }) {
   const isNew = !state.record_id;
+  const [addingCompany, setAddingCompany] = useState(false);
+  const [companyBusy, setCompanyBusy] = useState(false);
   const contact =
       data.contacts.find((c) => c.id === state.record_id) ||
       (state.mode === "contact"
@@ -594,6 +599,7 @@ export function CrmEditor({
   );
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (addingCompany || companyBusy || busy) return;
     setBusy(true);
     setError("");
     const f = new FormData(e.currentTarget),
@@ -715,7 +721,7 @@ export function CrmEditor({
       title={title}
       dirty={dirty}
       close={() => {
-        if (!busy) close();
+        if (!busy && !companyBusy) close();
       }}
     >
       <form
@@ -736,16 +742,13 @@ export function CrmEditor({
               {input("phone", "Primary phone", contact.phone)}
               {isNew ? (
                 <>
-                  <Field label="Company">
-                    <select name="company_id">
-                      <option value="">No company yet</option>
-                      {data.companies.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                  <ContactCompanyField
+                    companies={data.companies}
+                    create={createCompany}
+                    onOpenChange={setAddingCompany}
+                    onBusyChange={setCompanyBusy}
+                    onChange={() => setDirty(true)}
+                  />
                   {input("role", "Relationship role", "Contact")}
                 </>
               ) : null}
@@ -1276,7 +1279,11 @@ export function CrmEditor({
               </details>
             </>
           ) : null}
-          <button type="submit" className="primary">
+          <button
+            type="submit"
+            className="primary"
+            disabled={addingCompany || companyBusy}
+          >
             {busy
               ? "Saving…"
               : state.mode === "activity"

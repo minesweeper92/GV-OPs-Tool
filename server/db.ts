@@ -69,6 +69,8 @@ async function migrations() {
       "./migrations/008_crm.sql",
       "./migrations/009_profiles.sql",
       "./migrations/010_documents.sql",
+      "./migrations/011_company_creation.sql",
+      "./migrations/012_quote_numbers.sql",
     ].map(async (path, index) => {
       const sql = await readFile(new URL(path, import.meta.url), "utf8");
       return {

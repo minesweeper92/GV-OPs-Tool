@@ -544,14 +544,39 @@ export function Editor({
           ) : null}
           {kind === "quote" || kind === "direct-invoice" ? (
             <>
-              {initialDeal ? (
-                <p className="context-label">
-                  {initialDeal?.name} ·{" "}
-                  {
-                    data.entities.find((e) => e.id === initialDeal?.entity_id)
-                      ?.code
-                  }
-                </p>
+              {kind === "quote" && initialDeal ? (
+                <div className="quote-editor-context">
+                  <div>
+                    <small>Customer</small>
+                    <strong>
+                      {
+                        data.companies.find(
+                          (c) => c.id === initialDeal.company_id,
+                        )?.name
+                      }
+                    </strong>
+                  </div>
+                  <div>
+                    <small>Project</small>
+                    <strong>{initialDeal.name}</strong>
+                  </div>
+                  <div>
+                    <small>Issuing entity</small>
+                    <strong>
+                      {
+                        data.entities.find(
+                          (e) => e.id === initialDeal.entity_id,
+                        )?.name
+                      }
+                    </strong>
+                  </div>
+                  <div>
+                    <small>Quote number</small>
+                    <strong>Assigned on save</strong>
+                  </div>
+                </div>
+              ) : initialDeal ? (
+                <p className="context-label">{initialDeal.name}</p>
               ) : null}
               {kind === "quote"
                 ? text(
@@ -563,6 +588,16 @@ export function Editor({
                     "Use names such as Baku or Director Ali. The same name creates the next revision.",
                   )
                 : null}
+              {kind === "quote" ? (
+                <DocumentFields
+                  value={details}
+                  quote
+                  onChange={(v) => {
+                    setDetails(v);
+                    setDirty(true);
+                  }}
+                />
+              ) : null}
               <div className="form-row">
                 <Field label="Currency">
                   <select
@@ -948,7 +983,7 @@ export function Editor({
               </Field>
             </div>
           ) : null}
-          {documentMode ? (
+          {documentMode && kind !== "quote" ? (
             <DocumentFields
               key={selectedCompany}
               value={details}
@@ -1158,7 +1193,22 @@ export function Editor({
           {error ? <ErrorBox error={error} /> : null}
         </div>
         <div className="editor-footer">
-          <span className="muted">{me.user.name}</span>
+          {kind === "quote" ? (
+            <div className="quote-editor-footer-note">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!dirty || window.confirm("Discard your unsaved changes?"))
+                    onClose();
+                }}
+              >
+                Cancel
+              </button>
+              <small>Save as draft. No email is sent.</small>
+            </div>
+          ) : (
+            <span className="muted">{me.user.name}</span>
+          )}
           <button className="primary" disabled={busy || itemBusy}>
             {busy
               ? "Saving…"

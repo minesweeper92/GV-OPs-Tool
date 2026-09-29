@@ -9,6 +9,12 @@ async function owner(page: Page) {
     page.getByRole("heading", { name: "My day", exact: true }),
   ).toBeVisible();
 }
+async function nav(page: Page, group: string, label: string) {
+  const toggle = page.getByRole("button", { name: group, exact: true });
+  if ((await toggle.getAttribute("aria-expanded")) === "false")
+    await toggle.click();
+  await page.getByRole("link", { name: label, exact: true }).click();
+}
 test("first render, accessible navigation, themes, and responsive screens", async ({
   page,
 }) => {
@@ -198,7 +204,7 @@ test("accepted work to project, advance invoice, delivery recognition and profit
   await page.getByLabel("Delivery evidence").fill("First cut accepted");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
-  await page.getByRole("link", { name: "Expenses", exact: true }).click();
+  await nav(page, "Purchases", "Expenses");
   await page
     .getByRole("button", { name: "Record expense", exact: true })
     .click();
@@ -247,7 +253,7 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("dialog", (dialog) => dialog.accept());
   await owner(page);
-  await page.getByRole("link", { name: "Vendors", exact: true }).click();
+  await nav(page, "Purchases", "Vendors");
   await page.getByRole("button", { name: "New vendor", exact: true }).click();
   await page
     .getByLabel("Company name", { exact: true })
@@ -255,7 +261,7 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   await expect(page.getByLabel("Vendor", { exact: true })).toBeChecked();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
-  await page.getByRole("link", { name: "Bills", exact: true }).click();
+  await nav(page, "Purchases", "Bills");
   await page.getByRole("button", { name: "New bill", exact: true }).click();
   await page
     .getByLabel("Legal entity", { exact: true })
@@ -321,9 +327,7 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await page.reload();
   await expect(page.getByText("PKR 68,000.00", { exact: true })).toBeVisible();
-  await page
-    .getByRole("link", { name: "Payable balances", exact: true })
-    .click();
+  await nav(page, "Purchases", "Payable balances");
   await expect(
     page.getByRole("row").filter({ hasText: "STUDIO-BILL-101" }),
   ).toContainText("PKR 68,000.00");
@@ -385,7 +389,7 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   await page
     .getByLabel("Legal entity view", { exact: true })
     .selectOption({ label: "PVT · Sample Private Limited" });
-  await page.getByRole("link", { name: "Journals", exact: true }).click();
+  await nav(page, "Accountant", "Manual journals");
   await expect(
     page.getByRole("heading", {
       name: "Bill STUDIO-BILL-101 · Studio Supplies Test",
@@ -398,7 +402,7 @@ test("vendor bill approval, partial payments, balances and corrections reach the
       exact: true,
     }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Trial balance", exact: true }).click();
+  await nav(page, "Accountant", "Trial balance");
   await expect(
     page.getByRole("row").filter({ hasText: "Accounts payable" }),
   ).toContainText("PKR 0.00");
@@ -514,7 +518,7 @@ test("bank account, recorded expense, CSV preview, grouped match and reconciliat
     page.getByRole("heading", { name: "QA Operating Bank", exact: true }),
   ).toBeVisible();
   const bankUrl = page.url();
-  await page.getByRole("link", { name: "Expenses", exact: true }).click();
+  await nav(page, "Purchases", "Expenses");
   await page
     .getByRole("button", { name: "Record expense", exact: true })
     .click();
@@ -669,7 +673,7 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   await expect(page.locator(".document-masthead")).toContainText("Paid");
   await page.reload();
   await expect(page.locator(".document-masthead")).toContainText("Paid");
-  await page.getByRole("link", { name: "Expenses", exact: true }).click();
+  await nav(page, "Purchases", "Expenses");
   await page
     .getByRole("button", { name: "Record expense", exact: true })
     .click();
@@ -687,11 +691,11 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   await page
     .getByLabel("Legal entity view")
     .selectOption({ label: "AOP · Sample Partnership" });
-  await page.getByRole("link", { name: "Trial balance", exact: true }).click();
+  await nav(page, "Accountant", "Trial balance");
   await expect(
     page.getByRole("cell", { name: "Balanced", exact: true }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Journals", exact: true }).click();
+  await nav(page, "Accountant", "Manual journals");
   await expect(
     page.getByRole("heading", { name: "Payment for AOP-INV-00001" }),
   ).toBeVisible();
@@ -712,7 +716,7 @@ test("sales role cannot open accounting via navigation or direct API", async ({
     page.getByRole("heading", { name: "My day", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Journals", exact: true }),
+    page.getByRole("link", { name: "Manual journals", exact: true }),
   ).toHaveCount(0);
   await page.goto("/#journals");
   await expect(
@@ -724,7 +728,7 @@ test("team invitation, cancellation and member access are usable and audited", a
   page,
 }) => {
   await owner(page);
-  await page.getByRole("link", { name: "Team & access", exact: true }).click();
+  await nav(page, "Organization", "Team & access");
   await expect(
     page.getByRole("heading", { name: "Team & access", exact: true }),
   ).toBeVisible();
@@ -773,7 +777,7 @@ test("team invitation, cancellation and member access are usable and audited", a
     "at least one active administrator",
   );
   await page.getByRole("button", { name: "Close editor", exact: true }).click();
-  await page.getByRole("link", { name: "Activity log", exact: true }).click();
+  await nav(page, "Organization", "Activity log");
   await expect(page.getByText("team · access changed").first()).toBeVisible();
 });
 
@@ -826,7 +830,7 @@ test("an invited teammate accepts and opens the correct organization", async ({
   await page
     .getByRole("button", { name: "Owner Separate organization · sample" })
     .click();
-  await page.getByRole("link", { name: "Team & access", exact: true }).click();
+  await nav(page, "Organization", "Team & access");
   await page.getByLabel("Teammate email").fill("finance@example.test");
   await page.getByLabel("Invitation role").selectOption("finance");
   await page
