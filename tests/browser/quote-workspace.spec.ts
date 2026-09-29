@@ -39,7 +39,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     await command({
       action: "contact.create",
       first_name: "Nadia",
-      email: "",
+      email: `nadia-${randomUUID().slice(0, 8)}@example.test`,
       company_id: company,
       role: "Marketing manager",
     })
@@ -65,7 +65,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await expect(page.getByRole("heading", { name: "New quote" })).toBeVisible();
   await page.getByLabel("Search customers").fill(name.slice(0, 13));
   await page.getByLabel("Customer name").selectOption(company);
-  await page.getByLabel("Project / opportunity").selectOption(deal);
+  await page.getByLabel("Related opportunity").selectOption(deal);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByLabel("Named option").fill("Director A");
   await page
@@ -100,16 +100,53 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     page.getByText("Identity concept and design", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Next step: share this quote", { exact: false }),
+    page.getByText("Next step: create a private customer link", {
+      exact: false,
+    }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Prepare customer link" }).click();
+  await page.getByLabel("Customer contact").selectOption(contact);
+  await page.getByRole("button", { name: "Create private link" }).click();
+  await expect(
+    page.getByText("Private link ready.", { exact: false }),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const customerLink = await page.getByLabel("Customer link").inputValue();
+  expect(customerLink).toMatch(/^http:\/\/127\.0\.0\.1:4322\/p\//);
+  expect(await page.getByLabel("Email message").inputValue()).toContain(
+    customerLink,
+  );
+  const customerPage = await page.context().newPage();
+  await customerPage.goto(customerLink);
+  await expect(
+    customerPage.getByRole("heading", { name: quote.number }),
+  ).toBeVisible();
+  await expect(
+    customerPage.getByRole("button", { name: "Accept quote" }),
+  ).toBeVisible();
+  expect(
+    (await new AxeBuilder({ page: customerPage }).analyze()).violations,
+  ).toEqual([]);
+  await customerPage.screenshot({
+    path: "test-results/quote-customer-portal.png",
+    fullPage: true,
+  });
+  await customerPage.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await customerPage.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await expect(
+    customerPage.getByRole("button", { name: "Accept quote" }),
+  ).toBeVisible();
+  await customerPage.close();
   await page.screenshot({
     path: "test-results/quote-workspace-desktop.png",
     fullPage: true,
   });
   await page.getByRole("tab", { name: "Activity" }).click();
-  await expect(
-    page.getByText("No sharing or acceptance recorded yet."),
-  ).toBeVisible();
+  await expect(page.getByText("Link prepared")).toBeVisible();
   await page.getByRole("tab", { name: "Quote details" }).click();
   await page.getByRole("button", { name: "Mark as sent", exact: true }).click();
   await page
@@ -130,15 +167,29 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole("button", { name: "Accept this version" }).click();
-  await page.getByLabel("Acceptance evidence").fill("Approved quote QA-77");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const respondingCustomer = await page.context().newPage();
+  await respondingCustomer.goto(customerLink);
+  await respondingCustomer.getByLabel("Your name").fill("Nadia Customer");
+  await respondingCustomer
+    .getByLabel("Comment (optional)")
+    .fill("Approved quote QA-77");
+  await respondingCustomer
+    .getByRole("button", { name: "Accept quote" })
+    .click();
+  await expect(
+    respondingCustomer.getByRole("heading", { name: "Response recorded" }),
+  ).toBeVisible();
+  await respondingCustomer.close();
+  await page.reload();
+  await expect(page.locator(".quote-action-bar")).toContainText("Accepted");
   await page.getByRole("button", { name: "Convert to invoice" }).click();
   await expect(
     page.getByRole("heading", { name: "Convert quote to invoice" }),
   ).toBeVisible();
   await expect(page.getByLabel("Customer company")).toHaveValue(company);
-  await expect(page.getByLabel("Project name")).toHaveValue("Identity refresh");
+  await expect(page.getByLabel("Related opportunity")).toHaveValue(
+    "Identity refresh",
+  );
   await page.getByRole("button", { name: "New prefix" }).click();
   const prefix = `QA${randomUUID().slice(0, 5).toUpperCase()}-`;
   await page.getByLabel("Series name").fill(`QA series ${prefix}`);
@@ -154,12 +205,32 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await expect(page.locator(".quote-action-bar")).toContainText("Not sent");
   await page.getByRole("button", { name: "Issue invoice" }).click();
   await page.getByRole("button", { name: "Issue and post" }).click();
+  await page.getByRole("button", { name: "Prepare invoice email" }).click();
+  await page.getByLabel("Customer contact").selectOption(contact);
+  await expect(page.getByLabel("Email message")).toHaveValue(
+    /Please find invoice/,
+  );
+  await expect(
+    page.getByRole("link", { name: "Open reviewed email draft" }),
+  ).toHaveAttribute("href", /^mailto:/);
+  await expect(page.locator(".quote-action-bar")).toContainText("Not sent");
   await page.getByRole("button", { name: "Mark as sent" }).click();
   await page
     .getByLabel("Email link or message reference")
     .fill("Outlook invoice QA-77");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".quote-action-bar")).toContainText("Sent");
+  await page
+    .getByRole("button", { name: "Record payment", exact: true })
+    .click();
+  await page.getByLabel("Money received (PKR)").fill("50000");
+  await page.getByLabel("Withholding deducted (PKR)").fill("0");
+  await page.getByLabel("Bank or receipt reference").fill("PORTAL-BANK-001");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Record payment", exact: true })
+    .click();
+  await expect(page.locator(".document-masthead")).toContainText("Paid");
   const final = await (await page.request.get("/api/data")).json();
   const invoiced = final.invoices.find((i: any) => i.quote_id === quote.id);
   expect(invoiced.number).toBe(`${prefix}0012`);
@@ -169,6 +240,18 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
         e.invoice_id === invoiced.id && e.reference === "Outlook invoice QA-77",
     ),
   ).toBe(true);
+  expect(
+    final.payments.some(
+      (p: any) =>
+        p.invoice_id === invoiced.id && p.reference === "PORTAL-BANK-001",
+    ),
+  ).toBe(true);
+  await page.goto(`/#company/${company}`);
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: quote.number }),
+  ).toContainText("Accepted");
+  await expect(page.getByRole("link", { name: `${prefix}0012` })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -203,13 +286,15 @@ test("new customer and project can be created without losing a quote draft", asy
   await expect(page.getByLabel("Subject", { exact: true })).toHaveValue(
     "Film production proposal",
   );
-  await page.getByLabel("Project name").last().fill("Launch film");
+  await page.getByLabel("Opportunity name").last().fill("Launch film");
   await page
     .getByLabel("Issuing legal entity")
     .selectOption(data.entities[0].id);
-  await page.getByLabel("Project contact").selectOption({ label: "Ayesha" });
-  await page.getByRole("button", { name: "Create project" }).click();
-  await expect(page.getByLabel("Project / opportunity")).toHaveValue(/.+/);
+  await page
+    .getByLabel("Opportunity contact")
+    .selectOption({ label: "Ayesha" });
+  await page.getByRole("button", { name: "Create opportunity" }).click();
+  await expect(page.getByLabel("Related opportunity")).toHaveValue(/.+/);
   await page.getByRole("button", { name: "New prefix" }).click();
   const quotePrefix = `Q${randomUUID().slice(0, 5).toUpperCase()}-`;
   await page.getByLabel("Series name").fill(`Quote series ${quotePrefix}`);

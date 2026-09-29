@@ -19,7 +19,7 @@ export function Badge({ children }: { children: ReactNode }) {
       "Completed",
       "Posted",
     ].includes(value),
-    negative = ["Lost", "Voided", "Overdue"].includes(value);
+    negative = ["Lost", "Voided", "Overdue", "Declined"].includes(value);
   const Icon = positive ? Check : negative ? Minus : Clock;
   return (
     <span

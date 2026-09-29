@@ -188,7 +188,7 @@ export function QuoteComposer({
       setNewCustomerOpen(false);
       setProjectOpen(true);
       setNotice(
-        "Customer and primary contact added. Choose or create a project.",
+        "Customer and primary contact added. Choose or create an opportunity.",
       );
       setDirty(true);
     } catch (e) {
@@ -200,11 +200,13 @@ export function QuoteComposer({
 
   async function addProject() {
     if (!companyId || !projectName.trim() || !projectEntity) {
-      setError("Choose a customer and issuing entity, then name the project.");
+      setError(
+        "Choose a customer and issuing entity, then name the opportunity.",
+      );
       return;
     }
     if (!projectContact && !createdContactId && !contactFirst.trim()) {
-      setError("Choose or add a contact for this project.");
+      setError("Choose or add a contact for this opportunity.");
       return;
     }
     setBusy(true);
@@ -219,7 +221,7 @@ export function QuoteComposer({
             last_name: "",
             email: contactEmail.trim(),
             company_id: companyId,
-            role: "Project contact",
+            role: "Opportunity contact",
           })
         ).id;
         setCreatedContactId(contact);
@@ -243,7 +245,7 @@ export function QuoteComposer({
       setDealId(deal);
       setNumberSeriesId("");
       setProjectOpen(false);
-      setNotice("Project created and linked to this quote.");
+      setNotice("Opportunity created and linked to this quote.");
       setDirty(true);
     } catch (e) {
       setError((e as Error).message);
@@ -258,7 +260,9 @@ export function QuoteComposer({
       .submitter as HTMLButtonElement | null;
     const markSent = submitter?.value === "mark-sent";
     if (!dealId) {
-      setError("Choose or create a customer project before saving the quote.");
+      setError(
+        "Choose or create a customer opportunity before saving the quote.",
+      );
       return;
     }
     if (markSent && !shareReference.trim()) {
@@ -390,7 +394,7 @@ export function QuoteComposer({
                   {chosenDeal
                     ? data.entities.find((e) => e.id === chosenDeal.entity_id)
                         ?.name
-                    : "Choose a project below"}
+                    : "Choose an opportunity below"}
                 </strong>
               </div>
             </div>
@@ -496,8 +500,8 @@ export function QuoteComposer({
             <div className="quote-field-grid">
               <div className="quote-project-picker">
                 <Field
-                  label="Project / opportunity"
-                  hint="Choose the work being quoted. You can create it here without leaving this form."
+                  label="Related opportunity"
+                  hint="This is the pre-sale CRM deal. An accounting project can be started after a quote is accepted."
                 >
                   <select
                     value={dealId}
@@ -512,7 +516,7 @@ export function QuoteComposer({
                       setDirty(true);
                     }}
                   >
-                    <option value="">Select a project</option>
+                    <option value="">Select an opportunity</option>
                     {openDeals.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name} ·{" "}
@@ -523,7 +527,7 @@ export function QuoteComposer({
                       <option value={chosenDeal.id}>{chosenDeal.name}</option>
                     ) : null}
                     {companyId && !initialDeal ? (
-                      <option value="new">＋ Create new project…</option>
+                      <option value="new">＋ Create new opportunity…</option>
                     ) : null}
                   </select>
                 </Field>
@@ -534,7 +538,7 @@ export function QuoteComposer({
                     onClick={() => {
                       if (!companyId)
                         setError(
-                          "Choose a customer company first, then add the project.",
+                          "Choose a customer company first, then add the opportunity.",
                         );
                       else {
                         setError("");
@@ -542,7 +546,7 @@ export function QuoteComposer({
                       }
                     }}
                   >
-                    <Plus size={16} /> Add project
+                    <Plus size={16} /> Add opportunity
                   </button>
                 ) : null}
               </div>
@@ -563,13 +567,13 @@ export function QuoteComposer({
             </div>
             {projectOpen && companyId && !initialDeal ? (
               <div className="quote-inline-panel">
-                <h3>New project</h3>
+                <h3>New opportunity</h3>
                 <p className="muted">
-                  This creates a linked CRM lead and deal so the quote stays
-                  with its project history.
+                  This creates a linked CRM lead and deal. If won, you can start
+                  a separate cost-tracked project from the accepted quote.
                 </p>
                 <div className="quote-field-grid">
-                  <Field label="Project name">
+                  <Field label="Opportunity name">
                     <input
                       value={projectName}
                       onChange={(e) => setProjectName(e.target.value)}
@@ -592,7 +596,7 @@ export function QuoteComposer({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Project contact">
+                  <Field label="Opportunity contact">
                     <select
                       value={projectContact}
                       onChange={(e) => setProjectContact(e.target.value)}
@@ -638,7 +642,7 @@ export function QuoteComposer({
                     disabled={busy}
                     onClick={addProject}
                   >
-                    Create project
+                    Create opportunity
                   </button>
                 </div>
               </div>

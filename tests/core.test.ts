@@ -680,4 +680,226 @@ test("fresh integrated platform", async (t) => {
       );
     },
   );
+  await t.test(
+    "private quote links preserve tenant and version boundaries",
+    async () => {
+      const company = await owner.command({
+        action: "company.create",
+        name: `Portal client ${uuid().slice(0, 8)}`,
+        customer: false,
+        vendor: false,
+        service_entity_id: null,
+      });
+      const contact = await owner.command({
+        action: "contact.create",
+        first_name: "Buyer",
+        email: `buyer-${uuid()}@example.test`,
+        company_id: company.id,
+        role: "Buyer",
+      });
+      const lead = await owner.command({
+        action: "lead.create",
+        company_id: company.id,
+        contact_id: contact.id,
+        entity_id: entity.id,
+        title: "Portal project",
+        next_action: "Send quote",
+        due_date: day,
+      });
+      const deal = await owner.command({ action: "lead.convert", id: lead.id });
+      const quote = await owner.command({
+        action: "quote.create",
+        deal_id: deal.id,
+        option_name: "Option A",
+        currency: "PKR",
+        fx: "1",
+        lines: [
+          {
+            description: "<script>alert(1)</script>",
+            quantity: "1",
+            price: "2500",
+            tax: "0",
+          },
+        ],
+      });
+      const issue = (actor: typeof owner, contactId = contact.id) =>
+        actor.call("/api/quote-links", { quoteId: quote.id, contactId });
+      assert.equal((await issue(finance)).statusCode, 403);
+      assert.equal((await issue(other)).statusCode, 404);
+      const firstResponse = await issue(owner);
+      assert.equal(firstResponse.statusCode, 200, firstResponse.body);
+      const first = firstResponse.json();
+      assert.match(
+        first.url,
+        /^http:\/\/127\.0\.0\.1:4320\/p\/[A-Za-z0-9_-]{43}$/,
+      );
+      const raw = first.url.split("/").at(-1)!;
+      const stored = (
+        await db.query(
+          "SELECT token_hash FROM quote_portal_links WHERE quote_id=$1",
+          [quote.id],
+        )
+      ).rows[0];
+      assert.notEqual(stored.token_hash, raw);
+      const view = await app.inject({
+        url: `/p/${raw}`,
+        headers: { host: "127.0.0.1:4320" },
+      });
+      assert.equal(view.statusCode, 200, view.body);
+      assert.match(view.body, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+      assert.doesNotMatch(view.body, /<script>alert\(1\)<\/script>/);
+      const second = (await issue(owner)).json();
+      assert.equal(
+        (
+          await app.inject({
+            url: `/p/${raw}`,
+            headers: { host: "127.0.0.1:4320" },
+          })
+        ).statusCode,
+        410,
+      );
+      const activeToken = second.url.split("/").at(-1)!;
+      const respond = (
+        token: string,
+        decision: string,
+        name = "Buyer Person",
+      ) =>
+        app.inject({
+          method: "POST",
+          url: `/p/${token}/respond`,
+          headers: {
+            host: "127.0.0.1:4320",
+            origin,
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          payload: new URLSearchParams({
+            name,
+            decision,
+            comment: "Approved online",
+          }).toString(),
+        });
+      const accepted = await respond(activeToken, "Accepted");
+      assert.equal(accepted.statusCode, 200, accepted.body);
+      assert.match(accepted.body, /Response recorded/);
+      assert.equal((await respond(activeToken, "Declined")).statusCode, 409);
+      assert.equal(
+        (
+          await db.query(
+            "SELECT stage,accepted_quote_id FROM deals WHERE id=$1",
+            [deal.id],
+          )
+        ).rows[0].accepted_quote_id,
+        quote.id,
+      );
+      const events = (
+        await db.query(
+          "SELECT kind,actor_id FROM quote_events WHERE quote_id=$1",
+          [quote.id],
+        )
+      ).rows;
+      assert.deepEqual(
+        events.map((e) => e.kind),
+        ["Accepted"],
+      );
+      assert.equal(events[0].actor_id, null);
+      assert.equal(
+        (
+          await db.query(
+            "SELECT count(*)::int AS n FROM quote_events WHERE quote_id=$1 AND kind='Shared'",
+            [quote.id],
+          )
+        ).rows[0].n,
+        0,
+      );
+      assert.equal((await issue(owner)).statusCode, 409);
+      const secondLead = await owner.command({
+        action: "lead.create",
+        company_id: company.id,
+        contact_id: contact.id,
+        entity_id: entity.id,
+        title: "Another proposal",
+        next_action: "Discuss options",
+        due_date: day,
+      });
+      const secondDeal = await owner.command({
+        action: "lead.convert",
+        id: secondLead.id,
+      });
+      const declinedQuote = await owner.command({
+        action: "quote.create",
+        deal_id: secondDeal.id,
+        option_name: "Option B",
+        currency: "PKR",
+        fx: "1",
+        lines: [
+          {
+            description: "Other service",
+            quantity: "1",
+            price: "500",
+            tax: "0",
+          },
+        ],
+      });
+      const declinedLink = (
+        await owner.call("/api/quote-links", {
+          quoteId: declinedQuote.id,
+          contactId: contact.id,
+        })
+      )
+        .json()
+        .url.split("/")
+        .at(-1)!;
+      const noOrigin = await app.inject({
+        method: "POST",
+        url: `/p/${declinedLink}/respond`,
+        headers: {
+          host: "127.0.0.1:4320",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        payload: new URLSearchParams({
+          name: "Buyer Person",
+          decision: "Declined",
+        }).toString(),
+      });
+      assert.equal(noOrigin.statusCode, 403);
+      assert.equal((await respond(declinedLink, "Declined")).statusCode, 200);
+      const declinedDealRow = (
+        await db.query(
+          "SELECT stage,accepted_quote_id,next_action FROM deals WHERE id=$1",
+          [secondDeal.id],
+        )
+      ).rows[0];
+      assert.equal(declinedDealRow.stage, "Negotiation");
+      assert.equal(declinedDealRow.accepted_quote_id, null);
+      assert.equal(declinedDealRow.next_action, "Discuss customer feedback");
+      assert.equal(
+        (
+          await db.query("SELECT kind FROM quote_events WHERE quote_id=$1", [
+            declinedQuote.id,
+          ])
+        ).rows[0].kind,
+        "Declined",
+      );
+      const affiliationId = (
+        await db.query(
+          "SELECT id FROM affiliations WHERE company_id=$1 AND contact_id=$2 AND ended_on IS NULL",
+          [company.id, contact.id],
+        )
+      ).rows[0].id;
+      await owner.command({
+        action: "contact.end-association",
+        id: affiliationId,
+        ended_on: day,
+      });
+      assert.equal(
+        (
+          await app.inject({
+            url: `/p/${activeToken}`,
+            headers: { host: "127.0.0.1:4320" },
+          })
+        ).statusCode,
+        404,
+      );
+    },
+  );
 });

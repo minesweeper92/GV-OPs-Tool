@@ -17,6 +17,13 @@ import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 import { crmSnapshot, executeCrm } from "./crm.ts";
 import { executeProfile } from "./profiles.ts";
 import { executeDocument } from "./documents.ts";
+import {
+  issueQuoteLink,
+  portalPage,
+  publicQuote,
+  respondToQuote,
+  responsePage,
+} from "./quote-portal.ts";
 export function createApp(
   db: Database,
   origin: string,
@@ -55,6 +62,12 @@ export function createApp(
   ]);
   app.register(cookie);
   app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_req, body, done) =>
+      done(null, Object.fromEntries(new URLSearchParams(body as string))),
+  );
   app.addHook("onRequest", async (req, res) => {
     res
       .header("Cache-Control", "no-store")
@@ -162,6 +175,44 @@ export function createApp(
       onboarding: !s.tenantId,
     };
   });
+  app.post("/api/quote-links", async (req) => {
+    const input = z
+      .strictObject({ quoteId: z.uuid(), contactId: z.uuid() })
+      .parse(req.body);
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(db, ctx.tenantId, (tx) =>
+      issueQuoteLink(tx, ctx, input.quoteId, input.contactId, origin),
+    );
+  });
+  app.get<{ Params: { token: string } }>("/p/:token", async (req, res) => {
+    const q = await publicQuote(db, req.params.token);
+    return res
+      .header("Referrer-Policy", "same-origin")
+      .type("text/html; charset=utf-8")
+      .send(portalPage(q, req.params.token));
+  });
+  app.post<{ Params: { token: string } }>(
+    "/p/:token/respond",
+    async (req, res) => {
+      const input = z
+        .strictObject({
+          name: z.string().trim().min(2).max(120),
+          comment: z.string().trim().max(2000).default(""),
+          decision: z.enum(["Accepted", "Declined"]),
+        })
+        .parse(req.body);
+      const result = await respondToQuote(
+        db,
+        req.params.token,
+        input.decision,
+        input.name,
+        input.comment,
+      );
+      return res
+        .type("text/html; charset=utf-8")
+        .send(responsePage(result.decision, result.number));
+    },
+  );
   app.get("/api/organizations", async (req) =>
     access.organizations(sessions.get(req)!),
   );

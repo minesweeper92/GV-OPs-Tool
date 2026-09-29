@@ -1,8 +1,10 @@
 import type { Data, Deal, Editor, Invoice, Me, Report } from "./model";
 import { day, money, invoiceBalance } from "./model";
-import { Badge, Empty, Heading, Table } from "./components";
+import { Badge, Empty, ErrorBox, Heading, Table } from "./components";
 import { ArrowLeft, ArrowUpRight, Plus } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { request } from "./model";
 import type { CrmOpen } from "./Crm";
 import { ProfileSummary } from "./ProfileFields";
 import { DocumentExtras } from "./DocumentFields";
@@ -110,6 +112,9 @@ export function DealRecord({
             <Table headers={["Option / version", "Total", "Status", "Actions"]}>
               {quotes.map((q) => {
                 const accepted = deal.accepted_quote_id === q.id,
+                  declined = data.quoteEvents.some(
+                    (e) => e.quote_id === q.id && e.kind === "Declined",
+                  ),
                   shared = data.quoteEvents.some(
                     (e) => e.quote_id === q.id && e.kind === "Shared",
                   );
@@ -122,7 +127,13 @@ export function DealRecord({
                     <td className="num">{money(q.total_minor, q.currency)}</td>
                     <td>
                       <Badge>
-                        {accepted ? "Accepted" : shared ? "Sent" : "Draft"}
+                        {accepted
+                          ? "Accepted"
+                          : declined
+                            ? "Declined"
+                            : shared
+                              ? "Sent"
+                              : "Draft"}
                       </Badge>
                     </td>
                     <td>
@@ -311,19 +322,39 @@ export function PersonRecord({
       contact ? d.contact_id === id : d.company_id === id,
     ),
     ids = new Set(deals.map((d) => d.id)),
+    quotes = data.quotes.filter((q) => ids.has(q.deal_id)),
+    quoteIds = new Set(quotes.map((q) => q.id)),
     invoices = data.invoices.filter(
       (i) =>
         (i.deal_id && ids.has(i.deal_id)) ||
         (company && i.company_id === company.id),
     );
-  const events = data.events.filter(
-    (e) =>
-      e.record_id === id ||
-      ids.has(e.record_id) ||
-      invoices.some((i) => i.id === e.record_id) ||
-      e.details.contact_id === id ||
-      e.details.company_id === id,
+  const invoiceIds = new Set(invoices.map((i) => i.id));
+  const paymentIds = new Set(
+    data.payments.filter((p) => invoiceIds.has(p.invoice_id)).map((p) => p.id),
   );
+  const events: Data["events"] = [
+    ...data.events.filter(
+      (e) =>
+        e.record_id === id ||
+        ids.has(e.record_id) ||
+        quoteIds.has(e.record_id) ||
+        invoiceIds.has(e.record_id) ||
+        paymentIds.has(e.record_id) ||
+        e.details.contact_id === id ||
+        e.details.company_id === id,
+    ),
+    ...data.quoteEvents
+      .filter((e) => quoteIds.has(e.quote_id))
+      .map((e) => ({
+        id: `${e.quote_id}-${e.kind}-${e.created_at}`,
+        actor_id: "",
+        record_id: e.quote_id,
+        action: `quote.${e.kind.toLowerCase()}`,
+        created_at: e.created_at,
+        details: { reference: e.reference },
+      })),
+  ];
   const balances = new Map<string, bigint>();
   for (const i of invoices.filter((i) => i.status === "Issued"))
     balances.set(
@@ -445,7 +476,7 @@ export function PersonRecord({
           </dl>
         </aside>
         <section className="record-main">
-          <h2>Projects and deals</h2>
+          <h2>Opportunities</h2>
           {deals.length ? (
             <Table headers={["Deal", "Entity", "Stage"]}>
               {deals.map((d) => (
@@ -463,8 +494,48 @@ export function PersonRecord({
               ))}
             </Table>
           ) : (
-            <p className="muted">No projects linked yet.</p>
+            <p className="muted">No opportunities linked yet.</p>
           )}
+          {quotes.length ? (
+            <>
+              <h2 className="space-top">Quotes</h2>
+              <Table headers={["Quote", "Opportunity", "Amount", "Status"]}>
+                {quotes.map((q) => {
+                  const relatedDeal = deals.find((d) => d.id === q.deal_id);
+                  const history = data.quoteEvents.filter(
+                    (e) => e.quote_id === q.id,
+                  );
+                  const status =
+                    relatedDeal?.accepted_quote_id === q.id
+                      ? "Accepted"
+                      : history.some((e) => e.kind === "Declined")
+                        ? "Declined"
+                        : history.some((e) => e.kind === "Shared")
+                          ? "Sent"
+                          : "Draft";
+                  return (
+                    <tr key={q.id}>
+                      <td>
+                        <a href={`#quote/${q.id}`}>
+                          {q.number || q.option_name}
+                        </a>
+                        <small>
+                          {q.option_name} · v{q.revision}
+                        </small>
+                      </td>
+                      <td>{relatedDeal?.name || "—"}</td>
+                      <td className="num">
+                        {money(q.total_minor, q.currency)}
+                      </td>
+                      <td>
+                        <Badge>{status}</Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </Table>
+            </>
+          ) : null}
           <Suspense fallback={<p>Loading activity…</p>}>
             <CrmPanel
               data={data}
@@ -557,6 +628,104 @@ export function PersonRecord({
     </>
   );
 }
+function InvoiceEmailPanel({
+  invoice,
+  data,
+}: {
+  invoice: Invoice;
+  data: Data;
+}) {
+  const [contactId, setContactId] = useState("");
+  const [subject, setSubject] = useState(
+    `${invoice.issuer_name} invoice ${invoice.number || "draft"}`,
+  );
+  const [message, setMessage] = useState(
+    `Hello,\n\nPlease find invoice ${invoice.number || ""} for ${money(invoice.total_minor, invoice.currency)} attached. The due date is ${day(invoice.due_date)}.\n\n${invoice.details?.payment_instructions || "Please use the payment instructions on the invoice."}\n\nKind regards,\n${invoice.issuer_name}`,
+  );
+  const contacts = data.affiliations
+    .filter((a) => a.company_id === invoice.company_id && !a.ended_on)
+    .map((a) => {
+      const contact = data.contacts.find((c) => c.id === a.contact_id);
+      return contact && (a.work_email || contact.email)
+        ? {
+            id: contact.id,
+            name: `${contact.first_name} ${contact.last_name}`.trim(),
+            email: a.work_email || contact.email,
+          }
+        : null;
+    })
+    .filter((c): c is { id: string; name: string; email: string } => !!c);
+  const recipient = contacts.find((c) => c.id === contactId)?.email || "";
+  return (
+    <section
+      id="invoice-email-panel"
+      className="quote-share-panel"
+      aria-label="Invoice email preparation"
+    >
+      <h2>Prepare invoice email</h2>
+      <p className="muted">
+        Review the recipient and message, save the invoice as a PDF, then attach
+        it in your email app. Opening the draft does not send or mark the
+        invoice as sent.
+      </p>
+      <label htmlFor="invoice-email-contact">Customer contact</label>
+      <select
+        id="invoice-email-contact"
+        value={contactId}
+        onChange={(e) => setContactId(e.target.value)}
+      >
+        <option value="">Select a contact with an email</option>
+        {contacts.map((contact) => (
+          <option key={contact.id} value={contact.id}>
+            {contact.name} · {contact.email}
+          </option>
+        ))}
+      </select>
+      {!contacts.length ? (
+        <p className="muted">
+          Add an email address to an active contact at {invoice.customer_name}{" "}
+          first.
+        </p>
+      ) : null}
+      <label htmlFor="invoice-email-subject">Email subject</label>
+      <input
+        id="invoice-email-subject"
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+      />
+      <label htmlFor="invoice-email-message">Email message</label>
+      <textarea
+        id="invoice-email-message"
+        rows={7}
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+      />
+      <div className="actions">
+        <button type="button" onClick={() => window.print()}>
+          Print / Save PDF
+        </button>
+        {recipient ? (
+          <a
+            className="button primary"
+            href={`mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`}
+          >
+            Open reviewed email draft
+          </a>
+        ) : (
+          <span className="muted">
+            Choose a customer contact to prepare the email.
+          </span>
+        )}
+      </div>
+      <p className="muted">
+        After you send the PDF, use “Mark as sent” and record the message
+        reference. Payments and the ledger update when a payment is recorded—not
+        when this draft opens.
+      </p>
+    </section>
+  );
+}
+
 export function DocumentRecord({
   type,
   id,
@@ -564,10 +733,28 @@ export function DocumentRecord({
   me,
   edit,
 }: Props & { type: string; id: string }) {
+  const cache = useQueryClient();
   const [quoteTab, setQuoteTab] = useState<"details" | "activity">("details");
   const [quotePreview, setQuotePreview] = useState<"details" | "pdf">(
     "details",
   );
+  const [shareOpen, setShareOpen] = useState(false);
+  const [invoiceEmailOpen, setInvoiceEmailOpen] = useState(false);
+  const [shareContactId, setShareContactId] = useState("");
+  const [shareLink, setShareLink] = useState("");
+  const [shareRecipient, setShareRecipient] = useState("");
+  const [shareSubject, setShareSubject] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState("");
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setShareOpen(false);
+    setInvoiceEmailOpen(false);
+    setShareContactId("");
+    setShareLink("");
+    setShareError("");
+  }, [id]);
   const invoice =
       type === "invoice" ? data.invoices.find((i) => i.id === id) : undefined,
     quote = type === "quote" ? data.quotes.find((q) => q.id === id) : undefined,
@@ -586,9 +773,11 @@ export function DocumentRecord({
   const quoteStatus =
     deal?.accepted_quote_id === id
       ? "Accepted"
-      : quoteEvents.some((e) => e.kind === "Shared")
-        ? "Sent"
-        : "Draft";
+      : quoteEvents.some((e) => e.kind === "Declined")
+        ? "Declined"
+        : quoteEvents.some((e) => e.kind === "Shared")
+          ? "Sent"
+          : "Draft";
   const quoteSent = quoteEvents.some((e) => e.kind === "Shared");
   const canChangeQuote =
     !!quote && sales(me) && !["Won", "Lost"].includes(deal?.stage || "");
@@ -599,6 +788,53 @@ export function DocumentRecord({
     (!deal ||
       !["Won", "Lost"].includes(deal.stage) ||
       deal.accepted_quote_id === id);
+  const shareContacts =
+    quote && deal
+      ? data.affiliations
+          .filter((a) => a.company_id === deal.company_id && !a.ended_on)
+          .map((a) => {
+            const contact = data.contacts.find((c) => c.id === a.contact_id);
+            return contact && (a.work_email || contact.email)
+              ? {
+                  id: contact.id,
+                  name: `${contact.first_name} ${contact.last_name}`.trim(),
+                  email: a.work_email || contact.email,
+                }
+              : null;
+          })
+          .filter((c): c is { id: string; name: string; email: string } => !!c)
+      : [];
+  async function prepareCustomerLink() {
+    if (!quote || !shareContactId) return;
+    setShareBusy(true);
+    setShareError("");
+    try {
+      const result = await request<{
+        url: string;
+        recipient: string;
+        expiresAt: string;
+      }>(
+        "quote-links",
+        "POST",
+        { quoteId: quote.id, contactId: shareContactId },
+        me.csrf,
+      );
+      setShareLink(result.url);
+      setShareRecipient(result.recipient);
+      setShareSubject(
+        `${quote.issuer_name} quote ${quote.number || quote.option_name} — ${deal?.name || "Project"}`,
+      );
+      setShareMessage(
+        `Hello,\n\nPlease review the ${quote.option_name} quote for ${deal?.name || "your project"}. You can view the details and accept or decline this exact version using the private link below:\n\n${result.url}\n\nKind regards,\n${quote.issuer_name}`,
+      );
+      setCopied(false);
+      await cache.invalidateQueries({ queryKey: ["data"] });
+    } catch (error) {
+      setShareError((error as Error).message);
+    } finally {
+      setShareBusy(false);
+    }
+  }
   const action = invoice
     ? invoice.status === "Draft"
       ? "Issue invoice"
@@ -650,8 +886,21 @@ export function DocumentRecord({
               Mark as sent
             </button>
           ) : null}
+          {finance(me) &&
+          ["Issued", "Paid", "Settled"].includes(invoice.status) ? (
+            <button
+              aria-expanded={invoiceEmailOpen}
+              aria-controls="invoice-email-panel"
+              onClick={() => setInvoiceEmailOpen((open) => !open)}
+            >
+              Prepare invoice email
+            </button>
+          ) : null}
           <button onClick={() => window.print()}>PDF / Print</button>
         </div>
+      ) : null}
+      {invoice && invoiceEmailOpen ? (
+        <InvoiceEmailPanel invoice={invoice} data={data} />
       ) : null}
       {quote ? (
         <>
@@ -668,6 +917,15 @@ export function DocumentRecord({
             {canMarkQuoteSent ? (
               <button onClick={() => edit({ kind: "share", id })}>
                 Mark as sent
+              </button>
+            ) : null}
+            {canChangeQuote && quoteStatus !== "Declined" ? (
+              <button
+                aria-expanded={shareOpen}
+                aria-controls="quote-share-panel"
+                onClick={() => setShareOpen((open) => !open)}
+              >
+                Prepare customer link
               </button>
             ) : null}
             {canChangeQuote ? (
@@ -698,10 +956,125 @@ export function DocumentRecord({
             ) : null}
             <button onClick={printQuote}>PDF / Print</button>
           </div>
+          {shareOpen && canChangeQuote ? (
+            <section
+              id="quote-share-panel"
+              className="quote-share-panel"
+              aria-label="Customer quote link"
+            >
+              <div className="quote-section-heading">
+                <div>
+                  <h2>Share this exact quote version</h2>
+                  <p className="muted">
+                    Choose a current contact at {quote.customer_name}. Creating
+                    a link does not email the customer or mark the quote as
+                    sent.
+                  </p>
+                </div>
+              </div>
+              {shareError ? <ErrorBox error={shareError} /> : null}
+              <label htmlFor="quote-share-contact">Customer contact</label>
+              <select
+                id="quote-share-contact"
+                value={shareContactId}
+                onChange={(e) => {
+                  setShareContactId(e.target.value);
+                  setShareLink("");
+                }}
+              >
+                <option value="">Select a contact with an email</option>
+                {shareContacts.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.name} · {contact.email}
+                  </option>
+                ))}
+              </select>
+              {!shareContacts.length ? (
+                <p className="muted">
+                  Add an email address to an active company contact before
+                  sharing.
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="primary"
+                disabled={!shareContactId || shareBusy}
+                onClick={prepareCustomerLink}
+              >
+                {shareBusy
+                  ? "Preparing…"
+                  : shareLink
+                    ? "Replace link"
+                    : "Create private link"}
+              </button>
+              {shareLink ? (
+                <div className="quote-share-ready">
+                  <p>
+                    <strong>Private link ready.</strong> It expires in 30 days
+                    or on the quote expiry date, whichever comes first.
+                    Replacing it revokes the previous link for this contact.
+                  </p>
+                  <label htmlFor="quote-share-url">Customer link</label>
+                  <input
+                    id="quote-share-url"
+                    value={shareLink}
+                    readOnly
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <a href={shareLink} target="_blank" rel="noopener noreferrer">
+                    Preview customer view ↗
+                  </a>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(shareLink);
+                        setCopied(true);
+                      } catch {
+                        setShareError(
+                          "Copy was blocked. Select the link above and copy it manually.",
+                        );
+                      }
+                    }}
+                  >
+                    {copied ? "Copied" : "Copy link"}
+                  </button>
+                  {copied ? (
+                    <span role="status">Link copied to clipboard</span>
+                  ) : null}
+                  <label htmlFor="quote-share-subject">Email subject</label>
+                  <input
+                    id="quote-share-subject"
+                    value={shareSubject}
+                    onChange={(e) => setShareSubject(e.target.value)}
+                  />
+                  <label htmlFor="quote-share-message">Email message</label>
+                  <textarea
+                    id="quote-share-message"
+                    rows={7}
+                    value={shareMessage}
+                    onChange={(e) => setShareMessage(e.target.value)}
+                  />
+                  <a
+                    className="button primary"
+                    href={`mailto:${encodeURIComponent(shareRecipient)}?subject=${encodeURIComponent(shareSubject)}&body=${encodeURIComponent(shareMessage)}`}
+                  >
+                    Open reviewed email draft
+                  </a>
+                  <p className="muted">
+                    Your email app handles sending. The link is in the message;
+                    no PDF is attached automatically. After sending, use “Mark
+                    as sent” and record the message reference.
+                  </p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           {quoteStatus === "Draft" && canChangeQuote ? (
             <p className="quote-next-step">
-              Next step: share this quote with the customer, then record the
-              email or message reference using “Mark as sent”.
+              {shareLink
+                ? "Next step: send the reviewed email, then record delivery using “Mark as sent”."
+                : "Next step: create a private customer link, review the email draft, then record delivery using “Mark as sent”."}
             </p>
           ) : null}
           <div
@@ -729,8 +1102,27 @@ export function DocumentRecord({
       {quote && quoteTab === "activity" ? (
         <section className="quote-activity" role="tabpanel">
           <h2>Quote activity</h2>
-          {quoteEvents.length ? (
+          {quoteEvents.length ||
+          data.events.some(
+            (e) => e.record_id === id && e.action === "quote.link-created",
+          ) ? (
             <ol>
+              {data.events
+                .filter(
+                  (e) =>
+                    e.record_id === id && e.action === "quote.link-created",
+                )
+                .map((e) => (
+                  <li key={e.id}>
+                    <Badge>Link prepared</Badge>
+                    <strong>
+                      For{" "}
+                      {String(e.details.recipient_email || "customer contact")}{" "}
+                      · not sent
+                    </strong>
+                    <small>{day(e.created_at)}</small>
+                  </li>
+                ))}
               {quoteEvents.map((e, i) => (
                 <li key={i}>
                   <Badge>{e.kind}</Badge>
@@ -821,7 +1213,7 @@ export function DocumentRecord({
               ) : null}
             </div>
             <div>
-              <h3>Project</h3>
+              <h3>Related opportunity</h3>
               {deal ? (
                 <a href={`#deal/${deal.id}`}>{deal.name}</a>
               ) : (
@@ -1029,7 +1421,10 @@ export function DocumentRecord({
               sent from this preview.
             </p>
           </article>
-          <aside className="document-context">
+          <aside
+            className="document-context"
+            aria-label="Document actions and history"
+          >
             {invoice && finance(me) ? (
               <div className="vertical-actions">
                 {["Issued", "Paid", "Settled"].includes(invoice.status) ? (
@@ -1151,7 +1546,8 @@ export function DocumentRecord({
                     </p>
                   ))}
                 <p className="small muted">
-                  Sharing is logged manually until email sending is connected.
+                  Creating a customer link does not send email. Delivery is
+                  recorded only when you mark the quote as sent with evidence.
                 </p>
               </>
             )}

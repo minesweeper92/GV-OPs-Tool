@@ -1726,6 +1726,43 @@ details[open] summary {
     gap: 12px;
   }
 }
+.quote-share-panel {
+  margin: 18px 0;
+  padding: 22px;
+  border: 1px solid var(--border, #ded9d0);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  display: grid;
+  gap: 10px;
+  max-width: 820px;
+}
+.quote-share-panel h2 {
+  margin: 0 0 5px;
+}
+.quote-share-panel p {
+  margin: 0 0 8px;
+}
+.quote-share-panel label {
+  font-weight: 650;
+}
+.quote-share-panel input,
+.quote-share-panel select,
+.quote-share-panel textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.quote-share-panel button,
+.quote-share-panel .button {
+  justify-self: start;
+}
+.quote-share-ready {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, #ded9d0);
+}
 @media print {
   .sidebar,
   .topbar,
@@ -2816,6 +2853,7 @@ details[open] summary {
   .page-heading,
   .quote-action-bar,
   .quote-next-step,
+  .quote-share-panel,
   .quote-detail-tabs,
   .quote-summary-card,
   .quote-pdf-header,

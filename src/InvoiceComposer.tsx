@@ -316,9 +316,9 @@ export function InvoiceComposer({
                   onChange={(e) => setDueDate(e.target.value)}
                 />
               </Field>
-              <Field label="Project name">
+              <Field label="Related opportunity">
                 <input
-                  value={deal?.name || "No linked project (direct invoice)"}
+                  value={deal?.name || "No linked opportunity (direct invoice)"}
                   readOnly
                 />
               </Field>

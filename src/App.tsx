@@ -1725,7 +1725,10 @@ export default function App() {
       >
         Skip to content
       </a>
-      <aside className={`sidebar ${menu ? "open" : ""}`}>
+      <aside
+        className={`sidebar ${menu ? "open" : ""}`}
+        aria-label="Workspace navigation"
+      >
         <a className="brand" href="#home">
           <span className="brand-mark">gv</span>
           <strong>Workspace</strong>
