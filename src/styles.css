@@ -764,6 +764,206 @@ tbody tr:hover {
   border-top: 1px solid var(--border);
   padding-top: 26px;
 }
+.contact-index-tabs,
+.contact-tabs {
+  display: flex;
+  gap: 18px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.contact-index-tabs button,
+.contact-tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.contact-index-tabs button[aria-selected="true"],
+.contact-tabs button[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.contact-index-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+.contact-index-filters label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.contact-index-filters select {
+  min-width: 140px;
+}
+.contact-index-count {
+  margin: 8px 0 16px;
+}
+.contact-list-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 650;
+}
+.contact-mini-avatar,
+.contact-avatar {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  color: var(--accent);
+  flex: none;
+}
+.contact-mini-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+.contact-avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 28px;
+  margin-bottom: 14px;
+}
+.contact-record-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 275px) minmax(360px, 1fr) minmax(
+      230px,
+      280px
+    );
+  gap: 16px;
+  align-items: start;
+}
+.contact-profile-card,
+.contact-workspace,
+.contact-related > section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+}
+.contact-profile-card h1 {
+  font-size: 23px;
+  margin: 0 0 7px;
+}
+.contact-profile-card > a {
+  display: block;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+.contact-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 22px 0;
+}
+.contact-quick-actions button {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  font-size: 11px;
+  min-width: 0;
+  white-space: normal;
+}
+.contact-section-title {
+  align-items: center;
+}
+.contact-section-title h2,
+.contact-related h2 {
+  font-size: 15px;
+  margin: 0;
+}
+.contact-properties {
+  margin: 10px 0;
+}
+.contact-properties dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 13px;
+}
+.contact-properties dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.contact-more {
+  margin-top: 16px;
+}
+.contact-workspace {
+  min-height: 500px;
+}
+.contact-tabs {
+  margin: -4px 0 20px;
+}
+.contact-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.contact-highlight-grid > div {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 15px;
+}
+.contact-highlight-grid span,
+.contact-highlight-grid strong {
+  display: block;
+}
+.contact-highlight-grid span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.contact-highlight-grid strong {
+  margin-top: 8px;
+  font-size: 18px;
+}
+.contact-panel {
+  margin-top: 22px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.contact-panel h2 {
+  font-size: 16px;
+}
+.contact-related {
+  display: grid;
+  gap: 12px;
+}
+.contact-related .association-item a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.contact-related .section-title {
+  margin-bottom: 7px;
+}
+@media (max-width: 1200px) {
+  .contact-record-layout {
+    grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  }
+  .contact-related {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .contact-record-layout {
+    grid-template-columns: 1fr;
+  }
+  .contact-related {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+  }
+  .contact-highlight-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .properties dl {
   margin: 20px 0;
 }
@@ -1728,6 +1928,357 @@ details[open] summary {
 }
 
 /* Navigation follows the grouped Books workflow while retaining GV branding. */
+.quote-composer {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  min-height: calc(100dvh - 66px);
+  margin: -32px -32px -33px;
+  display: flex;
+  flex-direction: column;
+}
+.quote-composer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px clamp(22px, 3.5vw, 52px);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.quote-composer-heading h1 {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 7px 0 0;
+  font-size: 25px;
+}
+.quote-composer-heading > button,
+.quote-composer-back {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px;
+}
+.quote-composer-back {
+  color: var(--accent);
+  min-height: 28px;
+}
+.quote-composer-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.quote-composer-scroll {
+  flex: 1;
+}
+.quote-composer-section {
+  padding: 30px clamp(22px, 3.5vw, 52px);
+  border-bottom: 1px solid var(--border);
+}
+.quote-composer-section h2 {
+  font-size: 17px;
+  margin: 0 0 22px;
+}
+.quote-customer-block {
+  background: var(--bg);
+}
+.quote-main-fields {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(210px, 0.7fr);
+  align-items: end;
+  gap: 16px;
+}
+.quote-main-fields .field,
+.quote-field-grid .field,
+.quote-currency-row .field {
+  margin-bottom: 0;
+}
+.quote-main-fields .field span {
+  color: var(--danger);
+}
+.quote-main-fields input,
+.quote-main-fields select {
+  width: 100%;
+}
+.quote-main-fields .field {
+  min-width: 0;
+}
+.quote-inline-add {
+  color: var(--accent);
+  border-color: var(--border);
+  margin-bottom: 0;
+}
+.quote-fixed-field {
+  border-left: 1px solid var(--border);
+  padding-left: 17px;
+  min-height: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.quote-fixed-field small {
+  color: var(--muted);
+}
+.quote-fixed-field strong {
+  overflow-wrap: anywhere;
+}
+.quote-field-grid,
+.quote-currency-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin-bottom: 22px;
+}
+.quote-currency-row {
+  grid-template-columns: repeat(3, minmax(0, 220px));
+}
+.quote-field-grid > *,
+.quote-currency-row > * {
+  min-width: 0;
+}
+.quote-field-grid + .field {
+  margin-top: 18px;
+}
+.quote-inline-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 20px;
+  margin: 22px 0;
+}
+.quote-inline-panel h3 {
+  margin: 0;
+}
+.quote-inline-panel p {
+  margin: 3px 0 18px;
+}
+.quote-inline-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.quote-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+.quote-tax-mode {
+  color: var(--muted);
+  font-size: 13px;
+}
+.quote-item-table {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: visible;
+}
+.quote-item-head,
+.quote-item-row {
+  display: grid;
+  grid-template-columns: minmax(230px, 3fr) minmax(78px, 0.65fr) minmax(
+      110px,
+      0.9fr
+    ) minmax(80px, 0.65fr) minmax(120px, 1fr) 36px;
+  gap: 10px;
+  align-items: start;
+  padding: 13px 14px;
+}
+.quote-item-head {
+  background: var(--nav);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.quote-item-row + .quote-item-row {
+  border-top: 1px solid var(--border);
+}
+.quote-item-row input,
+.quote-item-row textarea {
+  width: 100%;
+}
+.quote-item-row textarea {
+  min-height: 65px;
+  resize: vertical;
+}
+.quote-item-row > strong {
+  text-align: right;
+  padding-top: 9px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.quote-item-row > button {
+  min-width: 0;
+  padding: 8px;
+}
+.quote-item-description details {
+  margin: 0;
+}
+.quote-item-description summary {
+  padding: 5px 0 0;
+  font-size: 12px;
+}
+.quote-line-extras {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 0;
+}
+.quote-line-extras .field {
+  margin: 0;
+}
+.quote-add-row {
+  margin: 16px 0;
+  color: var(--accent);
+}
+.quote-totals {
+  margin-left: auto;
+  width: min(400px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 18px;
+  border-radius: 7px;
+}
+.quote-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 0;
+  font-variant-numeric: tabular-nums;
+}
+.quote-totals-grand {
+  border-top: 1px solid var(--border);
+  font-size: 17px;
+  font-weight: 700;
+  margin-top: 7px;
+}
+.quote-bottom-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.quote-bottom-fields > .field {
+  margin: 0;
+}
+.quote-more-details,
+.quote-document-links,
+.quote-manual-send {
+  grid-column: 1 / -1;
+}
+.quote-more-details {
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+.quote-more-details[open] .quote-field-grid {
+  padding-top: 12px;
+}
+.quote-document-links {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.quote-document-links h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.quote-manual-send {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 15px 18px;
+}
+.quote-manual-send .field {
+  margin: 0;
+}
+.quote-composer-notice {
+  margin: 16px clamp(22px, 3.5vw, 52px);
+  color: var(--success);
+}
+.quote-composer-scroll > .error {
+  margin: 16px clamp(22px, 3.5vw, 52px);
+}
+.quote-composer-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 9;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 -6px 18px oklch(25% 0.01 280 / 0.06);
+  padding: 14px clamp(22px, 3.5vw, 52px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.quote-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.quote-composer-footer label {
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.quote-composer-footer select {
+  min-height: 35px;
+  padding: 5px 7px;
+  width: auto;
+}
+@media (max-width: 1100px) {
+  .quote-composer {
+    margin: -26px;
+  }
+  .quote-main-fields {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .quote-fixed-field {
+    grid-column: 1 / -1;
+  }
+  .quote-item-table {
+    overflow-x: auto;
+  }
+  .quote-item-head,
+  .quote-item-row {
+    min-width: 780px;
+  }
+}
+@media (max-width: 700px) {
+  .quote-composer {
+    margin: -24px -16px;
+  }
+  .quote-composer-heading,
+  .quote-composer-section {
+    padding: 20px 16px;
+  }
+  .quote-main-fields,
+  .quote-field-grid,
+  .quote-currency-row,
+  .quote-bottom-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .quote-fixed-field {
+    grid-column: auto;
+  }
+  .quote-inline-add {
+    justify-self: start;
+  }
+  .quote-composer-footer {
+    padding: 12px 16px;
+  }
+  .quote-footer-actions {
+    width: 100%;
+  }
+  .quote-footer-actions button {
+    flex: 1;
+  }
+}
 .sidebar {
   width: 248px;
   background: #21283e;
@@ -1998,6 +2549,150 @@ details[open] summary {
   display: block;
   margin-top: 4px;
 }
+.quote-summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: clamp(18px, 2.5vw, 34px);
+  min-width: 0;
+}
+.quote-summary-card-head,
+.quote-summary-title,
+.quote-pdf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.quote-summary-card-head {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.quote-summary-card-head h2 {
+  font-size: 17px;
+  margin: 0;
+}
+.quote-preview-switch {
+  display: inline-flex;
+  background: var(--nav);
+  border-radius: 7px;
+  padding: 3px;
+  gap: 3px;
+}
+.quote-preview-switch button {
+  border: 0;
+  min-height: 30px;
+  padding: 5px 11px;
+  background: transparent;
+  color: var(--muted);
+}
+.quote-preview-switch button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px oklch(25% 0 0 / 0.12);
+}
+.quote-summary-title {
+  padding: 24px 0;
+}
+.quote-summary-title h3 {
+  font-size: 23px;
+  margin: 0 0 8px;
+}
+.quote-summary-title > strong {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+.quote-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 28px;
+  margin: 12px 0 30px;
+}
+.quote-summary-grid > div {
+  display: grid;
+  grid-template-columns: minmax(105px, 0.8fr) minmax(0, 1.4fr);
+  gap: 12px;
+}
+.quote-summary-grid dt,
+.quote-summary-people h3 {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 550;
+}
+.quote-summary-grid dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.quote-summary-people {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  border-top: 1px solid var(--border);
+  padding: 23px 0 30px;
+}
+.quote-summary-people h3 {
+  margin: 0 0 9px;
+}
+.quote-summary-card > h3 {
+  font-size: 15px;
+}
+.quote-item-count {
+  background: var(--nav);
+  border-radius: 50%;
+  padding: 2px 7px;
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.quote-summary-totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 28px;
+  width: min(370px, 100%);
+  margin: 24px 0 28px auto;
+}
+.quote-summary-totals dt,
+.quote-summary-totals dd {
+  margin: 0;
+}
+.quote-summary-totals dd {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.quote-summary-totals dt:last-of-type,
+.quote-summary-totals dd:last-of-type {
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+  font-size: 17px;
+}
+.quote-summary-note {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 18px;
+}
+.quote-summary-note h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+.quote-pdf-header {
+  margin-bottom: 14px;
+}
+.quote-pdf-header p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .quote-summary-grid,
+  .quote-summary-people {
+    grid-template-columns: 1fr;
+  }
+  .quote-summary-grid > div {
+    grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.3fr);
+  }
+}
 @media (max-width: 1100px) {
   .sidebar {
     width: 210px;
@@ -2048,6 +2743,8 @@ details[open] summary {
   .quote-action-bar,
   .quote-next-step,
   .quote-detail-tabs,
+  .quote-summary-card,
+  .quote-pdf-header,
   .document-context {
     display: none !important;
   }

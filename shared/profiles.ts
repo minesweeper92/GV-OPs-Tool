@@ -48,6 +48,16 @@ export const contactProfile = z.strictObject({
   salutation: short,
   department: short,
   seniority: short,
+  lead_status: z
+    .enum([
+      "New",
+      "Attempted to contact",
+      "Connected",
+      "In progress",
+      "Open deal",
+      "Unqualified",
+    ])
+    .default("New"),
   preferred_channel: z
     .enum(["", "Email", "Phone", "WhatsApp", "Meeting"])
     .default(""),

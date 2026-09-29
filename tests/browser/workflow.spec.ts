@@ -636,9 +636,9 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   await page.getByLabel("Unit price 1", { exact: true }).fill("100000");
   await page.getByLabel("Tax % 1", { exact: true }).fill("18");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.getByRole("button", { name: "Save quote version" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
-  await page.getByRole("button", { name: "Accept", exact: true }).click();
+  await page.getByRole("button", { name: "Save as draft" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText(/QT-\d{6}/);
+  await page.getByRole("button", { name: "Accept this version" }).click();
   await page
     .getByLabel("Acceptance evidence")
     .fill("Client approval, reference TEST-100");
@@ -649,7 +649,6 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
     .click();
   await page.getByRole("button", { name: "Save invoice draft" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
-  await page.getByRole("link", { name: "Invoice draft" }).click();
   await expect(
     page.getByRole("heading", { name: "Invoice draft", exact: true }),
   ).toBeVisible();

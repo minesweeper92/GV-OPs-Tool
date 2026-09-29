@@ -434,6 +434,7 @@ export function CrmEditor({
   me,
   save,
   createCompany,
+  addAnother,
   close,
 }: {
   state: CrmEditorState;
@@ -441,6 +442,7 @@ export function CrmEditor({
   me: Me;
   save: (c: Record<string, unknown>) => Promise<void>;
   createCompany: (c: Record<string, unknown>) => Promise<{ id: string }>;
+  addAnother: () => void;
   close: () => void;
 }) {
   const isNew = !state.record_id;
@@ -529,7 +531,12 @@ export function CrmEditor({
           ),
   );
   const [selectedCompany, setSelectedCompany] = useState(
-    lead?.company_id || "",
+    lead?.company_id ||
+      (state.mode === "lead" && state.id
+        ? data.affiliations.find(
+            (a) => a.contact_id === state.id && !a.ended_on,
+          )?.company_id || ""
+        : ""),
   );
   const [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
@@ -709,7 +716,15 @@ export function CrmEditor({
         c.owner_id = v("owner_id");
       }
       await save(c);
-      close();
+      if (
+        state.mode === "contact" &&
+        isNew &&
+        (e.nativeEvent as SubmitEvent).submitter?.getAttribute(
+          "data-add-another",
+        ) === "true"
+      )
+        addAnother();
+      else close();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -740,6 +755,43 @@ export function CrmEditor({
               {input("title", "Job title", contact.title)}
               {input("email", "Primary email", contact.email, false, "email")}
               {input("phone", "Primary phone", contact.phone)}
+              <div className="form-row">
+                <Field label="Lifecycle stage">
+                  <select name="lifecycle" defaultValue={contact.lifecycle}>
+                    {[
+                      "Subscriber",
+                      "Lead",
+                      "MQL",
+                      "SQL",
+                      "Opportunity",
+                      "Customer",
+                      "Evangelist",
+                    ].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Lead status">
+                  <select
+                    value={String(profile.lead_status || "New")}
+                    onChange={(e) => {
+                      setProfile({ ...profile, lead_status: e.target.value });
+                      setDirty(true);
+                    }}
+                  >
+                    {[
+                      "New",
+                      "Attempted to contact",
+                      "Connected",
+                      "In progress",
+                      "Open deal",
+                      "Unqualified",
+                    ].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
               {isNew ? (
                 <>
                   <ContactCompanyField
@@ -863,21 +915,6 @@ export function CrmEditor({
                   Add phone
                 </button>
                 <h3>Relationship</h3>
-                <Field label="Lifecycle stage">
-                  <select name="lifecycle" defaultValue={contact.lifecycle}>
-                    {[
-                      "Subscriber",
-                      "Lead",
-                      "MQL",
-                      "SQL",
-                      "Opportunity",
-                      "Customer",
-                      "Evangelist",
-                    ].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
-                </Field>
                 {input("source", "Lead source", contact.source)}
                 {input(
                   "tags",
@@ -1032,7 +1069,23 @@ export function CrmEditor({
                     </select>
                   </Field>
                   <Field label="Contact">
-                    <select name="contact_id" required key={selectedCompany}>
+                    <select
+                      name="contact_id"
+                      required
+                      key={selectedCompany}
+                      defaultValue={
+                        state.mode === "lead" &&
+                        state.id &&
+                        data.affiliations.some(
+                          (a) =>
+                            a.contact_id === state.id &&
+                            a.company_id === selectedCompany &&
+                            !a.ended_on,
+                        )
+                          ? state.id
+                          : ""
+                      }
+                    >
                       <option value="">Choose associated contact</option>
                       {data.contacts
                         .filter((c) =>
@@ -1152,7 +1205,16 @@ export function CrmEditor({
               {state.mode === "activity" ? (
                 <>
                   <Field label="Activity kind">
-                    <select name="kind">
+                    <select
+                      name="kind"
+                      defaultValue={
+                        ["Call", "Meeting", "Email", "Note"].includes(
+                          state.id || "",
+                        )
+                          ? state.id
+                          : "Call"
+                      }
+                    >
                       {["Call", "Meeting", "Email", "Note"].map((k) => (
                         <option key={k}>{k}</option>
                       ))}
@@ -1294,6 +1356,15 @@ export function CrmEditor({
                     ? "Save"
                     : "Save changes"}
           </button>
+          {state.mode === "contact" && isNew ? (
+            <button
+              type="submit"
+              disabled={addingCompany || companyBusy}
+              data-add-another="true"
+            >
+              Create and add another
+            </button>
+          ) : null}
         </fieldset>
       </form>
     </Drawer>

@@ -109,6 +109,54 @@ test("rich profiles persist, secondary email is searchable and mobile editor is 
   expect(errors).toEqual([]);
 });
 
+test("contact workspace supports quick logging, status filters and create another", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await page.getByRole("link", { name: "Contacts", exact: true }).click();
+  const suffix = uuid().slice(0, 8);
+  const first = `Contact${suffix}`;
+  await page.getByRole("button", { name: "New contact" }).click();
+  await page.getByLabel("First name", { exact: true }).fill(first);
+  await page.getByLabel("Last name", { exact: true }).fill("Example");
+  await page
+    .getByLabel("Lead status", { exact: true })
+    .selectOption("Connected");
+  await page.getByRole("button", { name: "Create and add another" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByLabel("First name", { exact: true })).toHaveValue("");
+  await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page.getByLabel("Search this view").fill(first);
+  await page
+    .locator(".contact-index-filters select")
+    .nth(2)
+    .selectOption("Connected");
+  await expect(
+    page.getByRole("link", { name: `${first} Example` }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: `${first} Example` }).click();
+  await expect(
+    page.getByRole("heading", { name: `${first} Example` }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Note", exact: true }).click();
+  await expect(page.getByLabel("Activity kind")).toHaveValue("Note");
+  await page
+    .getByLabel("Subject", { exact: true })
+    .fill("Initial conversation");
+  await page.getByRole("button", { name: "Save activity" }).click();
+  await expect(page.getByText("Initial conversation")).toBeVisible();
+  await page.getByRole("tab", { name: "Activities" }).click();
+  await expect(page.getByText("Initial conversation")).toBeVisible();
+  await page.screenshot({
+    path: "test-results/contact-workspace-desktop.png",
+    fullPage: true,
+  });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
 test("lead closure, manual correspondence and tasks survive conversion and completion", async ({
   page,
 }) => {

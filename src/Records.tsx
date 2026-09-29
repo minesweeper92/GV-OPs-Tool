@@ -565,6 +565,9 @@ export function DocumentRecord({
   edit,
 }: Props & { type: string; id: string }) {
   const [quoteTab, setQuoteTab] = useState<"details" | "activity">("details");
+  const [quotePreview, setQuotePreview] = useState<"details" | "pdf">(
+    "details",
+  );
   const invoice =
       type === "invoice" ? data.invoices.find((i) => i.id === id) : undefined,
     quote = type === "quote" ? data.quotes.find((q) => q.id === id) : undefined,
@@ -595,6 +598,11 @@ export function DocumentRecord({
         ? "Record payment"
         : undefined
     : undefined;
+  const printQuote = () => {
+    setQuoteTab("details");
+    setQuotePreview("pdf");
+    window.setTimeout(() => window.print(), 0);
+  };
   return (
     <>
       <a className="back" href={invoice ? "#invoices" : "#quotes"}>
@@ -652,7 +660,7 @@ export function DocumentRecord({
                 Create invoice
               </button>
             ) : null}
-            <button onClick={() => window.print()}>PDF / Print</button>
+            <button onClick={printQuote}>PDF / Print</button>
           </div>
           {quoteStatus === "Draft" && canChangeQuote ? (
             <p className="quote-next-step">
@@ -699,8 +707,173 @@ export function DocumentRecord({
             <p>No sharing or acceptance recorded yet.</p>
           )}
         </section>
+      ) : quote && quotePreview === "details" ? (
+        <section className="quote-summary-card" role="tabpanel">
+          <div className="quote-summary-card-head">
+            <h2>Quote details</h2>
+            <div
+              className="quote-preview-switch"
+              role="group"
+              aria-label="Quote view"
+            >
+              <button className="active" aria-pressed="true">
+                Details
+              </button>
+              <button
+                aria-pressed="false"
+                onClick={() => setQuotePreview("pdf")}
+              >
+                PDF preview
+              </button>
+            </div>
+          </div>
+          <div className="quote-summary-title">
+            <div>
+              <h3>
+                {quote.number || `${quote.option_name} · v${quote.revision}`}
+              </h3>
+              <Badge>{quoteStatus}</Badge>
+            </div>
+            <strong>{money(quote.total_minor, quote.currency)}</strong>
+          </div>
+          <dl className="quote-summary-grid">
+            <div>
+              <dt>Quote number</dt>
+              <dd>{quote.number || "Unnumbered legacy quote"}</dd>
+            </div>
+            <div>
+              <dt>Quote date</dt>
+              <dd>{day(quote.details?.quote_date || quote.created_at)}</dd>
+            </div>
+            <div>
+              <dt>Expiry date</dt>
+              <dd>
+                {quote.details?.valid_until
+                  ? day(quote.details.valid_until)
+                  : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>Reference number</dt>
+              <dd>{quote.details?.reference || "—"}</dd>
+            </div>
+            <div>
+              <dt>Issuing entity</dt>
+              <dd>{entity?.name || quote.issuer_name}</dd>
+            </div>
+            <div>
+              <dt>PDF template</dt>
+              <dd>{quote.details?.template || "Standard"}</dd>
+            </div>
+            <div>
+              <dt>Named option</dt>
+              <dd>
+                {quote.option_name} · version {quote.revision}
+              </dd>
+            </div>
+            <div>
+              <dt>Subject</dt>
+              <dd>{quote.details?.subject || "—"}</dd>
+            </div>
+          </dl>
+          <div className="quote-summary-people">
+            <div>
+              <h3>Customer details</h3>
+              <strong>{quote.customer_name}</strong>
+              {quote.details?.billing_address ? (
+                <p className="preserve">{quote.details.billing_address}</p>
+              ) : null}
+            </div>
+            <div>
+              <h3>Project</h3>
+              {deal ? (
+                <a href={`#deal/${deal.id}`}>{deal.name}</a>
+              ) : (
+                <span>—</span>
+              )}
+            </div>
+          </div>
+          <h3>
+            Items <span className="quote-item-count">{quote.lines.length}</span>
+          </h3>
+          <Table headers={["Item", "Qty", "Rate", "Tax", "Amount"]}>
+            {quote.lines.map((line, index) => (
+              <tr key={index}>
+                <td className="preserve">{line.description}</td>
+                <td>{line.quantity}</td>
+                <td>
+                  {quote.currency} {line.price}
+                </td>
+                <td>{line.tax}%</td>
+                <td className="num">
+                  {money(
+                    BigInt(line.subtotal || "0") + BigInt(line.taxMinor || "0"),
+                    quote.currency,
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
+          <dl className="quote-summary-totals">
+            <dt>Subtotal</dt>
+            <dd>{money(quote.net_minor, quote.currency)}</dd>
+            <dt>Tax</dt>
+            <dd>{money(quote.tax_minor, quote.currency)}</dd>
+            <dt>Total</dt>
+            <dd>
+              <strong>{money(quote.total_minor, quote.currency)}</strong>
+            </dd>
+          </dl>
+          {quote.details?.customer_notes ? (
+            <div className="quote-summary-note">
+              <h3>Customer notes</h3>
+              <p className="preserve">{quote.details.customer_notes}</p>
+            </div>
+          ) : null}
+          {quote.terms ? (
+            <div className="quote-summary-note">
+              <h3>Terms & conditions</h3>
+              <p className="preserve">{quote.terms}</p>
+            </div>
+          ) : null}
+          {quote.details?.references?.length ? (
+            <div className="quote-summary-note">
+              <h3>Supporting documents</h3>
+              {quote.details.references.map((reference, index) => (
+                <p key={index}>
+                  <a href={reference.url} target="_blank" rel="noreferrer">
+                    {reference.name} ↗
+                  </a>
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </section>
       ) : (
         <div className="document-layout">
+          {quote ? (
+            <div className="quote-pdf-header">
+              <div
+                className="quote-preview-switch"
+                role="group"
+                aria-label="Quote view"
+              >
+                <button
+                  aria-pressed="false"
+                  onClick={() => setQuotePreview("details")}
+                >
+                  Details
+                </button>
+                <button className="active" aria-pressed="true">
+                  PDF preview
+                </button>
+              </div>
+              <p>
+                Print this preview or choose Save as PDF in the print dialog. No
+                email is sent.
+              </p>
+            </div>
+          ) : null}
           <article
             className={`document ${doc.details?.template === "Compact" ? "compact-document" : ""}`}
           >

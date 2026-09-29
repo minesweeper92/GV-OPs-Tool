@@ -58,34 +58,37 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     .locator("main#main")
     .getByRole("button", { name: "New quote", exact: true })
     .click();
-  await page.getByLabel("Find customer").fill(name.slice(0, 13));
-  await page.getByLabel("Customer", { exact: true }).selectOption(company);
-  await page.getByLabel("Project / deal").selectOption(deal);
+  await expect(page.getByRole("heading", { name: "New quote" })).toBeVisible();
+  await page.getByLabel("Search customers").fill(name.slice(0, 13));
+  await page.getByLabel("Customer name").selectOption(company);
+  await page.getByLabel("Project name", { exact: true }).selectOption(deal);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.getByRole("button", { name: "Continue to quote" }).click();
-  await expect(
-    page.getByRole("heading", { name: "New quote version" }),
-  ).toBeVisible();
   await page.getByLabel("Named option").fill("Director A");
   await page
-    .getByLabel("Subject / project description")
+    .getByLabel("Subject", { exact: true })
     .fill("Identity concept and design");
-  await page.getByLabel("Customer reference").fill("BRAND-2026");
+  await page.getByLabel("Reference number").fill("BRAND-2026");
   await page
     .getByLabel("Description 1", { exact: true })
     .fill("Identity design");
   await page.getByLabel("Unit price 1", { exact: true }).fill("50000");
   await page.getByLabel("Tax % 1", { exact: true }).fill("0");
-  await page.getByRole("button", { name: "Save quote version" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.screenshot({
+    path: "test-results/quote-composer-desktop.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Save as draft" }).click();
+  await expect(page.getByRole("heading", { name: "New quote" })).toHaveCount(0);
   const saved = await (await page.request.get("/api/data")).json();
   const quote = saved.quotes.find((q: any) => q.deal_id === deal);
   expect(quote.number).toMatch(/^QT-\d{6}$/);
   expect(quote.details.reference).toBe("BRAND-2026");
-  await page.locator(`main#main a[href="#quote/${quote.id}"]`).first().click();
-  await expect(
-    page.getByRole("heading", { name: quote.number, exact: true }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`#quote/${quote.id}$`));
+  await expect(page.locator(".page-heading h1")).toHaveText(quote.number);
+  await expect(page.locator(".quote-summary-card")).toContainText(
+    "Identity concept and design",
+  );
+  await page.getByRole("button", { name: "PDF preview" }).click();
   await expect(page.locator(".document .document-number")).toHaveText(
     quote.number,
   );
@@ -125,4 +128,56 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     fullPage: true,
   });
   expect(errors).toEqual([]);
+});
+
+test("new customer and project can be created without losing a quote draft", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  const data = await (await page.request.get("/api/data")).json();
+  const customerName = `Inline quote customer ${randomUUID().slice(0, 8)}`;
+  await page.getByRole("link", { name: "Quotes", exact: true }).click();
+  await page
+    .locator("main#main")
+    .getByRole("button", { name: "New quote", exact: true })
+    .click();
+  await page
+    .getByLabel("Subject", { exact: true })
+    .fill("Film production proposal");
+  await page.getByRole("button", { name: "New customer" }).click();
+  await page.getByLabel("Company name").fill(customerName);
+  await page.getByLabel("Primary contact first name").fill("Ayesha");
+  await page
+    .getByLabel("Primary contact email")
+    .fill(`ayesha-${randomUUID().slice(0, 8)}@example.com`);
+  await page.getByRole("button", { name: "Create customer" }).click();
+  await expect(page.getByLabel("Customer name")).toHaveValue(/.+/);
+  await expect(page.getByLabel("Subject", { exact: true })).toHaveValue(
+    "Film production proposal",
+  );
+  await page.getByLabel("Project name").last().fill("Launch film");
+  await page
+    .getByLabel("Issuing legal entity")
+    .selectOption(data.entities[0].id);
+  await page.getByLabel("Project contact").selectOption({ label: "Ayesha" });
+  await page.getByRole("button", { name: "Create project" }).click();
+  await expect(
+    page.getByLabel("Project name", { exact: true }).first(),
+  ).toHaveValue(/.+/);
+  await page.getByLabel("Named option").fill("Director A");
+  await page
+    .getByLabel("Description 1", { exact: true })
+    .fill("Film production");
+  await page.getByLabel("Unit price 1", { exact: true }).fill("10000");
+  await page
+    .getByLabel("Sent message reference")
+    .fill("Outlook message draft ref 123");
+  await page.getByRole("button", { name: "Save & mark as sent" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText(/QT-\d{6}/);
+  await expect(page.locator(".quote-action-bar")).toContainText("Shared");
+  await page.getByRole("tab", { name: "Activity" }).click();
+  await expect(page.getByText("Outlook message draft ref 123")).toBeVisible();
 });

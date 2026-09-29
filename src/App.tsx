@@ -41,7 +41,8 @@ import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
 import { Banking } from "./Banking";
 import { Projects } from "./Projects";
-import { QuoteStarter } from "./QuoteStarter";
+import { QuoteComposer } from "./QuoteComposer";
+import { ContactRecord } from "./ContactRecord";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
   import("./Crm").then((m) => ({ default: m.CrmEditor })),
@@ -266,8 +267,11 @@ export default function App() {
   const [entity, setEntity] = useState("all"),
     [search, setSearch] = useState(""),
     [editor, setEditor] = useState<EditorState | null>(null),
-    [quoteStarter, setQuoteStarter] = useState(false),
     [quoteFilter, setQuoteFilter] = useState("All"),
+    [contactView, setContactView] = useState("All contacts"),
+    [contactOwner, setContactOwner] = useState("All owners"),
+    [contactLifecycle, setContactLifecycle] = useState("All stages"),
+    [contactLeadStatus, setContactLeadStatus] = useState("All statuses"),
     [openGroups, setOpenGroups] = useState<string[]>(["CRM", "Sales"]),
     [crmEditor, setCrmEditor] = useState<CrmEditorState | null>(null),
     [menu, setMenu] = useState(false),
@@ -549,7 +553,17 @@ export default function App() {
         <Empty title="Deal unavailable">Choose a deal from the list.</Empty>
       );
     }
-    if (view === "company" || view === "contact")
+    if (view === "contact")
+      return (
+        <ContactRecord
+          id={id}
+          data={data}
+          me={me!}
+          edit={edit}
+          crmEdit={crmEdit}
+        />
+      );
+    if (view === "company")
       return <PersonRecord {...props!} type={view} id={id} />;
     if (view === "quote" || view === "invoice")
       return (
@@ -565,7 +579,7 @@ export default function App() {
               {view === "quote" && canCRM ? (
                 <button
                   aria-label="Quick add quote from navigation"
-                  onClick={() => setQuoteStarter(true)}
+                  onClick={() => edit({ kind: "quote" })}
                 >
                   <Plus size={16} />
                 </button>
@@ -876,7 +890,65 @@ export default function App() {
           </Table>
         </>
       );
-    if (view === "contacts")
+    if (view === "contacts") {
+      const contactRows = contacts
+        .filter((c) =>
+          match(
+            c.first_name,
+            c.last_name,
+            c.email,
+            c.phone,
+            c.tags.join(" "),
+            c.additional_emails.map((e) => e.value).join(" "),
+            c.additional_phones.map((p) => p.value).join(" "),
+          ),
+        )
+        .filter(
+          (c) =>
+            entity === "all" ||
+            c.service_entity_id === entity ||
+            data.affiliations.some(
+              (a) =>
+                a.contact_id === c.id &&
+                !a.ended_on &&
+                companies.some(
+                  (co) =>
+                    co.id === a.company_id && co.service_entity_id === entity,
+                ),
+            ),
+        )
+        .filter(
+          (c) =>
+            contactView !== "Open opportunities" ||
+            data.deals.some(
+              (d) =>
+                d.contact_id === c.id && !["Won", "Lost"].includes(d.stage),
+            ),
+        )
+        .filter(
+          (c) =>
+            contactView !== "Needs follow-up" ||
+            data.crmTasks.some(
+              (t) =>
+                t.record_type === "contact" &&
+                t.record_id === c.id &&
+                t.status === "Open" &&
+                t.due_at.slice(0, 10) <= today(),
+            ),
+        )
+        .filter(
+          (c) => contactOwner === "All owners" || c.owner_id === contactOwner,
+        )
+        .filter(
+          (c) =>
+            contactLifecycle === "All stages" ||
+            c.lifecycle === contactLifecycle,
+        )
+        .filter(
+          (c) =>
+            contactLeadStatus === "All statuses" ||
+            (c.profile?.lead_status || "New") === contactLeadStatus,
+        );
       return (
         <>
           <Heading
@@ -885,60 +957,130 @@ export default function App() {
             action={canMaintainContacts ? "New contact" : undefined}
             onAction={() => edit({ kind: "contact" })}
           />
-          {toolbar()}
-          <Table
-            headers={["Contact", "Company", "Email", "Title", "Lifecycle"]}
+          <div
+            className="contact-index-tabs"
+            role="tablist"
+            aria-label="Contact views"
           >
-            {contacts
-              .filter((c) =>
-                match(
-                  c.first_name,
-                  c.last_name,
-                  c.email,
-                  c.phone,
-                  c.tags.join(" "),
-                  c.additional_emails.map((e) => e.value).join(" "),
-                  c.additional_phones.map((p) => p.value).join(" "),
-                ),
-              )
-              .filter(
-                (c) =>
-                  entity === "all" ||
-                  c.service_entity_id === entity ||
-                  data.affiliations.some(
-                    (a) =>
-                      a.contact_id === c.id &&
-                      !a.ended_on &&
-                      companies.some(
-                        (co) =>
-                          co.id === a.company_id &&
-                          co.service_entity_id === entity,
-                      ),
-                  ),
-              )
-              .map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <a href={`#contact/${c.id}`}>
-                      {c.first_name} {c.last_name}
-                    </a>
-                  </td>
-                  <td>
-                    {data.affiliations
-                      .filter((a) => a.contact_id === c.id && !a.ended_on)
-                      .map((a) => companyName(a.company_id))
-                      .join(", ") || "No current company"}
-                  </td>
-                  <td>{c.email || "Not provided"}</td>
-                  <td>{c.title || "Not set"}</td>
-                  <td>
-                    <Badge>{c.lifecycle}</Badge>
-                  </td>
-                </tr>
-              ))}
+            {["All contacts", "Open opportunities", "Needs follow-up"].map(
+              (name) => (
+                <button
+                  key={name}
+                  role="tab"
+                  aria-selected={contactView === name}
+                  onClick={() => setContactView(name)}
+                >
+                  {name}
+                </button>
+              ),
+            )}
+          </div>
+          <div className="contact-index-filters">
+            {searchControl()}
+            <label>
+              Contact owner{" "}
+              <select
+                value={contactOwner}
+                onChange={(e) => setContactOwner(e.target.value)}
+              >
+                <option>All owners</option>
+                {data.crmMembers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Lifecycle stage{" "}
+              <select
+                value={contactLifecycle}
+                onChange={(e) => setContactLifecycle(e.target.value)}
+              >
+                <option>All stages</option>
+                {[
+                  "Subscriber",
+                  "Lead",
+                  "MQL",
+                  "SQL",
+                  "Opportunity",
+                  "Customer",
+                  "Evangelist",
+                ].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Lead status{" "}
+              <select
+                value={contactLeadStatus}
+                onChange={(e) => setContactLeadStatus(e.target.value)}
+              >
+                <option>All statuses</option>
+                {[
+                  "New",
+                  "Attempted to contact",
+                  "Connected",
+                  "In progress",
+                  "Open deal",
+                  "Unqualified",
+                ].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="muted contact-index-count">
+            {contactRows.length} contacts ·{" "}
+            {entity === "all" ? "All legal entities" : entityCode(entity)}
+          </p>
+          <Table
+            headers={[
+              "Contact",
+              "Email",
+              "Phone",
+              "Company",
+              "Lead status",
+              "Lifecycle",
+            ]}
+          >
+            {contactRows.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <a href={`#contact/${c.id}`}>
+                    <span className="contact-list-name">
+                      <span className="contact-mini-avatar" aria-hidden="true">
+                        {(
+                          c.first_name[0] ||
+                          c.last_name[0] ||
+                          "?"
+                        ).toUpperCase()}
+                      </span>
+                      <span>
+                        {c.first_name} {c.last_name}
+                      </span>
+                    </span>
+                  </a>
+                </td>
+                <td>{c.email || "Not provided"}</td>
+                <td>{c.phone || "Not provided"}</td>
+                <td>
+                  {data.affiliations
+                    .filter((a) => a.contact_id === c.id && !a.ended_on)
+                    .map((a) => companyName(a.company_id))
+                    .join(", ") || "No current company"}
+                </td>
+                <td>{c.profile?.lead_status || "New"}</td>
+                <td>
+                  <Badge>{c.lifecycle}</Badge>
+                </td>
+              </tr>
+            ))}
           </Table>
         </>
       );
+    }
     if (view === "leads")
       return (
         <>
@@ -1133,7 +1275,7 @@ export default function App() {
             title="Quotes"
             subtitle="Customer quotes, options and revisions in one place."
             action={canCRM ? "New quote" : undefined}
-            onAction={() => setQuoteStarter(true)}
+            onAction={() => edit({ kind: "quote" })}
           />
           <div className="toolbar">
             {searchControl()}
@@ -1706,7 +1848,7 @@ export default function App() {
                             <button
                               className="nav-quick-add"
                               aria-label="Quick add quote from navigation"
-                              onClick={() => setQuoteStarter(true)}
+                              onClick={() => edit({ kind: "quote" })}
                             >
                               <Plus size={16} />
                             </button>
@@ -1797,7 +1939,22 @@ export default function App() {
         <main id="main" tabIndex={-1}>
           {error && !editor ? <ErrorBox error={error} /> : null}
           <Suspense fallback={<p role="status">Opening workspace…</p>}>
-            {content()}
+            {editor?.kind === "quote" && data && me ? (
+              <QuoteComposer
+                key={editor.id || "new-quote"}
+                id={editor.id || ""}
+                data={data}
+                entityId={entity}
+                create={runWithResult}
+                close={() => setEditor(null)}
+                done={(quoteId) => {
+                  setEditor(null);
+                  location.hash = `#quote/${quoteId}`;
+                }}
+              />
+            ) : (
+              content()
+            )}
           </Suspense>
         </main>
         <footer className="app-footer">
@@ -1820,26 +1977,19 @@ export default function App() {
             me={me}
             save={run}
             createCompany={runWithResult}
+            addAnother={() =>
+              setCrmEditor({
+                mode: "contact",
+                record_type: "contact",
+                record_id: "",
+                key: crypto.randomUUID(),
+              })
+            }
             close={() => setCrmEditor(null)}
           />
         </Suspense>
       ) : null}
-      {quoteStarter && data ? (
-        <QuoteStarter
-          data={data}
-          entity={entity}
-          close={() => setQuoteStarter(false)}
-          start={(dealId) => {
-            setQuoteStarter(false);
-            edit({ kind: "quote", id: dealId });
-          }}
-          newLead={() => {
-            setQuoteStarter(false);
-            edit({ kind: "lead" });
-          }}
-        />
-      ) : null}
-      {editor && data ? (
+      {editor && editor.kind !== "quote" && data ? (
         <Suspense fallback={<p role="status">Opening editor…</p>}>
           <Editor
             key={editor.kind + editor.id}
@@ -1848,7 +1998,15 @@ export default function App() {
             me={me}
             entityId={entity}
             onClose={() => setEditor(null)}
-            onSave={run}
+            onSave={async (command) => {
+              const result = await runWithResult(command);
+              if (
+                editor.kind === "invoice" &&
+                command.action === "invoice.create"
+              ) {
+                location.hash = `#invoice/${result.id}`;
+              }
+            }}
           />
         </Suspense>
       ) : null}

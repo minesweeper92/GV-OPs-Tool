@@ -25,6 +25,7 @@ export interface Company {
   owner_id: string;
 }
 export interface Contact {
+  created_at?: string;
   profile: Partial<import("../shared/profiles").ContactProfile>;
   version: number;
   additional_emails: { label: string; value: string }[];
