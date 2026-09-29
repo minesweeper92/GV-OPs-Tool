@@ -17,6 +17,7 @@ import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 import { crmSnapshot, executeCrm } from "./crm.ts";
 import { executeProfile } from "./profiles.ts";
 import { executeDocument } from "./documents.ts";
+import { executeManualJournal } from "./manual-journals.ts";
 import {
   issueQuoteLink,
   portalPage,
@@ -343,23 +344,26 @@ export function createApp(
     return inTenant(db, ctx.tenantId, (tx) =>
       c.action.startsWith("document.")
         ? executeDocument(tx, ctx, c)
-        : c.action.startsWith("profile.")
-          ? executeProfile(tx, ctx, c)
-          : c.action.startsWith("crm.")
-            ? executeCrm(tx, ctx, c)
-            : c.action.startsWith("recurring.")
-              ? executeRecurring(tx, ctx, c)
-              : c.action.startsWith("credit.")
-                ? executeCredit(tx, ctx, c)
-                : c.action.startsWith("project.") ||
-                    ["invoice.cancel", "invoice.recognise"].includes(c.action)
-                  ? executeProject(tx, ctx, c)
-                  : c.action.startsWith("bank.")
-                    ? executeBank(tx, ctx, c)
-                    : c.action.startsWith("bill.") ||
-                        c.action.startsWith("vendor-payment.")
-                      ? executePayable(tx, ctx, c)
-                      : execute(tx, ctx, c),
+        : c.action === "manual-journal.create" ||
+            c.action === "manual-journal.reverse"
+          ? executeManualJournal(tx, ctx, c)
+          : c.action.startsWith("profile.")
+            ? executeProfile(tx, ctx, c)
+            : c.action.startsWith("crm.")
+              ? executeCrm(tx, ctx, c)
+              : c.action.startsWith("recurring.")
+                ? executeRecurring(tx, ctx, c)
+                : c.action.startsWith("credit.")
+                  ? executeCredit(tx, ctx, c)
+                  : c.action.startsWith("project.") ||
+                      ["invoice.cancel", "invoice.recognise"].includes(c.action)
+                    ? executeProject(tx, ctx, c)
+                    : c.action.startsWith("bank.")
+                      ? executeBank(tx, ctx, c)
+                      : c.action.startsWith("bill.") ||
+                          c.action.startsWith("vendor-payment.")
+                        ? executePayable(tx, ctx, c)
+                        : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

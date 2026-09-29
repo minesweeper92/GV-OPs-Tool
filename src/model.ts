@@ -295,7 +295,11 @@ export interface Report {
     description: string;
     source_type: string;
     source_id: string;
-    lines: { account: string; debit: string; credit: string }[];
+    external_reference: string;
+    memo: string;
+    reverses_journal_id: string | null;
+    reversal_id: string | null;
+    lines: { account: string; debit: string; credit: string; memo: string }[];
   }[];
 }
 export type Editor = { kind: string; id?: string };

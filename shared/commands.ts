@@ -261,6 +261,32 @@ export const commandSchema = z.discriminatedUnion("action", [
     reason: text,
   }),
   z.strictObject({
+    action: z.literal("manual-journal.create"),
+    entity_id: id,
+    date,
+    reference: text,
+    memo: text,
+    lines: z
+      .array(
+        z.strictObject({
+          account_code: z.string().regex(/^[A-Za-z0-9]{1,12}$/),
+          debit: money,
+          credit: money,
+          memo: z.string().trim().max(400),
+        }),
+      )
+      .min(2)
+      .max(100),
+    request_key: id,
+  }),
+  z.strictObject({
+    action: z.literal("manual-journal.reverse"),
+    id,
+    date,
+    reason: text,
+    request_key: id,
+  }),
+  z.strictObject({
     action: z.literal("note.create"),
     record_id: id,
     text: z.string().trim().min(1).max(4000),

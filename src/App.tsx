@@ -43,6 +43,7 @@ import { Banking } from "./Banking";
 import { Projects } from "./Projects";
 import { QuoteComposer } from "./QuoteComposer";
 import { InvoiceComposer } from "./InvoiceComposer";
+import { ManualJournals } from "./ManualJournals";
 import { ContactRecord } from "./ContactRecord";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
@@ -1570,7 +1571,16 @@ export default function App() {
               {reportQuery.error ? (
                 <ErrorBox error={reportQuery.error.message} />
               ) : reportQuery.data ? (
-                <Ledger report={reportQuery.data} mode={view} />
+                view === "journals" ? (
+                  <ManualJournals
+                    key={entity}
+                    entity={data.entities.find((e) => e.id === entity)!}
+                    report={reportQuery.data}
+                    onRun={runWithResult}
+                  />
+                ) : (
+                  <Ledger report={reportQuery.data} mode={view} />
+                )
               ) : (
                 <p aria-busy="true">Loading ledger…</p>
               )}

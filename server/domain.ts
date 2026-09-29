@@ -105,7 +105,18 @@ async function entityDate(tx: SQL, id: string, date: string, ctx: Context) {
     reject(409, "This accounting period is locked. Choose a later date.");
   return entity;
 }
-type PostingLine = { account: string; debit?: bigint; credit?: bigint };
+type PostingLine = {
+  account: string;
+  debit?: bigint;
+  credit?: bigint;
+  memo?: string;
+};
+type PostingMeta = {
+  reference?: string;
+  memo?: string;
+  requestHash?: string;
+  reversesJournalId?: string;
+};
 export async function post(
   tx: SQL,
   ctx: Context,
@@ -115,6 +126,7 @@ export async function post(
   sourceId: string,
   description: string,
   lines: PostingLine[],
+  meta: PostingMeta = {},
 ) {
   const filtered = lines.filter((l) => (l.debit || 0n) + (l.credit || 0n) > 0n);
   if (source !== "bank-opening") {
@@ -138,12 +150,25 @@ export async function post(
     throw new Error("Posting is not balanced.");
   const id = uuid();
   await tx.query(
-    "INSERT INTO journals(id,tenant_id,entity_id,source_type,source_id,posted_on,description,actor_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
-    [id, ctx.tenantId, entity, source, sourceId, date, description, ctx.userId],
+    "INSERT INTO journals(id,tenant_id,entity_id,source_type,source_id,posted_on,description,actor_id,external_reference,memo,request_hash,reverses_journal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    [
+      id,
+      ctx.tenantId,
+      entity,
+      source,
+      sourceId,
+      date,
+      description,
+      ctx.userId,
+      meta.reference || "",
+      meta.memo || "",
+      meta.requestHash || null,
+      meta.reversesJournalId || null,
+    ],
   );
-  for (const l of filtered)
+  for (const [index, l] of filtered.entries())
     await tx.query(
-      "INSERT INTO journal_lines(id,tenant_id,entity_id,journal_id,account_code,debit_minor,credit_minor) VALUES($1,$2,$3,$4,$5,$6,$7)",
+      "INSERT INTO journal_lines(id,tenant_id,entity_id,journal_id,account_code,debit_minor,credit_minor,memo,line_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
       [
         uuid(),
         ctx.tenantId,
@@ -152,6 +177,8 @@ export async function post(
         l.account,
         String(l.debit || 0n),
         String(l.credit || 0n),
+        l.memo || "",
+        index + 1,
       ],
     );
   return id;
@@ -307,7 +334,8 @@ export async function reports(
   ).rows;
   const journals = (
     await tx.query(
-      `SELECT j.*,json_agg(json_build_object('account',l.account_code,'debit',l.debit_minor::text,'credit',l.credit_minor::text)) AS lines
+      `SELECT j.*,(SELECT r.id FROM journals r WHERE r.reverses_journal_id=j.id) AS reversal_id,
+       json_agg(json_build_object('account',l.account_code,'debit',l.debit_minor::text,'credit',l.credit_minor::text,'memo',l.memo) ORDER BY l.line_number,l.id) AS lines
     FROM journals j JOIN journal_lines l ON l.journal_id=j.id WHERE j.entity_id=$1 AND j.posted_on BETWEEN $2 AND $3 GROUP BY j.id ORDER BY j.posted_on DESC,j.created_at DESC`,
       [entityId, from, to],
     )

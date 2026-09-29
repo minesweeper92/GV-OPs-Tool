@@ -1557,22 +1557,50 @@ export function DocumentRecord({
     </>
   );
 }
-export function Ledger({ report, mode }: { report: Report; mode: string }) {
+export function Ledger({
+  report,
+  mode,
+  onReverse,
+}: {
+  report: Report;
+  mode: string;
+  onReverse?: (id: string) => void;
+}) {
   if (mode === "journals")
     return report.journals.length ? (
       <div className="journals">
         {report.journals.map((j) => (
           <section key={j.id}>
             <div className="section-title">
-              <h3>{j.description}</h3>
+              <div>
+                <h3>{j.description}</h3>
+                {j.memo ? <p className="muted">{j.memo}</p> : null}
+                {j.source_type === "manual" && j.reversal_id ? (
+                  <small>Reversed by a later journal</small>
+                ) : null}
+                {j.reverses_journal_id ? (
+                  <small>
+                    Reverses journal {j.reverses_journal_id.slice(0, 8)}
+                  </small>
+                ) : null}
+              </div>
               <span>{day(j.posted_on)}</span>
             </div>
-            <Table headers={["Account", "Debit", "Credit"]}>
+            {j.source_type === "manual" && !j.reversal_id && onReverse ? (
+              <button type="button" onClick={() => onReverse(j.id)}>
+                Reverse this journal
+              </button>
+            ) : null}
+            <Table
+              headers={["Account", "Debit", "Credit"]}
+              label={`${j.description} ${j.id.slice(0, 8)} lines`}
+            >
               {j.lines.map((l, i) => (
                 <tr key={i}>
                   <td>
                     {l.account} ·{" "}
                     {report.trial.find((a) => a.code === l.account)?.name}
+                    {l.memo ? <small>{l.memo}</small> : null}
                   </td>
                   <td className="num">{money(l.debit)}</td>
                   <td className="num">{money(l.credit)}</td>

@@ -83,15 +83,17 @@ export function Empty({
 export function Table({
   headers,
   children,
+  label,
 }: {
   headers: string[];
   children: ReactNode;
+  label?: string;
 }) {
   return (
     <div
       className="table-scroll"
       role="region"
-      aria-label={headers.join(", ")}
+      aria-label={label || headers.join(", ")}
       tabIndex={0}
     >
       <table>
