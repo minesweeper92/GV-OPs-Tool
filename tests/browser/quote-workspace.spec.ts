@@ -11,6 +11,9 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await page
     .getByRole("button", { name: "Owner Grid Velocity · sample" })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
   const me = await (await page.request.get("/api/me")).json();
   const data = await (await page.request.get("/api/data")).json();
   const entity = data.entities[0];
@@ -53,6 +56,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     })
   ).id;
   const deal = (await command({ action: "lead.convert", id: lead })).id;
+  await page.reload();
   await page.getByRole("link", { name: "Quotes", exact: true }).click();
   await page
     .locator("main#main")
@@ -137,6 +141,9 @@ test("new customer and project can be created without losing a quote draft", asy
   await page
     .getByRole("button", { name: "Owner Grid Velocity · sample" })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
   const data = await (await page.request.get("/api/data")).json();
   const customerName = `Inline quote customer ${randomUUID().slice(0, 8)}`;
   await page.getByRole("link", { name: "Quotes", exact: true }).click();
