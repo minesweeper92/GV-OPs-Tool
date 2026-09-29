@@ -4,6 +4,7 @@ import type { SQL, Row } from "./db.ts";
 import { Problem, audit, post, type Context } from "./domain.ts";
 import { minor, round, baseAmount } from "../shared/money.ts";
 import { invoiceCredits } from "./credits.ts";
+import { allocateNumber } from "./numbering.ts";
 const finance = (ctx: Context) => {
   if (!["admin", "finance"].includes(ctx.role))
     throw new Problem(
@@ -223,9 +224,16 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
     id = uuid();
   if (baseAmount(BigInt(calculated.net), BigInt(q.fx_micros)) <= 0n)
     throw new Problem(400, "The invoice subtotal rounds to zero in PKR.");
+  const number = await allocateNumber(
+    tx,
+    ctx.tenantId,
+    d.entity_id,
+    "invoice",
+    c.number_series_id,
+  );
   await tx.query(
-    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros,details)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros,details,number)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
     [
       id,
       ctx.tenantId,
@@ -246,6 +254,7 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
       q.currency,
       q.fx_micros,
       JSON.stringify(c.details || q.details || {}),
+      number,
     ],
   );
   await audit(tx, ctx, id, "invoice.create", { ...c, deal_id: d.id });

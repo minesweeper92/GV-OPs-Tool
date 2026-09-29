@@ -4,6 +4,7 @@ import { Field, ErrorBox } from "./components";
 import { CustomFields } from "./ProfileFields";
 import { today, money, rate, type Data, type Line } from "./model";
 import { documentDetails } from "../shared/documents";
+import { NumberSeriesField } from "./NumberSeriesField";
 import { totals } from "../shared/money";
 
 const emptyLine = (): Line => ({
@@ -21,6 +22,7 @@ export function QuoteComposer({
   id,
   data,
   entityId,
+  canManageNumbering,
   create,
   close,
   done,
@@ -28,6 +30,7 @@ export function QuoteComposer({
   id: string;
   data: Data;
   entityId: string;
+  canManageNumbering: boolean;
   create: (command: Record<string, unknown>) => Promise<{ id: string }>;
   close: () => void;
   done: (quoteId: string) => void;
@@ -62,6 +65,7 @@ export function QuoteComposer({
   const [dirty, setDirty] = useState(false);
   const [savedQuoteId, setSavedQuoteId] = useState("");
   const [shareReference, setShareReference] = useState("");
+  const [numberSeriesId, setNumberSeriesId] = useState("");
   const [optionName, setOptionName] = useState(initialQuote?.option_name || "");
   const [currency, setCurrency] = useState(initialQuote?.currency || "PKR");
   const [fx, setFx] = useState(
@@ -237,6 +241,7 @@ export function QuoteComposer({
       }
       const deal = (await create({ action: "lead.convert", id: lead })).id;
       setDealId(deal);
+      setNumberSeriesId("");
       setProjectOpen(false);
       setNotice("Project created and linked to this quote.");
       setDirty(true);
@@ -275,6 +280,7 @@ export function QuoteComposer({
             lines,
             details,
             terms,
+            ...(numberSeriesId ? { number_series_id: numberSeriesId } : {}),
           })
         ).id;
         setSavedQuoteId(quoteId);
@@ -447,12 +453,20 @@ export function QuoteComposer({
           <section className="quote-composer-section">
             <h2>Quote information</h2>
             <div className="quote-field-grid">
-              <Field
-                label="Quote number"
-                hint="Assigned when you save this version."
-              >
-                <input value="Auto-numbered on save" readOnly />
-              </Field>
+              <NumberSeriesField
+                data={data}
+                entityId={
+                  chosenDeal?.entity_id ||
+                  projectEntity ||
+                  (entityId === "all" ? "" : entityId)
+                }
+                kind="quote"
+                selectedId={numberSeriesId}
+                onSelect={setNumberSeriesId}
+                create={create}
+                canManage={canManageNumbering}
+                existingNumber={undefined}
+              />
               <Field label="Reference number">
                 <input
                   value={details.reference}
@@ -480,28 +494,58 @@ export function QuoteComposer({
               </Field>
             </div>
             <div className="quote-field-grid">
-              <Field label="Project name">
-                <select
-                  value={dealId}
-                  required
-                  disabled={!!initialDeal}
-                  onChange={(e) => {
-                    setDealId(e.target.value);
-                    setDirty(true);
-                  }}
+              <div className="quote-project-picker">
+                <Field
+                  label="Project / opportunity"
+                  hint="Choose the work being quoted. You can create it here without leaving this form."
                 >
-                  <option value="">Select a project</option>
-                  {openDeals.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ·{" "}
-                      {data.entities.find((e) => e.id === d.entity_id)?.code}
-                    </option>
-                  ))}
-                  {chosenDeal && !openDeals.some((d) => d.id === dealId) ? (
-                    <option value={chosenDeal.id}>{chosenDeal.name}</option>
-                  ) : null}
-                </select>
-              </Field>
+                  <select
+                    value={dealId}
+                    required
+                    disabled={!!initialDeal}
+                    onChange={(e) => {
+                      if (e.target.value === "new") setProjectOpen(true);
+                      else {
+                        setDealId(e.target.value);
+                        setNumberSeriesId("");
+                      }
+                      setDirty(true);
+                    }}
+                  >
+                    <option value="">Select a project</option>
+                    {openDeals.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ·{" "}
+                        {data.entities.find((e) => e.id === d.entity_id)?.code}
+                      </option>
+                    ))}
+                    {chosenDeal && !openDeals.some((d) => d.id === dealId) ? (
+                      <option value={chosenDeal.id}>{chosenDeal.name}</option>
+                    ) : null}
+                    {companyId && !initialDeal ? (
+                      <option value="new">＋ Create new project…</option>
+                    ) : null}
+                  </select>
+                </Field>
+                {!initialDeal ? (
+                  <button
+                    type="button"
+                    className="quote-inline-add"
+                    onClick={() => {
+                      if (!companyId)
+                        setError(
+                          "Choose a customer company first, then add the project.",
+                        );
+                      else {
+                        setError("");
+                        setProjectOpen(true);
+                      }
+                    }}
+                  >
+                    <Plus size={16} /> Add project
+                  </button>
+                ) : null}
+              </div>
               <Field
                 label="Named option"
                 hint="Baku, Sri Lanka, Director A, etc. Reusing a name creates its next version."
@@ -517,15 +561,6 @@ export function QuoteComposer({
                 />
               </Field>
             </div>
-            {companyId && !initialDeal ? (
-              <button
-                type="button"
-                className="quote-inline-add"
-                onClick={() => setProjectOpen((open) => !open)}
-              >
-                <Plus size={16} /> New project for this customer
-              </button>
-            ) : null}
             {projectOpen && companyId && !initialDeal ? (
               <div className="quote-inline-panel">
                 <h3>New project</h3>
@@ -544,7 +579,10 @@ export function QuoteComposer({
                   <Field label="Issuing legal entity">
                     <select
                       value={projectEntity}
-                      onChange={(e) => setProjectEntity(e.target.value)}
+                      onChange={(e) => {
+                        setProjectEntity(e.target.value);
+                        setNumberSeriesId("");
+                      }}
                     >
                       <option value="">Choose the entity</option>
                       {data.entities.map((e) => (

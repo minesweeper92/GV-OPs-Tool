@@ -26,6 +26,7 @@ const titles: Record<string, string> = {
   entity: "Add legal entity",
   accept: "Accept this quote",
   share: "Mark quote as shared",
+  "invoice-mark-sent": "Mark invoice as sent",
   invoice: "Create invoice draft",
   "direct-invoice": "New invoice",
   "edit-invoice": "Edit invoice draft",
@@ -290,6 +291,9 @@ export function Editor({
         break;
       case "share":
         command = { action: "quote.share", id, ...f };
+        break;
+      case "invoice-mark-sent":
+        command = { action: "invoice.mark-sent", id, ...f };
         break;
       case "invoice":
       case "milestone-invoice":
@@ -879,6 +883,25 @@ export function Editor({
                 "",
                 "text",
                 "Record who confirmed it, when, and a link or reference.",
+              )}
+            </>
+          ) : null}
+          {kind === "invoice-mark-sent" ? (
+            <>
+              <div className="posting-notice">
+                <strong>{invoice?.number}</strong>
+                <p>
+                  This records an invoice sent outside the app. No email is sent
+                  and no new journal is posted.
+                </p>
+              </div>
+              {text(
+                "reference",
+                "Email link or message reference",
+                true,
+                "",
+                "text",
+                "Record the message or other evidence of delivery.",
               )}
             </>
           ) : null}

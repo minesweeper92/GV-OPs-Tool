@@ -181,6 +181,22 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  numberSeries: {
+    id: string | null;
+    entity_id: string;
+    kind: "quote" | "invoice";
+    name: string;
+    prefix: string;
+    padding: number;
+    next_number: string | number;
+    is_default: boolean;
+  }[];
+  invoiceDeliveryEvents: {
+    invoice_id: string;
+    kind: "Sent";
+    reference: string;
+    created_at: string;
+  }[];
   catalogItems: {
     id: string;
     name: string;

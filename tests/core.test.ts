@@ -533,4 +533,151 @@ test("fresh integrated platform", async (t) => {
   await t.test("vendor bills and payments on the configured database", (sub) =>
     verifyPayables(sub, db),
   );
+  await t.test(
+    "number series, numbered drafts and manual delivery remain auditable",
+    async () => {
+      const postingDay = new Date(`${day}T12:00:00Z`);
+      postingDay.setUTCDate(postingDay.getUTCDate() + 1);
+      const invoiceDay = postingDay.toISOString().slice(0, 10);
+      const company = await owner.command({
+        action: "company.create",
+        name: `Series client ${uuid().slice(0, 8)}`,
+        customer: false,
+        vendor: false,
+        service_entity_id: null,
+      });
+      const contact = await owner.command({
+        action: "contact.create",
+        first_name: "Series buyer",
+        email: "",
+        company_id: company.id,
+        role: "Buyer",
+      });
+      const lead = await owner.command({
+        action: "lead.create",
+        company_id: company.id,
+        contact_id: contact.id,
+        entity_id: entity.id,
+        title: "Numbered job",
+        next_action: "Quote",
+        due_date: day,
+      });
+      const project = await owner.command({
+        action: "lead.convert",
+        id: lead.id,
+      });
+      const quoteSeries = await owner.command({
+        action: "number-series.create",
+        entity_id: entity.id,
+        kind: "quote",
+        name: "International",
+        prefix: "INT-QT-",
+        padding: 4,
+        next_number: 42,
+      });
+      await sales.command(
+        {
+          action: "number-series.create",
+          entity_id: entity.id,
+          kind: "quote",
+          name: "Forbidden",
+          prefix: "BAD-",
+          padding: 4,
+          next_number: 1,
+        },
+        403,
+      );
+      const quote = await owner.command({
+        action: "quote.create",
+        deal_id: project.id,
+        option_name: "Launch",
+        currency: "PKR",
+        fx: "1",
+        lines: [
+          { description: "Service", quantity: "1", price: "1000", tax: "0" },
+        ],
+        number_series_id: quoteSeries.id,
+      });
+      const quoteRow = (
+        await db.query("SELECT number FROM quotes WHERE id=$1", [quote.id])
+      ).rows[0];
+      assert.equal(quoteRow.number, "INT-QT-0042");
+      await owner.command({
+        action: "quote.accept",
+        id: quote.id,
+        reference: "Approved",
+      });
+      await owner.command({
+        action: "quote.share",
+        id: quote.id,
+        reference: "Email evidence filed later",
+      });
+      assert.equal(
+        (await db.query("SELECT stage FROM deals WHERE id=$1", [project.id]))
+          .rows[0].stage,
+        "Won",
+      );
+      const invoiceSeries = await owner.command({
+        action: "number-series.create",
+        entity_id: entity.id,
+        kind: "invoice",
+        name: "Project billing",
+        prefix: "JOB-INV-",
+        padding: 3,
+        next_number: 7,
+      });
+      const requestKey = uuid();
+      const createInvoice = {
+        action: "invoice.create",
+        quote_id: quote.id,
+        issue_date: invoiceDay,
+        due_date: invoiceDay,
+        request_key: requestKey,
+        number_series_id: invoiceSeries.id,
+      };
+      const invoice = await owner.command(createInvoice);
+      assert.equal((await owner.command(createInvoice)).id, invoice.id);
+      const draft = (
+        await db.query("SELECT number,status FROM invoices WHERE id=$1", [
+          invoice.id,
+        ])
+      ).rows[0];
+      assert.equal(draft.number, "JOB-INV-007");
+      assert.equal(draft.status, "Draft");
+      await owner.command(
+        {
+          action: "invoice.mark-sent",
+          id: invoice.id,
+          reference: "Outlook 123",
+        },
+        409,
+      );
+      await owner.command({ action: "invoice.issue", id: invoice.id });
+      await owner.command({
+        action: "invoice.mark-sent",
+        id: invoice.id,
+        reference: "Outlook 123",
+      });
+      const after = (await owner.call("/api/data")).json();
+      assert.equal(
+        after.invoices.find((i: any) => i.id === invoice.id).number,
+        "JOB-INV-007",
+      );
+      assert.ok(
+        after.invoiceDeliveryEvents.some(
+          (e: any) =>
+            e.invoice_id === invoice.id && e.reference === "Outlook 123",
+        ),
+      );
+      assert.equal(
+        (
+          await db.query(
+            "SELECT count(*)::integer AS n FROM journals WHERE source_id=$1",
+            [invoice.id],
+          )
+        ).rows[0].n,
+        1,
+      );
+    },
+  );
 });

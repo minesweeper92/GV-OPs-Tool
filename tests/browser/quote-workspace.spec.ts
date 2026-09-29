@@ -65,7 +65,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await expect(page.getByRole("heading", { name: "New quote" })).toBeVisible();
   await page.getByLabel("Search customers").fill(name.slice(0, 13));
   await page.getByLabel("Customer name").selectOption(company);
-  await page.getByLabel("Project name", { exact: true }).selectOption(deal);
+  await page.getByLabel("Project / opportunity").selectOption(deal);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByLabel("Named option").fill("Director A");
   await page
@@ -111,9 +111,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     page.getByText("No sharing or acceptance recorded yet."),
   ).toBeVisible();
   await page.getByRole("tab", { name: "Quote details" }).click();
-  await page
-    .getByRole("button", { name: "Mark as shared", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Mark as sent", exact: true }).click();
   await page
     .getByLabel("Email link or message reference")
     .fill("Outlook message reference QA-77");
@@ -131,6 +129,46 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     path: "test-results/quote-workspace-mobile.png",
     fullPage: true,
   });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "Accept this version" }).click();
+  await page.getByLabel("Acceptance evidence").fill("Approved quote QA-77");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Convert to invoice" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Convert quote to invoice" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Customer company")).toHaveValue(company);
+  await expect(page.getByLabel("Project name")).toHaveValue("Identity refresh");
+  await page.getByRole("button", { name: "New prefix" }).click();
+  const prefix = `QA${randomUUID().slice(0, 5).toUpperCase()}-`;
+  await page.getByLabel("Series name").fill(`QA series ${prefix}`);
+  await page.getByLabel("Prefix", { exact: true }).fill(prefix);
+  await page.getByLabel("Next number").fill("12");
+  await page.getByLabel("Digits").fill("4");
+  await page.getByRole("button", { name: "Save prefix and use it" }).click();
+  await expect(page.getByLabel("invoice number preview")).toHaveValue(
+    `${prefix}0012`,
+  );
+  await page.getByRole("button", { name: "Save as draft" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText(`${prefix}0012`);
+  await expect(page.locator(".quote-action-bar")).toContainText("Not sent");
+  await page.getByRole("button", { name: "Issue invoice" }).click();
+  await page.getByRole("button", { name: "Issue and post" }).click();
+  await page.getByRole("button", { name: "Mark as sent" }).click();
+  await page
+    .getByLabel("Email link or message reference")
+    .fill("Outlook invoice QA-77");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator(".quote-action-bar")).toContainText("Sent");
+  const final = await (await page.request.get("/api/data")).json();
+  const invoiced = final.invoices.find((i: any) => i.quote_id === quote.id);
+  expect(invoiced.number).toBe(`${prefix}0012`);
+  expect(
+    final.invoiceDeliveryEvents.some(
+      (e: any) =>
+        e.invoice_id === invoiced.id && e.reference === "Outlook invoice QA-77",
+    ),
+  ).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -171,9 +209,17 @@ test("new customer and project can be created without losing a quote draft", asy
     .selectOption(data.entities[0].id);
   await page.getByLabel("Project contact").selectOption({ label: "Ayesha" });
   await page.getByRole("button", { name: "Create project" }).click();
-  await expect(
-    page.getByLabel("Project name", { exact: true }).first(),
-  ).toHaveValue(/.+/);
+  await expect(page.getByLabel("Project / opportunity")).toHaveValue(/.+/);
+  await page.getByRole("button", { name: "New prefix" }).click();
+  const quotePrefix = `Q${randomUUID().slice(0, 5).toUpperCase()}-`;
+  await page.getByLabel("Series name").fill(`Quote series ${quotePrefix}`);
+  await page.getByLabel("Prefix", { exact: true }).fill(quotePrefix);
+  await page.getByLabel("Next number").fill("9");
+  await page.getByLabel("Digits").fill("3");
+  await page.getByRole("button", { name: "Save prefix and use it" }).click();
+  await expect(page.getByLabel("quote number preview")).toHaveValue(
+    `${quotePrefix}009`,
+  );
   await page.getByLabel("Named option").fill("Director A");
   await page
     .getByLabel("Description 1", { exact: true })
@@ -183,8 +229,10 @@ test("new customer and project can be created without losing a quote draft", asy
     .getByLabel("Sent message reference")
     .fill("Outlook message draft ref 123");
   await page.getByRole("button", { name: "Save & mark as sent" }).click();
-  await expect(page.locator(".page-heading h1")).toHaveText(/QT-\d{6}/);
-  await expect(page.locator(".quote-action-bar")).toContainText("Shared");
+  await expect(page.locator(".page-heading h1")).toHaveText(
+    `${quotePrefix}009`,
+  );
+  await expect(page.locator(".quote-action-bar")).toContainText("Sent");
   await page.getByRole("tab", { name: "Activity" }).click();
   await expect(page.getByText("Outlook message draft ref 123")).toBeVisible();
 });

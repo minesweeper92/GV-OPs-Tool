@@ -69,6 +69,7 @@ export const documentCommands = [
     terms: text,
     details: documentDetails,
     request_key: z.uuid(),
+    number_series_id: z.uuid().optional(),
   }),
   z.strictObject({
     action: z.literal("document.invoice-edit"),

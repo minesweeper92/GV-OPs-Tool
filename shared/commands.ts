@@ -186,6 +186,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     lines: z.array(documentLine).min(1).max(100),
     details: documentDetails.optional(),
     terms: optional,
+    number_series_id: id.optional(),
   }),
   z.strictObject({ action: z.literal("quote.share"), id, reference: text }),
   z.strictObject({ action: z.literal("quote.accept"), id, reference: text }),
@@ -200,8 +201,26 @@ export const commandSchema = z.discriminatedUnion("action", [
     milestone_id: id.nullable().optional(),
     request_key: id.optional(),
     details: documentDetails.optional(),
+    number_series_id: id.optional(),
   }),
   z.strictObject({ action: z.literal("invoice.issue"), id }),
+  z.strictObject({
+    action: z.literal("invoice.mark-sent"),
+    id,
+    reference: text,
+  }),
+  z.strictObject({
+    action: z.literal("number-series.create"),
+    entity_id: id,
+    kind: z.enum(["quote", "invoice"]),
+    name: text,
+    prefix: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z][A-Za-z0-9/_-]{0,19}$/),
+    padding: z.number().int().min(1).max(12),
+    next_number: z.number().int().min(1).max(999999999999),
+  }),
   z.strictObject({ action: z.literal("invoice.void"), id, reason: text, date }),
   z.strictObject({
     action: z.literal("payment.create"),

@@ -122,7 +122,7 @@ export function DealRecord({
                     <td className="num">{money(q.total_minor, q.currency)}</td>
                     <td>
                       <Badge>
-                        {accepted ? "Accepted" : shared ? "Shared" : "Draft"}
+                        {accepted ? "Accepted" : shared ? "Sent" : "Draft"}
                       </Badge>
                     </td>
                     <td>
@@ -138,7 +138,7 @@ export function DealRecord({
                             <button
                               onClick={() => edit({ kind: "share", id: q.id })}
                             >
-                              Mark shared
+                              Mark sent
                             </button>
                             <button
                               onClick={() => edit({ kind: "accept", id: q.id })}
@@ -587,10 +587,18 @@ export function DocumentRecord({
     deal?.accepted_quote_id === id
       ? "Accepted"
       : quoteEvents.some((e) => e.kind === "Shared")
-        ? "Shared"
+        ? "Sent"
         : "Draft";
+  const quoteSent = quoteEvents.some((e) => e.kind === "Shared");
   const canChangeQuote =
     !!quote && sales(me) && !["Won", "Lost"].includes(deal?.stage || "");
+  const canMarkQuoteSent =
+    !!quote &&
+    sales(me) &&
+    !quoteSent &&
+    (!deal ||
+      !["Won", "Lost"].includes(deal.stage) ||
+      deal.accepted_quote_id === id);
   const action = invoice
     ? invoice.status === "Draft"
       ? "Issue invoice"
@@ -628,6 +636,20 @@ export function DocumentRecord({
       {invoice ? (
         <div className="quote-action-bar" aria-label="Invoice actions">
           <Badge>{invoice.status}</Badge>
+          <Badge>
+            {data.invoiceDeliveryEvents.some((e) => e.invoice_id === invoice.id)
+              ? "Sent"
+              : "Not sent"}
+          </Badge>
+          {finance(me) &&
+          ["Issued", "Paid", "Settled"].includes(invoice.status) &&
+          !data.invoiceDeliveryEvents.some(
+            (e) => e.invoice_id === invoice.id,
+          ) ? (
+            <button onClick={() => edit({ kind: "invoice-mark-sent", id })}>
+              Mark as sent
+            </button>
+          ) : null}
           <button onClick={() => window.print()}>PDF / Print</button>
         </div>
       ) : null}
@@ -635,14 +657,17 @@ export function DocumentRecord({
         <>
           <div className="quote-action-bar" aria-label="Quote actions">
             <Badge>{quoteStatus}</Badge>
+            {quoteStatus === "Accepted" ? (
+              <Badge>{quoteSent ? "Sent" : "Not sent"}</Badge>
+            ) : null}
             {canChangeQuote ? (
               <button onClick={() => edit({ kind: "quote", id })}>
                 Create revision
               </button>
             ) : null}
-            {canChangeQuote ? (
+            {canMarkQuoteSent ? (
               <button onClick={() => edit({ kind: "share", id })}>
-                Mark as shared
+                Mark as sent
               </button>
             ) : null}
             {canChangeQuote ? (
@@ -655,9 +680,20 @@ export function DocumentRecord({
             ) : null}
             {finance(me) &&
             deal?.accepted_quote_id === id &&
-            !data.invoices.some((i) => i.deal_id === doc.deal_id) ? (
+            data.invoices
+              .filter(
+                (i) =>
+                  i.quote_id === id &&
+                  !["Voided", "Cancelled"].includes(i.status),
+              )
+              .reduce((sum, i) => sum + BigInt(i.net_minor), 0n) +
+              BigInt(
+                data.projects.find((p) => p.quote_id === id)?.planned_net ||
+                  "0",
+              ) <
+              BigInt(quote.net_minor) ? (
               <button onClick={() => edit({ kind: "invoice", id })}>
-                Create invoice
+                Convert to invoice
               </button>
             ) : null}
             <button onClick={printQuote}>PDF / Print</button>
@@ -665,7 +701,7 @@ export function DocumentRecord({
           {quoteStatus === "Draft" && canChangeQuote ? (
             <p className="quote-next-step">
               Next step: share this quote with the customer, then record the
-              email or message reference using “Mark as shared”.
+              email or message reference using “Mark as sent”.
             </p>
           ) : null}
           <div
@@ -1066,6 +1102,23 @@ export function DocumentRecord({
             <p>{entity?.code} · base PKR</p>
             {invoice ? (
               <>
+                <h3 className="space-top">Delivery</h3>
+                {data.invoiceDeliveryEvents.filter((e) => e.invoice_id === id)
+                  .length ? (
+                  data.invoiceDeliveryEvents
+                    .filter((e) => e.invoice_id === id)
+                    .map((e, i) => (
+                      <div className="association-item" key={i}>
+                        <Badge>Sent</Badge>
+                        <span>{e.reference}</span>
+                        <small>{day(e.created_at)}</small>
+                      </div>
+                    ))
+                ) : (
+                  <p className="muted">
+                    Not marked as sent. Issuing an invoice does not send email.
+                  </p>
+                )}
                 <h3 className="space-top">Payments</h3>
                 {data.payments
                   .filter((p) => p.invoice_id === id)
@@ -1092,7 +1145,7 @@ export function DocumentRecord({
                   .filter((e) => e.quote_id === id)
                   .map((e, i) => (
                     <p key={i}>
-                      <Badge>{e.kind}</Badge>
+                      <Badge>{e.kind === "Shared" ? "Sent" : e.kind}</Badge>
                       <br />
                       {e.reference}
                     </p>

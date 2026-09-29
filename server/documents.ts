@@ -3,6 +3,7 @@ import type { SQL, Row } from "./db.ts";
 import { Problem, audit, type Context } from "./domain.ts";
 import { totals, scaled, baseAmount } from "../shared/money.ts";
 import { documentDetails } from "../shared/documents.ts";
+import { allocateNumber } from "./numbering.ts";
 
 export function detailsSnapshot(company: Row, details?: Row) {
   const p = company.profile || {};
@@ -174,9 +175,16 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
     }
     if (baseAmount(BigInt(calculated.net), fx) <= 0n)
       throw new Problem(400, "The subtotal rounds to zero in PKR.");
+    const number = await allocateNumber(
+      tx,
+      ctx.tenantId,
+      e.id,
+      "invoice",
+      c.number_series_id,
+    );
     await tx.query(
-      `INSERT INTO invoices(id,tenant_id,entity_id,company_id,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,issue_date,due_date,lines,net_minor,tax_minor,total_minor,currency,fx_micros,billing_kind,label,request_key,request_payload,details)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+      `INSERT INTO invoices(id,tenant_id,entity_id,company_id,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,issue_date,due_date,lines,net_minor,tax_minor,total_minor,currency,fx_micros,billing_kind,label,request_key,request_payload,details,number)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
       [
         id,
         ctx.tenantId,
@@ -200,6 +208,7 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
         c.request_key,
         JSON.stringify(c),
         JSON.stringify(detailsSnapshot(company, c.details)),
+        number,
       ],
     );
     await tx.query("UPDATE companies SET customer=true WHERE id=$1", [

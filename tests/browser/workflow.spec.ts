@@ -180,7 +180,10 @@ test("accepted work to project, advance invoice, delivery recognition and profit
     .click();
   await page.getByRole("button", { name: "Save invoice draft" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
-  await page.getByRole("link", { name: "Open draft", exact: true }).click();
+  await page
+    .getByRole("link", { name: /INV-\d+/, exact: true })
+    .first()
+    .click();
   await expect(page.locator(".document")).toContainText("PKR 47,200.00");
   await page
     .getByRole("button", { name: "Issue invoice", exact: true })
@@ -645,13 +648,13 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await page
-    .getByRole("button", { name: "Create invoice", exact: true })
+    .getByRole("button", { name: "Convert to invoice", exact: true })
     .click();
-  await page.getByRole("button", { name: "Save invoice draft" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Invoice draft", exact: true }),
+    page.getByRole("heading", { name: "Convert quote to invoice" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Save as draft" }).click();
+  await expect(page.locator(".page-heading h1")).toHaveText(/INV-\d+/);
   await page.getByRole("button", { name: "Issue invoice" }).click();
   await page.getByRole("button", { name: "Issue and post" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();

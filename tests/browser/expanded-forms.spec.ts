@@ -67,9 +67,11 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   const company = data.companies[0],
     entity = data.entities.find((e: any) => e.code === "PVT");
   await page
-    .getByLabel("Legal entity", { exact: true })
+    .getByLabel("Issuing legal entity", { exact: true })
     .selectOption(entity.id);
-  await page.getByLabel("Customer", { exact: true }).selectOption(company.id);
+  await page
+    .getByLabel("Customer company", { exact: true })
+    .selectOption(company.id);
   const reference = `PO-${randomUUID().slice(0, 8)}`;
   await page
     .getByLabel("Description 1", { exact: true })
@@ -77,14 +79,16 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   await page.getByLabel("Unit price 1", { exact: true }).fill("1000");
   await page.getByLabel("Quantity 1", { exact: true }).fill("2");
   await page.getByLabel("Tax % 1", { exact: true }).fill("18");
+  await page.getByText("Unit, section and discount").click();
   await page.getByLabel("Discount 1", { exact: true }).fill("10");
   await page.getByLabel("Unit 1", { exact: true }).fill("days");
   await page.getByLabel("Section 1", { exact: true }).fill("Strategy");
+  await page.getByText("More customer, billing and PDF details").click();
   await page
     .getByLabel("Purchase order number", { exact: true })
     .fill(reference);
   await page
-    .getByLabel("Customer billing address", { exact: true })
+    .getByLabel("Billing address", { exact: true })
     .fill("Invoice snapshot address");
   await page
     .getByRole("button", { name: "Save line 1 to item library", exact: true })
@@ -105,9 +109,11 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
     fullPage: true,
   });
   await page
-    .getByRole("button", { name: "Save invoice draft", exact: true })
+    .getByRole("button", { name: "Save as draft", exact: true })
     .click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "New invoice" })).toHaveCount(
+    0,
+  );
   let saved = await (await page.request.get("/api/data")).json();
   const invoice = saved.invoices.find(
     (i: any) => i.details.purchase_order === reference,

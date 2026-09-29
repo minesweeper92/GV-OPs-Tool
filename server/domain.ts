@@ -4,6 +4,7 @@ import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { createProjectInvoice } from "./projects.ts";
 import { detailsSnapshot } from "./documents.ts";
+import { allocateNumber, createNumberSeries } from "./numbering.ts";
 export type Context = {
   tenantId: string;
   userId: string;
@@ -200,6 +201,35 @@ export async function snapshot(tx: SQL, ctx: Context) {
       [quotes.map((q) => q.id)],
     )
   ).rows;
+  const invoiceDeliveryEvents = (
+    await tx.query(
+      "SELECT * FROM invoice_delivery_events WHERE invoice_id=ANY($1::uuid[]) ORDER BY created_at DESC",
+      [invoices.map((i) => i.id)],
+    )
+  ).rows;
+  const storedSeries = (
+    await tx.query(
+      "SELECT * FROM number_series ORDER BY entity_id,kind,is_default DESC,name",
+    )
+  ).rows;
+  const numberSeries = [...storedSeries];
+  for (const e of entities)
+    for (const kind of ["quote", "invoice"] as const)
+      if (
+        !storedSeries.some(
+          (s) => s.entity_id === e.id && s.kind === kind && s.is_default,
+        )
+      )
+        numberSeries.push({
+          id: null,
+          entity_id: e.id,
+          kind,
+          name: "Standard",
+          prefix: kind === "quote" ? "QT-" : `${e.code}-INV-`,
+          padding: kind === "quote" ? 6 : 5,
+          next_number: kind === "quote" ? e.next_quote_number : e.next_invoice,
+          is_default: true,
+        });
   const payments = (
     await tx.query(
       "SELECT * FROM payments WHERE invoice_id=ANY($1::uuid[]) ORDER BY created_at DESC",
@@ -238,6 +268,8 @@ export async function snapshot(tx: SQL, ctx: Context) {
     deals,
     quotes,
     quoteEvents,
+    invoiceDeliveryEvents,
+    numberSeries,
     invoices,
     payments,
     expenses,
@@ -508,15 +540,13 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           )
         ).rows[0].n,
       );
-      const nextNumber = Number(
-        (
-          await tx.query(
-            "UPDATE entities SET next_quote_number=next_quote_number+1 WHERE id=$1 RETURNING next_quote_number-1 AS n",
-            [e.id],
-          )
-        ).rows[0].n,
+      const number = await allocateNumber(
+        tx,
+        t,
+        e.id,
+        "quote",
+        c.number_series_id,
       );
-      const number = `QT-${String(nextNumber).padStart(6, "0")}`;
       await tx.query(
         `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by,details,number)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
@@ -550,7 +580,10 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
     case "quote.accept": {
       const q = await record(tx, "quotes", c.id, ctx),
         d = await record(tx, "deals", q.deal_id, ctx, true);
-      if (["Won", "Lost"].includes(d.stage))
+      if (
+        ["Won", "Lost"].includes(d.stage) &&
+        (c.action === "quote.accept" || d.accepted_quote_id !== q.id)
+      )
         reject(409, "This deal is already closed.");
       if (c.action === "quote.accept") {
         await tx.query(
@@ -560,7 +593,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         await tx.query("UPDATE companies SET customer=true WHERE id=$1", [
           d.company_id,
         ]);
-      } else
+      } else if (d.stage !== "Won")
         await tx.query("UPDATE deals SET stage='Negotiation' WHERE id=$1", [
           d.id,
         ]);
@@ -580,6 +613,20 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
     case "invoice.create": {
       return createProjectInvoice(tx, ctx, c);
     }
+    case "number-series.create": {
+      return createNumberSeries(tx, ctx, c);
+    }
+    case "invoice.mark-sent": {
+      const invoice = await record(tx, "invoices", c.id, ctx);
+      if (!["Issued", "Paid", "Settled"].includes(invoice.status))
+        reject(409, "Issue the invoice before marking it sent.");
+      await tx.query(
+        "INSERT INTO invoice_delivery_events(id,tenant_id,invoice_id,kind,reference,actor_id) VALUES($1,$2,$3,'Sent',$4,$5)",
+        [id, t, invoice.id, c.reference, ctx.userId],
+      );
+      await audit(tx, ctx, invoice.id, c.action, { reference: c.reference });
+      return { id: invoice.id };
+    }
     case "invoice.issue": {
       const i = await record(tx, "invoices", c.id, ctx);
       if (i.status !== "Draft") {
@@ -593,11 +640,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         String(i.issue_date).slice(0, 10),
         ctx,
       );
-      const number = `${e.code}-INV-${String(e.next_invoice).padStart(5, "0")}`;
-      await tx.query(
-        "UPDATE entities SET next_invoice=next_invoice+1 WHERE id=$1",
-        [e.id],
-      );
+      // Older drafts may be unnumbered; new drafts receive a number on save.
+      const number = i.number || (await allocateNumber(tx, t, e.id, "invoice"));
       const net = baseAmount(BigInt(i.net_minor), BigInt(i.fx_micros)),
         total = baseAmount(BigInt(i.total_minor), BigInt(i.fx_micros));
       if (total <= 0n) reject(400, "Base-currency total rounds to zero.");

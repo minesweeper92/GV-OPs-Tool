@@ -42,6 +42,7 @@ import { FinancialReports } from "./FinancialReports";
 import { Banking } from "./Banking";
 import { Projects } from "./Projects";
 import { QuoteComposer } from "./QuoteComposer";
+import { InvoiceComposer } from "./InvoiceComposer";
 import { ContactRecord } from "./ContactRecord";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
@@ -1945,12 +1946,35 @@ export default function App() {
                 id={editor.id || ""}
                 data={data}
                 entityId={entity}
+                canManageNumbering={
+                  me.user.role === "admin" || me.user.role === "finance"
+                }
                 create={runWithResult}
                 close={() => setEditor(null)}
                 done={(quoteId) => {
                   setEditor(null);
                   location.hash = `#quote/${quoteId}`;
                 }}
+              />
+            ) : (editor?.kind === "invoice" ||
+                editor?.kind === "direct-invoice") &&
+              data &&
+              me ? (
+              <InvoiceComposer
+                key={`${editor.kind}-${editor.id || "new"}`}
+                id={editor.id || ""}
+                kind={editor.kind}
+                data={data}
+                entityId={entity}
+                create={runWithResult}
+                close={() => setEditor(null)}
+                done={(invoiceId) => {
+                  setEditor(null);
+                  location.hash = `#invoice/${invoiceId}`;
+                }}
+                canManageNumbering={
+                  me.user.role === "admin" || me.user.role === "finance"
+                }
               />
             ) : (
               content()
@@ -1989,7 +2013,9 @@ export default function App() {
           />
         </Suspense>
       ) : null}
-      {editor && editor.kind !== "quote" && data ? (
+      {editor &&
+      !["quote", "invoice", "direct-invoice"].includes(editor.kind) &&
+      data ? (
         <Suspense fallback={<p role="status">Opening editor…</p>}>
           <Editor
             key={editor.kind + editor.id}
