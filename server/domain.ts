@@ -57,7 +57,7 @@ export async function seedAccounts(
 ) {
   for (const [code, name, type] of chart)
     await tx.query(
-      "INSERT INTO accounts(tenant_id,entity_id,code,name,type) VALUES($1,$2,$3,$4,$5)",
+      "INSERT INTO accounts(tenant_id,entity_id,code,name,type,system) VALUES($1,$2,$3,$4,$5,true)",
       [tenantId, entityId, code, name, type],
     );
 }
@@ -325,10 +325,11 @@ export async function reports(
   await record(tx, "entities", entityId, ctx);
   const trial = (
     await tx.query(
-      `SELECT a.code,a.name,a.type,coalesce(sum(l.debit_minor),0)::text AS debit,coalesce(sum(l.credit_minor),0)::text AS credit
+      `SELECT a.id,a.code,a.name,a.type,a.parent_code,a.description,a.active,a.system,a.version,
+       coalesce(sum(l.debit_minor),0)::text AS debit,coalesce(sum(l.credit_minor),0)::text AS credit
     FROM accounts a LEFT JOIN journal_lines l ON l.entity_id=a.entity_id AND l.account_code=a.code AND l.journal_id IN
     (SELECT id FROM journals WHERE entity_id=$1 AND posted_on BETWEEN $2 AND $3)
-    WHERE a.entity_id=$1 GROUP BY a.code,a.name,a.type ORDER BY a.code`,
+    WHERE a.entity_id=$1 GROUP BY a.id,a.code,a.name,a.type,a.parent_code,a.description,a.active,a.system,a.version ORDER BY a.code`,
       [entityId, from, to],
     )
   ).rows;

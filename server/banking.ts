@@ -147,7 +147,7 @@ export async function executeBank(tx: SQL, ctx: Context, c: Row) {
     const opening = signedMinor(c.opening),
       code = `10B${String(e.next_bank).padStart(4, "0")}`;
     await tx.query(
-      "INSERT INTO accounts(tenant_id,entity_id,code,name,type) VALUES($1,$2,$3,$4,'Asset')",
+      "INSERT INTO accounts(tenant_id,entity_id,code,name,type,system) VALUES($1,$2,$3,$4,'Asset',true)",
       [t, e.id, code, c.name],
     );
     await tx.query("UPDATE entities SET next_bank=next_bank+1 WHERE id=$1", [

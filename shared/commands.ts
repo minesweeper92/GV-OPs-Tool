@@ -287,6 +287,38 @@ export const commandSchema = z.discriminatedUnion("action", [
     request_key: id,
   }),
   z.strictObject({
+    action: z.literal("account.create"),
+    entity_id: id,
+    code: z
+      .string()
+      .trim()
+      .regex(/^[A-Z0-9]{4,8}$/),
+    name: text,
+    type: z.enum(["Asset", "Liability", "Equity", "Income", "Expense"]),
+    parent_code: z
+      .string()
+      .trim()
+      .regex(/^[A-Z0-9]{4,8}$/)
+      .nullable(),
+    description: z.string().trim().max(1000),
+    request_key: id,
+  }),
+  z.strictObject({
+    action: z.literal("account.update"),
+    entity_id: id,
+    code: z.string().regex(/^[A-Z0-9]{4,8}$/),
+    version: z.number().int().positive(),
+    name: text,
+    description: z.string().trim().max(1000),
+  }),
+  z.strictObject({
+    action: z.literal("account.set-active"),
+    entity_id: id,
+    code: z.string().regex(/^[A-Z0-9]{4,8}$/),
+    version: z.number().int().positive(),
+    active: z.boolean(),
+  }),
+  z.strictObject({
     action: z.literal("note.create"),
     record_id: id,
     text: z.string().trim().min(1).max(4000),

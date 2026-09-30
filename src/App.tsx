@@ -44,6 +44,7 @@ import { Projects } from "./Projects";
 import { QuoteComposer } from "./QuoteComposer";
 import { InvoiceComposer } from "./InvoiceComposer";
 import { ManualJournals } from "./ManualJournals";
+import { ChartOfAccounts } from "./ChartOfAccounts";
 import { ContactRecord } from "./ContactRecord";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
@@ -1576,6 +1577,14 @@ export default function App() {
                     key={entity}
                     entity={data.entities.find((e) => e.id === entity)!}
                     report={reportQuery.data}
+                    onRun={runWithResult}
+                  />
+                ) : view === "accounts" ? (
+                  <ChartOfAccounts
+                    key={entity}
+                    entity={data.entities.find((e) => e.id === entity)!}
+                    report={reportQuery.data}
+                    canManage={me!.user.role === "admin"}
                     onRun={runWithResult}
                   />
                 ) : (

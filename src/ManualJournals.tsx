@@ -48,7 +48,10 @@ export function ManualJournals({
   const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
   const [reversalKey, setReversalKey] = useState(() => crypto.randomUUID());
   const available = report.trial.filter(
-    (a) => !controlledAccountCodes.has(a.code),
+    (a) =>
+      a.active &&
+      !controlledAccountCodes.has(a.code) &&
+      !a.code.startsWith("10B"),
   );
   const debit = lines.reduce(
     (sum, line) => sum + (amount(line.debit) || 0n),

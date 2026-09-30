@@ -80,6 +80,160 @@ export async function verifyManualJournals(t: TestContext, db: Database) {
   const ownerCall = await login(admin),
     financeCall = await login(finance),
     salesCall = await login(sales);
+  await t.test(
+    "chart accounts are scoped, editable and safely deactivated",
+    async () => {
+      const createAccount = {
+        action: "account.create",
+        entity_id: entity,
+        code: "5400",
+        name: "Studio overhead",
+        type: "Expense",
+        parent_code: "5000",
+        description: "Indirect studio costs",
+        request_key: uuid(),
+      };
+      await financeCall("/api/commands", createAccount, 403);
+      const made = await ownerCall("/api/commands", createAccount);
+      assert.equal(
+        (await ownerCall("/api/commands", createAccount)).id,
+        made.id,
+      );
+      await ownerCall(
+        "/api/commands",
+        {
+          ...createAccount,
+          name: "Different",
+          request_key: createAccount.request_key,
+        },
+        409,
+      );
+      await ownerCall(
+        "/api/commands",
+        {
+          ...createAccount,
+          code: "5500",
+          parent_code: "3000",
+          request_key: uuid(),
+        },
+        400,
+      );
+      await ownerCall(
+        "/api/commands",
+        { ...createAccount, entity_id: otherEntity, request_key: uuid() },
+        404,
+      );
+      await ownerCall(
+        "/api/commands",
+        {
+          action: "account.update",
+          entity_id: entity,
+          code: "5000",
+          version: 1,
+          name: "Changed system",
+          description: "",
+        },
+        403,
+      );
+      await ownerCall("/api/commands", {
+        action: "account.update",
+        entity_id: entity,
+        code: "5400",
+        version: 1,
+        name: "Studio running costs",
+        description: "Revised classification",
+      });
+      await ownerCall(
+        "/api/commands",
+        {
+          action: "account.update",
+          entity_id: entity,
+          code: "5400",
+          version: 1,
+          name: "Stale",
+          description: "",
+        },
+        409,
+      );
+      const child = await ownerCall("/api/commands", {
+        ...createAccount,
+        code: "5410",
+        name: "Rent",
+        parent_code: "5400",
+        request_key: uuid(),
+      });
+      assert.ok(child.id);
+      await ownerCall(
+        "/api/commands",
+        {
+          action: "account.set-active",
+          entity_id: entity,
+          code: "5400",
+          version: 2,
+          active: false,
+        },
+        409,
+      );
+      await ownerCall("/api/commands", {
+        action: "account.set-active",
+        entity_id: entity,
+        code: "5410",
+        version: 1,
+        active: false,
+      });
+      await ownerCall("/api/commands", {
+        action: "account.set-active",
+        entity_id: entity,
+        code: "5400",
+        version: 2,
+        active: false,
+      });
+      const report = await ownerCall(
+        `/api/reports?entityId=${entity}&from=2026-09-01&to=2026-09-30`,
+      );
+      const row = report.trial.find(
+        (account: { code: string }) => account.code === "5400",
+      );
+      assert.equal(row.active, false);
+      assert.equal(row.name, "Studio running costs");
+      await ownerCall(
+        "/api/commands",
+        {
+          action: "manual-journal.create",
+          entity_id: entity,
+          date: "2026-09-14",
+          reference: "INACTIVE",
+          memo: "Should be blocked",
+          request_key: uuid(),
+          lines: [
+            { account_code: "5400", debit: "1", credit: "0", memo: "" },
+            { account_code: "3000", debit: "0", credit: "1", memo: "" },
+          ],
+        },
+        400,
+      );
+      await ownerCall("/api/commands", {
+        action: "account.set-active",
+        entity_id: entity,
+        code: "5400",
+        version: 3,
+        active: true,
+      });
+      await ownerCall("/api/commands", {
+        action: "account.set-active",
+        entity_id: entity,
+        code: "5410",
+        version: 2,
+        active: true,
+      });
+      await assert.rejects(
+        db.query("DELETE FROM accounts WHERE entity_id=$1 AND code='5400'", [
+          entity,
+        ]),
+        /Deactivate accounts/i,
+      );
+    },
+  );
   const create = {
     action: "manual-journal.create",
     entity_id: entity,

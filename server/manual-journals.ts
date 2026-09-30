@@ -74,9 +74,17 @@ export async function executeManualJournal(
         400,
         "Use the corresponding invoice, bill, payment or bank workflow for a control account.",
       );
+    const bankAccounts = (
+      await tx.query(
+        "SELECT account_code FROM bank_accounts WHERE entity_id=$1 AND account_code=ANY($2::text[])",
+        [command.entity_id, accountCodes],
+      )
+    ).rows;
+    if (bankAccounts.length)
+      throw new Problem(400, "Use the banking workflow for a bank account.");
     const accounts = (
       await tx.query(
-        "SELECT code FROM accounts WHERE entity_id=$1 AND code=ANY($2::text[])",
+        "SELECT code FROM accounts WHERE entity_id=$1 AND active AND code=ANY($2::text[])",
         [command.entity_id, accountCodes],
       )
     ).rows;

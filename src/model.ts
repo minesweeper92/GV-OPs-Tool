@@ -283,9 +283,15 @@ export interface Me {
 }
 export interface Report {
   trial: {
+    id: string;
     code: string;
     name: string;
     type: string;
+    parent_code: string | null;
+    description: string;
+    active: boolean;
+    system: boolean;
+    version: number;
     debit: string;
     credit: string;
   }[];
