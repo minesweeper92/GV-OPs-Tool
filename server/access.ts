@@ -101,7 +101,12 @@ export class Access {
   context(s: Session): Context {
     if (!s.tenantId || !s.role)
       throw new Problem(403, "Create or join an organization first.");
-    return { tenantId: s.tenantId, userId: s.userId, role: s.role };
+    return {
+      tenantId: s.tenantId,
+      userId: s.userId,
+      role: s.role,
+      name: s.name,
+    };
   }
   async organizations(s: Session) {
     const organizations = (

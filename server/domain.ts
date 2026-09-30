@@ -9,6 +9,7 @@ export type Context = {
   tenantId: string;
   userId: string;
   role: "admin" | "finance" | "sales" | "viewer";
+  name?: string;
 };
 export class Problem extends Error {
   constructor(
@@ -128,6 +129,22 @@ export async function post(
   lines: PostingLine[],
   meta: PostingMeta = {},
 ) {
+  const period = (
+    await tx.query(
+      "SELECT status FROM accounting_periods WHERE entity_id=$1 AND month=date_trunc('month',$2::date)::date",
+      [entity, date],
+    )
+  ).rows[0];
+  if (period?.status === "Closed")
+    throw new Problem(
+      409,
+      "This accounting month is closed. Reopen it before posting.",
+    );
+  if (
+    period?.status === "Soft closed" &&
+    !["admin", "finance"].includes(ctx.role)
+  )
+    throw new Problem(409, "Only finance can post in a soft-closed month.");
   const filtered = lines.filter((l) => (l.debit || 0n) + (l.credit || 0n) > 0n);
   if (source !== "bank-opening") {
     const closed = (
@@ -341,7 +358,13 @@ export async function reports(
       [entityId, from, to],
     )
   ).rows;
-  return { trial, journals };
+  const periods = (
+    await tx.query(
+      "SELECT month,status FROM accounting_periods WHERE entity_id=$1 ORDER BY month DESC",
+      [entityId],
+    )
+  ).rows;
+  return { trial, journals, periods };
 }
 export async function execute(tx: SQL, ctx: Context, c: Row) {
   const t = ctx.tenantId,

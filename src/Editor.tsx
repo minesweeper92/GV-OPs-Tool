@@ -40,7 +40,6 @@ const titles: Record<string, string> = {
   association: "Add company association",
   "end-association": "End company association",
   note: "Add a note",
-  close: "Lock accounting period",
 };
 export function Editor({
   editor,
@@ -376,9 +375,6 @@ export function Editor({
         break;
       case "note":
         command = { action: "note.create", record_id: id, ...f };
-        break;
-      case "close":
-        command = { action: "period.close", entity_id: id, ...f };
         break;
     }
     try {
@@ -1142,26 +1138,16 @@ export function Editor({
               </p>
             </>
           ) : null}
-          {["lose", "void", "close"].includes(kind) ? (
+          {["lose", "void"].includes(kind) ? (
             <>
               {text("reason", "Reason")}
-              {kind !== "lose"
-                ? text(
-                    "date",
-                    kind === "close"
-                      ? "Lock transactions through"
-                      : "Reversal date",
-                    true,
-                    today(),
-                    "date",
-                  )
+              {kind === "void"
+                ? text("date", "Reversal date", true, today(), "date")
                 : null}
               <p className="posting-notice">
                 {kind === "void"
                   ? "This reverses the unpaid invoice in the ledger and preserves its original number."
-                  : kind === "close"
-                    ? "New postings on or before this date will be blocked. This build does not allow reopening a locked period."
-                    : "This removes the deal from open follow-ups and keeps its history."}
+                  : "This removes the deal from open follow-ups and keeps its history."}
               </p>
             </>
           ) : null}
@@ -1247,9 +1233,7 @@ export function Editor({
                       ? "Record payment"
                       : kind === "expense"
                         ? "Post expense"
-                        : kind === "close"
-                          ? "Lock period"
-                          : "Save"}
+                        : "Save"}
           </button>
         </div>
       </form>

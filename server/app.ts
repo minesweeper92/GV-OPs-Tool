@@ -20,6 +20,11 @@ import { executeDocument } from "./documents.ts";
 import { executeManualJournal } from "./manual-journals.ts";
 import { executeAccount } from "./accounts.ts";
 import {
+  periodPreview,
+  transitionPeriod,
+  unlockLegacyPeriod,
+} from "./periods.ts";
+import {
   issueQuoteLink,
   portalPage,
   publicQuote,
@@ -306,6 +311,21 @@ export function createApp(
       reports(tx, ctx, q.entityId, q.from, q.to),
     );
   });
+  app.get("/api/period-close", async (req) => {
+    const q = z
+      .strictObject({
+        entityId: z.uuid(),
+        month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+      })
+      .parse(req.query);
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(
+      db,
+      ctx.tenantId,
+      (tx) => periodPreview(tx, ctx, q.entityId, q.month),
+      true,
+    );
+  });
   app.get("/api/financial-reports", async (req) => {
     const q = reportFilter.parse(req.query),
       ctx = access.context(sessions.get(req)!);
@@ -345,32 +365,36 @@ export function createApp(
     return inTenant(db, ctx.tenantId, (tx) =>
       c.action.startsWith("document.")
         ? executeDocument(tx, ctx, c)
-        : c.action === "account.create" ||
-            c.action === "account.update" ||
-            c.action === "account.set-active"
-          ? executeAccount(tx, ctx, c)
-          : c.action === "manual-journal.create" ||
-              c.action === "manual-journal.reverse"
-            ? executeManualJournal(tx, ctx, c)
-            : c.action.startsWith("profile.")
-              ? executeProfile(tx, ctx, c)
-              : c.action.startsWith("crm.")
-                ? executeCrm(tx, ctx, c)
-                : c.action.startsWith("recurring.")
-                  ? executeRecurring(tx, ctx, c)
-                  : c.action.startsWith("credit.")
-                    ? executeCredit(tx, ctx, c)
-                    : c.action.startsWith("project.") ||
-                        ["invoice.cancel", "invoice.recognise"].includes(
-                          c.action,
-                        )
-                      ? executeProject(tx, ctx, c)
-                      : c.action.startsWith("bank.")
-                        ? executeBank(tx, ctx, c)
-                        : c.action.startsWith("bill.") ||
-                            c.action.startsWith("vendor-payment.")
-                          ? executePayable(tx, ctx, c)
-                          : execute(tx, ctx, c),
+        : c.action === "period.transition"
+          ? transitionPeriod(tx, ctx, c)
+          : c.action === "period.legacy-unlock"
+            ? unlockLegacyPeriod(tx, ctx, c)
+            : c.action === "account.create" ||
+                c.action === "account.update" ||
+                c.action === "account.set-active"
+              ? executeAccount(tx, ctx, c)
+              : c.action === "manual-journal.create" ||
+                  c.action === "manual-journal.reverse"
+                ? executeManualJournal(tx, ctx, c)
+                : c.action.startsWith("profile.")
+                  ? executeProfile(tx, ctx, c)
+                  : c.action.startsWith("crm.")
+                    ? executeCrm(tx, ctx, c)
+                    : c.action.startsWith("recurring.")
+                      ? executeRecurring(tx, ctx, c)
+                      : c.action.startsWith("credit.")
+                        ? executeCredit(tx, ctx, c)
+                        : c.action.startsWith("project.") ||
+                            ["invoice.cancel", "invoice.recognise"].includes(
+                              c.action,
+                            )
+                          ? executeProject(tx, ctx, c)
+                          : c.action.startsWith("bank.")
+                            ? executeBank(tx, ctx, c)
+                            : c.action.startsWith("bill.") ||
+                                c.action.startsWith("vendor-payment.")
+                              ? executePayable(tx, ctx, c)
+                              : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

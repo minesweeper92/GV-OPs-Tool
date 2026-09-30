@@ -67,11 +67,24 @@ export function ManualJournals({
     );
     setReviewing(false);
   };
+  const dateRestriction = (on: string) => {
+    if (entity.lock_date && on <= entity.lock_date)
+      return `This entity is locked through ${day(entity.lock_date)}. Choose a later date.`;
+    if (
+      report.periods.some(
+        (period) =>
+          period.month.slice(0, 7) === on.slice(0, 7) &&
+          period.status === "Closed",
+      )
+    )
+      return "This accounting month is closed. Reopen it before posting a journal.";
+    return "";
+  };
   const validate = () => {
     if (!reference.trim() || !memo.trim())
       return "Enter a reference and explanation.";
-    if (entity.lock_date && date <= entity.lock_date)
-      return `This entity is locked through ${day(entity.lock_date)}. Choose a later date.`;
+    const restriction = dateRestriction(date);
+    if (restriction) return restriction;
     for (const line of lines) {
       const dr = amount(line.debit),
         cr = amount(line.credit);
@@ -123,6 +136,11 @@ export function ManualJournals({
   async function reverse(event: React.FormEvent) {
     event.preventDefault();
     setError("");
+    const restriction = dateRestriction(reversalDate);
+    if (restriction) {
+      setError(restriction);
+      return;
+    }
     setBusy(true);
     try {
       await onRun({

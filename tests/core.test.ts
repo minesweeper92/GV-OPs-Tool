@@ -13,6 +13,7 @@ import { verifyProjects } from "./project-cases.ts";
 import { verifyBilling } from "./billing-cases.ts";
 import { verifyCrm } from "./crm-cases.ts";
 import { verifyManualJournals } from "./manual-journal-cases.ts";
+import { verifyPeriodClose } from "./period-cases.ts";
 
 test("integer pricing, tax rounding and FX remain exact", () => {
   assert.equal(minor("90071992547.41"), 9007199254741n);
@@ -76,6 +77,7 @@ test("fresh integrated platform", async (t) => {
   await t.test("manual journals and audited reversals", (sub) =>
     verifyManualJournals(sub, db),
   );
+  await t.test("audited month-end close", (sub) => verifyPeriodClose(sub, db));
   const origin = "http://127.0.0.1:4320",
     app = createApp(db, origin);
   await app.ready();

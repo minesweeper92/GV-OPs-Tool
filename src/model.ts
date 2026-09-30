@@ -282,6 +282,7 @@ export interface Me {
   onboarding: boolean;
 }
 export interface Report {
+  periods: { month: string; status: "Open" | "Soft closed" | "Closed" }[];
   trial: {
     id: string;
     code: string;

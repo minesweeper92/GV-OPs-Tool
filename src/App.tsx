@@ -45,6 +45,9 @@ import { QuoteComposer } from "./QuoteComposer";
 import { InvoiceComposer } from "./InvoiceComposer";
 import { ManualJournals } from "./ManualJournals";
 import { ChartOfAccounts } from "./ChartOfAccounts";
+const MonthEndClose = lazy(() =>
+  import("./MonthEndClose").then((m) => ({ default: m.MonthEndClose })),
+);
 import { ContactRecord } from "./ContactRecord";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
@@ -123,6 +126,7 @@ const groups = [
     items: [
       ["journals", "Manual journals", BookOpen],
       ["accounts", "Chart of accounts", BookOpen],
+      ["period-close", "Month-end close", BookOpen],
       ["reports", "Trial balance", BookOpen],
     ],
   },
@@ -370,6 +374,7 @@ export default function App() {
         cache.invalidateQueries({ queryKey: ["financial-report"] }),
         cache.invalidateQueries({ queryKey: ["financial-detail"] }),
         cache.invalidateQueries({ queryKey: ["banking"] }),
+        cache.invalidateQueries({ queryKey: ["period-close"] }),
       ]);
       setToast("Saved");
       return result;
@@ -1598,6 +1603,29 @@ export default function App() {
         </>
       );
     }
+    if (view === "period-close") {
+      if (!canFinance) return denied();
+      return (
+        <>
+          <Heading
+            title="Month-end close"
+            subtitle="Review each legal entity separately before restricting postings."
+          />
+          {entity === "all" ? (
+            <Empty title="Select a legal entity">
+              Choose an entity in the header to review its accounting month.
+            </Empty>
+          ) : (
+            <MonthEndClose
+              key={entity}
+              entity={data.entities.find((e) => e.id === entity)!}
+              canClose={me!.user.role === "admin"}
+              onRun={runWithResult}
+            />
+          )}
+        </>
+      );
+    }
     if (view === "settings")
       return (
         <>
@@ -1613,7 +1641,7 @@ export default function App() {
               "Code",
               "Base currency",
               "Tax registration",
-              "Locked through",
+              "Earlier date lock",
               "Actions",
             ]}
           >
@@ -1629,8 +1657,13 @@ export default function App() {
                 <td>{e.lock_date ? day(e.lock_date) : "No lock"}</td>
                 <td>
                   {me!.user.role === "admin" ? (
-                    <button onClick={() => edit({ kind: "close", id: e.id })}>
-                      Lock period
+                    <button
+                      onClick={() => {
+                        setEntity(e.id);
+                        location.hash = "period-close";
+                      }}
+                    >
+                      Review month-end
                     </button>
                   ) : null}
                 </td>

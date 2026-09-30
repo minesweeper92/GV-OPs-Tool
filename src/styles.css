@@ -1180,6 +1180,35 @@ tbody tr:hover {
   max-width: 700px;
   margin-top: 40px;
 }
+.month-close {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.month-close > h2 {
+  margin: 8px 0 0;
+}
+.month-close .settings-note {
+  margin-top: 0;
+}
+.month-close .table-scroll {
+  max-width: 100%;
+}
+.month-close-actions {
+  max-width: 760px;
+  margin: 0;
+}
+.month-close-actions .check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.month-close-actions .check-row input {
+  flex: none;
+  margin-top: 3px;
+}
 .settings-note label {
   display: flex;
   gap: 12px;
