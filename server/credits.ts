@@ -147,6 +147,11 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
     const i = await invoice(tx, c.invoice_id),
       prior = await retry(tx, "credit_notes", c);
     if (prior) return { id: prior.id };
+    if (i.opening_batch_id)
+      throw new Problem(
+        409,
+        "Opening receivables cannot use a revenue credit note. Record a reviewed opening-balance adjustment instead.",
+      );
     if (!["Issued", "Paid", "Settled"].includes(i.status))
       throw new Problem(409, "Choose an issued invoice.");
     if (c.date < day(i.issue_date))

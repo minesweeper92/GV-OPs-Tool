@@ -23,6 +23,8 @@ import {
   journalScheduleSnapshot,
 } from "./journal-schedules.ts";
 import { executeAccount } from "./accounts.ts";
+import { cutoverInput } from "../shared/cutover.ts";
+import { commitCutover, cutoverHistory, previewCutover } from "./cutover.ts";
 import {
   periodPreview,
   transitionPeriod,
@@ -329,6 +331,47 @@ export function createApp(
       ctx.tenantId,
       (tx) => periodPreview(tx, ctx, q.entityId, q.month),
       true,
+    );
+  });
+  app.get("/api/cutover", async (req) => {
+    const q = z.strictObject({ entityId: z.uuid() }).parse(req.query);
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(
+      db,
+      ctx.tenantId,
+      (tx) => cutoverHistory(tx, ctx, q.entityId),
+      true,
+    );
+  });
+  app.post("/api/cutover/preview", { bodyLimit: 512 * 1024 }, async (req) => {
+    const input = cutoverInput.parse(req.body);
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(
+      db,
+      ctx.tenantId,
+      (tx) => previewCutover(tx, ctx, input),
+      true,
+    );
+  });
+  app.post("/api/cutover/commit", { bodyLimit: 512 * 1024 }, async (req) => {
+    const body = z
+      .strictObject({
+        input: cutoverInput,
+        preflightHash: z.string().regex(/^[a-f0-9]{64}$/),
+        requestKey: z.uuid(),
+        confirmation: z.string().trim().max(8),
+      })
+      .parse(req.body);
+    const ctx = access.context(sessions.get(req)!);
+    return inTenant(db, ctx.tenantId, (tx) =>
+      commitCutover(
+        tx,
+        ctx,
+        body.input,
+        body.preflightHash,
+        body.requestKey,
+        body.confirmation,
+      ),
     );
   });
   app.get("/api/financial-reports", async (req) => {

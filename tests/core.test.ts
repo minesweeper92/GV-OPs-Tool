@@ -15,6 +15,7 @@ import { verifyCrm } from "./crm-cases.ts";
 import { verifyManualJournals } from "./manual-journal-cases.ts";
 import { verifyPeriodClose } from "./period-cases.ts";
 import { verifyJournalSchedules } from "./journal-schedule-cases.ts";
+import { verifyCutover } from "./cutover-cases.ts";
 
 test("integer pricing, tax rounding and FX remain exact", () => {
   assert.equal(minor("90071992547.41"), 9007199254741n);
@@ -82,6 +83,9 @@ test("fresh integrated platform", async (t) => {
     verifyJournalSchedules(sub, db),
   );
   await t.test("audited month-end close", (sub) => verifyPeriodClose(sub, db));
+  await t.test("validated opening-balance cutover", (sub) =>
+    verifyCutover(sub, db),
+  );
   const origin = "http://127.0.0.1:4320",
     app = createApp(db, origin);
   await app.ready();

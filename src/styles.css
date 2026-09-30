@@ -3020,3 +3020,53 @@ details[open] summary {
     display: block;
   }
 }
+.cutover-flow {
+  max-width: 900px;
+  display: grid;
+  gap: 16px;
+}
+.cutover-flow .settings-note {
+  margin: 0;
+}
+.cutover-upload {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  background: var(--surface);
+}
+.cutover-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cutover-upload-actions input[type="file"] {
+  max-width: min(100%, 360px);
+}
+.cutover-checks {
+  padding: 0;
+  margin: 18px 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.cutover-checks li {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 2px;
+}
+.cutover-checks li span {
+  color: var(--muted);
+}
+.cutover-checks .cutover-pass strong {
+  color: var(--success);
+}
+.cutover-checks .cutover-error {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+.cutover-checks .cutover-error strong {
+  color: var(--danger);
+}

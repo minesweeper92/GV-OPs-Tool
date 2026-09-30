@@ -48,6 +48,9 @@ import { ChartOfAccounts } from "./ChartOfAccounts";
 const MonthEndClose = lazy(() =>
   import("./MonthEndClose").then((m) => ({ default: m.MonthEndClose })),
 );
+const OpeningBalances = lazy(() =>
+  import("./OpeningBalances").then((m) => ({ default: m.OpeningBalances })),
+);
 import { ContactRecord } from "./ContactRecord";
 import type { CrmEditorState, CrmOpen } from "./Crm";
 const CrmEditor = lazy(() =>
@@ -127,6 +130,7 @@ const groups = [
       ["journals", "Manual journals", BookOpen],
       ["journal-schedules", "Recurring journals", BookOpen],
       ["accounts", "Chart of accounts", BookOpen],
+      ["opening-balances", "Opening balances", BookOpen],
       ["period-close", "Month-end close", BookOpen],
       ["reports", "Trial balance", BookOpen],
     ],
@@ -1636,6 +1640,29 @@ export default function App() {
               entity={data.entities.find((e) => e.id === entity)!}
               canClose={me!.user.role === "admin"}
               onRun={runWithResult}
+            />
+          )}
+        </>
+      );
+    }
+    if (view === "opening-balances") {
+      if (!canFinance) return denied();
+      return (
+        <>
+          <Heading
+            title="Opening balances"
+            subtitle="Import and reconcile a legal entity at cutover before posting anything."
+          />
+          {entity === "all" ? (
+            <Empty title="Select a legal entity">
+              Choose an entity in the header. Opening balances cannot be
+              combined across entities.
+            </Empty>
+          ) : (
+            <OpeningBalances
+              key={entity}
+              entity={data.entities.find((e) => e.id === entity)!}
+              me={me!}
             />
           )}
         </>
