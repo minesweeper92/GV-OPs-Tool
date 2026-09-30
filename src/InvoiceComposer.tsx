@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { ErrorBox, Field } from "./components";
 import { NumberSeriesField } from "./NumberSeriesField";
@@ -14,6 +14,8 @@ const blankLine = (): Line => ({
   discount_type: "percent",
   discount: "0",
 });
+const normalized = (value: string) =>
+  value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 function plusDays(value: string, days: number) {
   const date = new Date(`${value}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -43,6 +45,20 @@ export function InvoiceComposer({
     kind === "invoice" ? data.quotes.find((q) => q.id === id) : undefined;
   const deal = data.deals.find((d) => d.id === quote?.deal_id);
   const [customerId, setCustomerId] = useState(deal?.company_id || "");
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerDomain, setNewCustomerDomain] = useState("");
+  const [newCustomerTaxId, setNewCustomerTaxId] = useState("");
+  const [newCustomerAddress, setNewCustomerAddress] = useState("");
+  const [createdCustomer, setCreatedCustomer] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const customerRetry = useRef<{ key: string; payload: string } | null>(null);
+  const customerPicker = useRef<HTMLSelectElement>(null);
+  const customerTrigger = useRef<HTMLButtonElement>(null);
+  const [customerBusy, setCustomerBusy] = useState(false);
+  const [customerError, setCustomerError] = useState("");
   const [issuerId, setIssuerId] = useState(
     quote?.entity_id || (entityId === "all" ? "" : entityId),
   );
@@ -104,6 +120,80 @@ export function InvoiceComposer({
     setDetails((old) => ({ ...old, [key]: value }));
     setDirty(true);
   };
+  function selectCustomer(companyId: string) {
+    const company = data.companies.find((c) => c.id === companyId);
+    setCustomerId(companyId);
+    setDueDate(plusDays(issueDate, company?.profile.payment_days ?? 30));
+    setDetails((old) => ({
+      ...old,
+      billing_address: company?.address || "",
+      shipping_address: company?.shipping_address || "",
+      customer_tax_id: company?.tax_id || "",
+      customer_notes: company?.profile.document_notes || "",
+      recipients: company?.profile.billing_recipients || [],
+      payment_terms: `Net ${company?.profile.payment_days ?? 30} days`,
+    }));
+    setDirty(true);
+  }
+  async function addCustomer() {
+    if (customerBusy) return;
+    const name = newCustomerName.trim();
+    if (!name) {
+      setCustomerError("Enter the customer company name.");
+      return;
+    }
+    const existing = data.companies.find(
+      (c) => normalized(c.name) === normalized(name),
+    );
+    if (existing) {
+      selectCustomer(existing.id);
+      setCustomerError("");
+      setNewCustomerOpen(false);
+      customerPicker.current?.focus();
+      return;
+    }
+    const command = {
+      action: "company.create",
+      name,
+      domain: newCustomerDomain.trim(),
+      tax_id: newCustomerTaxId.trim(),
+      address: newCustomerAddress.trim(),
+      customer: true,
+      vendor: false,
+      service_entity_id: null,
+    };
+    const fingerprint = JSON.stringify(command);
+    if (customerRetry.current?.payload !== fingerprint)
+      customerRetry.current = {
+        key: crypto.randomUUID(),
+        payload: fingerprint,
+      };
+    setCustomerBusy(true);
+    setCustomerError("");
+    try {
+      const result = await create({
+        ...command,
+        request_key: customerRetry.current.key,
+      });
+      setCreatedCustomer({ id: result.id, name });
+      setCustomerId(result.id);
+      setDueDate(plusDays(issueDate, 30));
+      setDetails((old) => ({
+        ...old,
+        billing_address: command.address,
+        customer_tax_id: command.tax_id,
+        payment_terms: "Net 30 days",
+      }));
+      setNewCustomerOpen(false);
+      setDirty(true);
+      customerRetry.current = null;
+      customerPicker.current?.focus();
+    } catch (error) {
+      setCustomerError((error as Error).message);
+    } finally {
+      setCustomerBusy(false);
+    }
+  }
   const setLine = (index: number, key: keyof Line, value: string) => {
     setLines((old) =>
       old.map((line, i) => (i === index ? { ...line, [key]: value } : line)),
@@ -141,6 +231,10 @@ export function InvoiceComposer({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (newCustomerOpen || customerBusy) {
+      setError("Finish adding the customer or close that panel first.");
+      return;
+    }
     if (!issuerId || !customerId) {
       setError("Choose the customer company and issuing legal entity.");
       return;
@@ -225,33 +319,47 @@ export function InvoiceComposer({
               </p>
             ) : null}
             <div className="quote-field-grid">
-              <Field
-                label="Customer company"
-                hint="Customers are companies, not a separate record type."
-              >
-                <select
-                  required
-                  value={customerId}
-                  disabled={!!quote}
-                  onChange={(e) => {
-                    setCustomerId(e.target.value);
-                    setDueDate(
-                      plusDays(
-                        issueDate,
-                        data.companies.find((c) => c.id === e.target.value)
-                          ?.profile.payment_days ?? 30,
-                      ),
-                    );
-                  }}
+              <div className="invoice-customer-picker">
+                <Field
+                  label="Customer company"
+                  hint="Customers are companies, not a separate record type."
                 >
-                  <option value="">Select a company</option>
-                  {data.companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+                  <select
+                    ref={customerPicker}
+                    required
+                    value={customerId}
+                    disabled={!!quote}
+                    onChange={(e) => selectCustomer(e.target.value)}
+                  >
+                    <option value="">Select a company</option>
+                    {data.companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                    {createdCustomer &&
+                    !data.companies.some((c) => c.id === createdCustomer.id) ? (
+                      <option value={createdCustomer.id}>
+                        {createdCustomer.name}
+                      </option>
+                    ) : null}
+                  </select>
+                </Field>
+                {!quote ? (
+                  <button
+                    ref={customerTrigger}
+                    type="button"
+                    className="quote-inline-add"
+                    aria-expanded={newCustomerOpen}
+                    onClick={() => {
+                      setNewCustomerOpen((open) => !open);
+                      setCustomerError("");
+                    }}
+                  >
+                    <Plus size={16} /> New customer
+                  </button>
+                ) : null}
+              </div>
               <Field label="Issuing legal entity">
                 <select
                   required
@@ -271,6 +379,85 @@ export function InvoiceComposer({
                 </select>
               </Field>
             </div>
+            {newCustomerOpen && !quote ? (
+              <div
+                className="quote-inline-panel"
+                aria-label="New customer details"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && !customerBusy) {
+                    event.preventDefault();
+                    setNewCustomerOpen(false);
+                    customerTrigger.current?.focus();
+                  } else if (
+                    event.key === "Enter" &&
+                    event.target instanceof HTMLInputElement
+                  ) {
+                    event.preventDefault();
+                    void addCustomer();
+                  }
+                }}
+              >
+                <h3>Add a customer company</h3>
+                <p className="muted">
+                  Your invoice stays open. Add a contact to this company later
+                  from CRM if needed.
+                </p>
+                <div className="quote-field-grid">
+                  <Field label="New customer company name">
+                    <input
+                      autoFocus
+                      value={newCustomerName}
+                      maxLength={200}
+                      onChange={(e) => setNewCustomerName(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Website domain (optional)">
+                    <input
+                      value={newCustomerDomain}
+                      maxLength={200}
+                      onChange={(e) => setNewCustomerDomain(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Tax registration (optional)">
+                    <input
+                      value={newCustomerTaxId}
+                      maxLength={200}
+                      onChange={(e) => setNewCustomerTaxId(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Billing address (optional)">
+                    <textarea
+                      value={newCustomerAddress}
+                      maxLength={4000}
+                      onChange={(e) => setNewCustomerAddress(e.target.value)}
+                    />
+                  </Field>
+                </div>
+                {customerError ? <ErrorBox error={customerError} /> : null}
+                <div className="quote-inline-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewCustomerOpen(false);
+                      customerTrigger.current?.focus();
+                    }}
+                    disabled={customerBusy}
+                  >
+                    Back to invoice
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void addCustomer()}
+                    disabled={customerBusy}
+                  >
+                    {customerBusy
+                      ? "Adding customer…"
+                      : "Create & select customer"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
           <section className="quote-composer-section">
             <h2>Invoice information</h2>
@@ -722,7 +909,7 @@ export function InvoiceComposer({
             <button
               type="submit"
               className="primary"
-              disabled={busy || itemBusy}
+              disabled={busy || itemBusy || customerBusy || newCustomerOpen}
             >
               {busy ? "Saving…" : "Save as draft"}
             </button>

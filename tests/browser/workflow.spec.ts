@@ -655,11 +655,12 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   ).toBeVisible();
   await page.getByRole("button", { name: "Save as draft" }).click();
   await expect(page.locator(".page-heading h1")).toHaveText(/INV-\d+/);
+  const invoiceNumber = await page.locator(".page-heading h1").innerText();
   await page.getByRole("button", { name: "Issue invoice" }).click();
   await page.getByRole("button", { name: "Issue and post" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "AOP-INV-00001" }),
+    page.getByRole("heading", { name: invoiceNumber }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Record payment", exact: true })
@@ -699,7 +700,7 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   ).toBeVisible();
   await nav(page, "Accountant", "Manual journals");
   await expect(
-    page.getByRole("heading", { name: "Payment for AOP-INV-00001" }),
+    page.getByRole("heading", { name: `Payment for ${invoiceNumber}` }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/new-workspace-journals.png",
@@ -717,6 +718,13 @@ test("sales role cannot open accounting via navigation or direct API", async ({
   await expect(
     page.getByRole("heading", { name: "My day", exact: true }),
   ).toBeVisible();
+  await page.locator(".global-create > summary").click();
+  await expect(
+    page.getByRole("button", { name: "New lead", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "New invoice", exact: true }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("link", { name: "Manual journals", exact: true }),
   ).toHaveCount(0);

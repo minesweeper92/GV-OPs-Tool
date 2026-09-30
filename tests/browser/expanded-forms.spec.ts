@@ -155,3 +155,113 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   );
   expect(errors).toEqual([]);
 });
+
+test("Create menu opens invoice and inline customer creation preserves the draft", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await page.locator(".global-create > summary").click();
+  await expect(
+    page.getByRole("button", { name: "New contact", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "New invoice", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "New invoice" }),
+  ).toBeVisible();
+  const entity = (await (await page.request.get("/api/data")).json())
+    .entities[0];
+  await page
+    .getByLabel("Issuing legal entity", { exact: true })
+    .selectOption(entity.id);
+  await page
+    .getByLabel("Description 1", { exact: true })
+    .fill("Strategy session");
+  await page.getByLabel("Unit price 1", { exact: true }).fill("1200");
+  await page.getByRole("button", { name: "New customer", exact: true }).click();
+  const name = `Invoice customer ${randomUUID().slice(0, 8)}`;
+  await expect(page.getByLabel("New customer company name")).toBeFocused();
+  await page.getByLabel("New customer company name").fill(name);
+  await page
+    .getByLabel("Website domain (optional)")
+    .fill("invoice.example.test");
+  await page.getByLabel("Tax registration (optional)").fill("NTN-123");
+  await page.getByLabel("Billing address (optional)").fill("Office 12, Lahore");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  expect(
+    (await new AxeBuilder({ page }).include(".invoice-composer").analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: "test-results/invoice-inline-customer-mobile.png",
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Create & select customer", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Add a customer company" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Description 1", { exact: true })).toHaveValue(
+    "Strategy session",
+  );
+  await expect(page.getByLabel("Unit price 1", { exact: true })).toHaveValue(
+    "1200",
+  );
+  const selectedId = await page
+    .getByLabel("Customer company", { exact: true })
+    .inputValue();
+  expect(selectedId).not.toBe("");
+  await expect(
+    page.getByLabel("Customer company", { exact: true }),
+  ).toBeFocused();
+  await page.getByText("More customer, billing and PDF details").click();
+  await expect(page.getByLabel("Billing address", { exact: true })).toHaveValue(
+    "Office 12, Lahore",
+  );
+  await expect(page.getByLabel("Customer tax ID", { exact: true })).toHaveValue(
+    "NTN-123",
+  );
+  await page
+    .getByRole("button", { name: "Save as draft", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: "New invoice" })).toHaveCount(
+    0,
+  );
+  const data = await (await page.request.get("/api/data")).json();
+  expect(data.companies.find((c: any) => c.id === selectedId)?.name).toBe(name);
+  expect(
+    data.invoices.some((invoice: any) => invoice.company_id === selectedId),
+  ).toBe(true);
+});
+
+test("inline invoice customer picker reuses an existing company", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Invoices", exact: true })
+    .click();
+  await page.getByRole("button", { name: "New invoice", exact: true }).click();
+  const before = await (await page.request.get("/api/data")).json();
+  const existing = before.companies[0];
+  await page.getByRole("button", { name: "New customer", exact: true }).click();
+  await page.getByLabel("New customer company name").fill(existing.name);
+  await page.getByLabel("New customer company name").press("Enter");
+  await expect(
+    page.getByLabel("Customer company", { exact: true }),
+  ).toHaveValue(existing.id);
+  const after = await (await page.request.get("/api/data")).json();
+  expect(after.companies.length).toBe(before.companies.length);
+});

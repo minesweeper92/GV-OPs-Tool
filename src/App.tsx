@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -291,6 +291,7 @@ export default function App() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [layout, setLayout] = useState<"board" | "table">("board");
+  const createMenu = useRef<HTMLDetailsElement>(null);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("gv-workspace-theme-v1") || "light",
   );
@@ -337,9 +338,21 @@ export default function App() {
   useEffect(() => {
     setSearch("");
     setMenu(false);
+    createMenu.current?.removeAttribute("open");
     setError("");
     document.getElementById("main")?.focus();
   }, [route]);
+  useEffect(() => {
+    const closeCreate = (event: PointerEvent) => {
+      if (
+        createMenu.current &&
+        !createMenu.current.contains(event.target as Node)
+      )
+        createMenu.current.removeAttribute("open");
+    };
+    document.addEventListener("pointerdown", closeCreate);
+    return () => document.removeEventListener("pointerdown", closeCreate);
+  }, []);
   useEffect(() => {
     const group = groups.find((g) =>
       g.items.some(
@@ -2026,11 +2039,49 @@ export default function App() {
             >
               {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
             </button>
-            {canCRM ? (
-              <button onClick={() => edit({ kind: "lead" })}>
-                <Plus size={17} />
-                <span className="quick-label">New lead</span>
-              </button>
+            {canMaintainContacts ? (
+              <details
+                className="global-create"
+                ref={createMenu}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    createMenu.current?.removeAttribute("open");
+                    createMenu.current?.querySelector("summary")?.focus();
+                  }
+                }}
+              >
+                <summary>
+                  <Plus size={18} /> Create <ChevronDown size={15} />
+                </summary>
+                <div
+                  className="global-create-options"
+                  aria-label="Create new record"
+                >
+                  {(
+                    [
+                      ["Contact", "contact", canMaintainContacts],
+                      ["Company", "company", canMaintainContacts],
+                      ["Lead", "lead", canCRM],
+                      ["Quote", "quote", canCRM],
+                      ["Invoice", "direct-invoice", canFinance],
+                      ["Expense", "expense", canFinance],
+                    ] as const
+                  )
+                    .filter(([, , allowed]) => allowed)
+                    .map(([label, kind]) => (
+                      <button
+                        type="button"
+                        key={kind}
+                        onClick={() => {
+                          createMenu.current?.removeAttribute("open");
+                          edit({ kind });
+                        }}
+                      >
+                        New {label.toLowerCase()}
+                      </button>
+                    ))}
+                </div>
+              </details>
             ) : null}
           </div>
         </header>
