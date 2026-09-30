@@ -125,6 +125,7 @@ const groups = [
     label: "Accountant",
     items: [
       ["journals", "Manual journals", BookOpen],
+      ["journal-schedules", "Recurring journals", BookOpen],
       ["accounts", "Chart of accounts", BookOpen],
       ["period-close", "Month-end close", BookOpen],
       ["reports", "Trial balance", BookOpen],
@@ -327,7 +328,7 @@ export default function App() {
       !!me &&
       canFinance &&
       entity !== "all" &&
-      ["accounts", "journals", "reports"].includes(view),
+      ["accounts", "journals", "journal-schedules", "reports"].includes(view),
   });
   useEffect(() => {
     setSearch("");
@@ -1533,7 +1534,9 @@ export default function App() {
         </>
       );
     }
-    if (["accounts", "journals", "reports"].includes(view)) {
+    if (
+      ["accounts", "journals", "journal-schedules", "reports"].includes(view)
+    ) {
       if (!canFinance) return denied();
       return (
         <>
@@ -1543,9 +1546,15 @@ export default function App() {
                 ? "Chart of accounts"
                 : view === "journals"
                   ? "Journal entries"
-                  : "Trial balance"
+                  : view === "journal-schedules"
+                    ? "Recurring journals"
+                    : "Trial balance"
             }
-            subtitle="Each legal entity has its own ledger. Amounts shown in PKR."
+            subtitle={
+              view === "journal-schedules"
+                ? "Schedule balanced entries by legal entity; review each draft before it reaches the ledger."
+                : "Each legal entity has its own ledger. Amounts shown in PKR."
+            }
           />
           {entity === "all" ? (
             <Empty title="Select a legal entity">
@@ -1554,34 +1563,40 @@ export default function App() {
             </Empty>
           ) : (
             <>
-              <div className="toolbar">
-                <label>
-                  From{" "}
-                  <input
-                    type="date"
-                    aria-label="Report start date"
-                    value={from}
-                    onChange={(e) => setFrom(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Through{" "}
-                  <input
-                    type="date"
-                    aria-label="Report end date"
-                    value={to}
-                    onChange={(e) => setTo(e.target.value)}
-                  />
-                </label>
-              </div>
+              {view !== "journal-schedules" ? (
+                <div className="toolbar">
+                  <label>
+                    From{" "}
+                    <input
+                      type="date"
+                      aria-label="Report start date"
+                      value={from}
+                      onChange={(e) => setFrom(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Through{" "}
+                    <input
+                      type="date"
+                      aria-label="Report end date"
+                      value={to}
+                      onChange={(e) => setTo(e.target.value)}
+                    />
+                  </label>
+                </div>
+              ) : null}
               {reportQuery.error ? (
                 <ErrorBox error={reportQuery.error.message} />
               ) : reportQuery.data ? (
-                view === "journals" ? (
+                view === "journals" || view === "journal-schedules" ? (
                   <ManualJournals
-                    key={entity}
+                    key={`${entity}-${view}`}
                     entity={data.entities.find((e) => e.id === entity)!}
                     report={reportQuery.data}
+                    data={data}
+                    focus={
+                      view === "journal-schedules" ? "schedules" : "manual"
+                    }
                     onRun={runWithResult}
                   />
                 ) : view === "accounts" ? (

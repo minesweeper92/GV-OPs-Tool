@@ -62,6 +62,66 @@ test("manual journal review, posting and reversal work in the accounting UI", as
   expect(errors).toEqual([]);
 });
 
+test("recurring journals generate review drafts and scheduled reversals", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
+  const data = await (await page.request.get("/api/data")).json();
+  const entity = data.entities.find((e: { code: string }) => e.code === "PVT");
+  await page.goto("/#journal-schedules");
+  await page.getByLabel("Legal entity view").selectOption(entity.id);
+  await page.getByRole("button", { name: "+ New recurring journal" }).click();
+  const prior = new Date();
+  prior.setUTCMonth(prior.getUTCMonth() - 1, 15);
+  const first = prior.toISOString().slice(0, 10);
+  await page.getByLabel("First occurrence date").fill(first);
+  await page.getByLabel("Schedule name").fill("UI monthly accrual");
+  await page.getByLabel("Reference", { exact: true }).fill("UI-RECUR");
+  await page.getByLabel("Explanation").fill("Accrue monthly cost");
+  await page.getByLabel("Number of occurrences (optional)").fill("1");
+  await page
+    .getByLabel("Prepare a reversal for the first day of the following month")
+    .check();
+  const lines = page
+    .getByRole("group", { name: "Journal lines" })
+    .locator(".manual-journal-line");
+  await lines.nth(0).getByLabel("Account").selectOption("5000");
+  await lines.nth(0).getByLabel("Debit (PKR)").fill("42.50");
+  await lines.nth(1).getByLabel("Account").selectOption("3000");
+  await lines.nth(1).getByLabel("Credit (PKR)").fill("42.50");
+  await page.getByRole("button", { name: "Review schedule" }).click();
+  await expect(
+    page.getByText("This creates a monthly schedule", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Create schedule" }).click();
+  await expect(page.getByText("UI monthly accrual")).toBeVisible();
+  await page.getByRole("button", { name: "Generate due drafts" }).click();
+  await expect(page.getByText("UI-RECUR-1")).toBeVisible();
+  await page.getByRole("button", { name: "Review before posting" }).click();
+  await page.getByRole("button", { name: "Post reviewed journal" }).click();
+  await expect(page.getByText("Due", { exact: false }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Review reversal" }).click();
+  await page.getByLabel("Reason").fill("Accrual reversed next month");
+  await page.getByRole("button", { name: "Post exact reversal" }).click();
+  await expect(page.getByText("Posted", { exact: true }).first()).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("chart account creation, editing and deactivation are usable", async ({
   page,
 }) => {
@@ -90,7 +150,10 @@ test("chart account creation, editing and deactivation are usable", async ({
   const row = page.getByRole("row").filter({ hasText: code });
   await expect(row).toContainText("Browser overhead");
   await expect(row).toContainText("Active");
-  await page.screenshot({ path: "test-results/chart-of-accounts.png", fullPage: true });
+  await page.screenshot({
+    path: "test-results/chart-of-accounts.png",
+    fullPage: true,
+  });
   await row.getByRole("button", { name: "Edit" }).click();
   await page.getByLabel("Account name").fill("Studio overhead");
   await page.getByRole("button", { name: "Save changes" }).click();

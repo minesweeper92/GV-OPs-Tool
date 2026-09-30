@@ -181,6 +181,58 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  journalSchedules: {
+    id: string;
+    entity_id: string;
+    name: string;
+    reference: string;
+    memo: string;
+    lines: {
+      account_code: string;
+      debit: string;
+      credit: string;
+      memo: string;
+    }[];
+    start_date: string;
+    end_date: string | null;
+    frequency: string;
+    timezone: string;
+    occurrences: number | null;
+    next_index: number;
+    reverse_next_month: boolean;
+    status: "Active" | "Paused" | "Stopped" | "Completed";
+    version: number;
+    last_error: string;
+  }[];
+  journalOccurrences: {
+    id: string;
+    entity_id: string;
+    schedule_id: string;
+    cycle: number;
+    scheduled_date: string;
+    reference: string;
+    memo: string;
+    lines: {
+      account_code: string;
+      debit: string;
+      credit: string;
+      memo: string;
+    }[];
+    reverse_next_month: boolean;
+    status: "Pending review" | "Posted" | "Skipped";
+    journal_id: string | null;
+    reason: string;
+  }[];
+  journalReversalTasks: {
+    id: string;
+    entity_id: string;
+    original_journal_id: string;
+    due_date: string;
+    status: "Pending review" | "Posted";
+    reversal_journal_id: string | null;
+    external_reference: string;
+    description: string;
+  }[];
   numberSeries: {
     id: string | null;
     entity_id: string;

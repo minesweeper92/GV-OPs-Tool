@@ -18,6 +18,10 @@ import { crmSnapshot, executeCrm } from "./crm.ts";
 import { executeProfile } from "./profiles.ts";
 import { executeDocument } from "./documents.ts";
 import { executeManualJournal } from "./manual-journals.ts";
+import {
+  executeJournalSchedule,
+  journalScheduleSnapshot,
+} from "./journal-schedules.ts";
 import { executeAccount } from "./accounts.ts";
 import {
   periodPreview,
@@ -293,6 +297,7 @@ export function createApp(
         ...(await projectSnapshot(tx, ctx)),
         ...(await creditSnapshot(tx, ctx)),
         ...(await recurringSnapshot(tx, ctx)),
+        ...(await journalScheduleSnapshot(tx, ctx)),
         ...(await crmSnapshot(tx, ctx)),
         crmMembers,
       }),
@@ -376,25 +381,32 @@ export function createApp(
               : c.action === "manual-journal.create" ||
                   c.action === "manual-journal.reverse"
                 ? executeManualJournal(tx, ctx, c)
-                : c.action.startsWith("profile.")
-                  ? executeProfile(tx, ctx, c)
-                  : c.action.startsWith("crm.")
-                    ? executeCrm(tx, ctx, c)
-                    : c.action.startsWith("recurring.")
-                      ? executeRecurring(tx, ctx, c)
-                      : c.action.startsWith("credit.")
-                        ? executeCredit(tx, ctx, c)
-                        : c.action.startsWith("project.") ||
-                            ["invoice.cancel", "invoice.recognise"].includes(
-                              c.action,
-                            )
-                          ? executeProject(tx, ctx, c)
-                          : c.action.startsWith("bank.")
-                            ? executeBank(tx, ctx, c)
-                            : c.action.startsWith("bill.") ||
-                                c.action.startsWith("vendor-payment.")
-                              ? executePayable(tx, ctx, c)
-                              : execute(tx, ctx, c),
+                : c.action === "journal-schedule.create" ||
+                    c.action === "journal-schedule.status" ||
+                    c.action === "journal-schedule.run" ||
+                    c.action === "journal-schedule.skip" ||
+                    c.action === "journal-schedule.post" ||
+                    c.action === "journal-reversal.post"
+                  ? executeJournalSchedule(tx, ctx, c)
+                  : c.action.startsWith("profile.")
+                    ? executeProfile(tx, ctx, c)
+                    : c.action.startsWith("crm.")
+                      ? executeCrm(tx, ctx, c)
+                      : c.action.startsWith("recurring.")
+                        ? executeRecurring(tx, ctx, c)
+                        : c.action.startsWith("credit.")
+                          ? executeCredit(tx, ctx, c)
+                          : c.action.startsWith("project.") ||
+                              ["invoice.cancel", "invoice.recognise"].includes(
+                                c.action,
+                              )
+                            ? executeProject(tx, ctx, c)
+                            : c.action.startsWith("bank.")
+                              ? executeBank(tx, ctx, c)
+                              : c.action.startsWith("bill.") ||
+                                  c.action.startsWith("vendor-payment.")
+                                ? executePayable(tx, ctx, c)
+                                : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

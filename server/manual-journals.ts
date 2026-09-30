@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID as uuid } from "node:crypto";
 import type { SQL } from "./db.ts";
 import { audit, post, Problem, type Context } from "./domain.ts";
 import { minor } from "../shared/money.ts";
@@ -9,6 +9,12 @@ type JournalCommand = Extract<
   Command,
   { action: "manual-journal.create" | "manual-journal.reverse" }
 >;
+type JournalLine = {
+  account_code: string;
+  debit: string;
+  credit: string;
+  memo: string;
+};
 
 // These accounts have dedicated sub-ledgers. A free-form journal against one would
 // leave a customer, vendor, bank or tax balance inconsistent with its detail.
@@ -47,6 +53,53 @@ async function priorRequest(
   return { id: prior.id as string };
 }
 
+export async function validatedManualLines(
+  tx: SQL,
+  entityId: string,
+  input: JournalLine[],
+) {
+  const accountCodes = [...new Set(input.map((line) => line.account_code))];
+  if (accountCodes.some((code) => controlledAccountCodes.has(code)))
+    throw new Problem(
+      400,
+      "Use the corresponding invoice, bill, payment or bank workflow for a control account.",
+    );
+  const bankAccounts = (
+    await tx.query(
+      "SELECT account_code FROM bank_accounts WHERE entity_id=$1 AND account_code=ANY($2::text[])",
+      [entityId, accountCodes],
+    )
+  ).rows;
+  if (bankAccounts.length)
+    throw new Problem(400, "Use the banking workflow for a bank account.");
+  const accounts = (
+    await tx.query(
+      "SELECT code FROM accounts WHERE entity_id=$1 AND active AND code=ANY($2::text[])",
+      [entityId, accountCodes],
+    )
+  ).rows;
+  if (accounts.length !== accountCodes.length)
+    throw new Problem(400, "Choose accounts from this legal entity's chart.");
+  const lines = input.map((line) => ({
+    account: line.account_code,
+    debit: minor(line.debit),
+    credit: minor(line.credit),
+    memo: line.memo,
+  }));
+  if (lines.some((line) => line.debit > 0n === line.credit > 0n))
+    throw new Problem(
+      400,
+      "Each line needs either a debit or a credit, not both.",
+    );
+  const debit = lines.reduce((sum, line) => sum + line.debit, 0n);
+  const credit = lines.reduce((sum, line) => sum + line.credit, 0n);
+  if (debit === 0n || debit !== credit)
+    throw new Problem(400, "Journal debits and credits must balance.");
+  if (debit > 9_000_000_000_000_000n)
+    throw new Problem(400, "Journal total exceeds the supported amount.");
+  return { lines, debit };
+}
+
 export async function executeManualJournal(
   tx: SQL,
   ctx: Context,
@@ -62,51 +115,20 @@ export async function executeManualJournal(
       reference: command.reference,
       memo: command.memo,
       lines: command.lines,
+      ...(command.auto_reverse_on
+        ? { auto_reverse_on: command.auto_reverse_on }
+        : {}),
     });
     const prior = await priorRequest(tx, "manual", command.request_key, hash);
     if (prior) return prior;
     await postingEntity(tx, command.entity_id, command.date);
-    const accountCodes = [
-      ...new Set(command.lines.map((line) => line.account_code)),
-    ];
-    if (accountCodes.some((code) => controlledAccountCodes.has(code)))
-      throw new Problem(
-        400,
-        "Use the corresponding invoice, bill, payment or bank workflow for a control account.",
-      );
-    const bankAccounts = (
-      await tx.query(
-        "SELECT account_code FROM bank_accounts WHERE entity_id=$1 AND account_code=ANY($2::text[])",
-        [command.entity_id, accountCodes],
-      )
-    ).rows;
-    if (bankAccounts.length)
-      throw new Problem(400, "Use the banking workflow for a bank account.");
-    const accounts = (
-      await tx.query(
-        "SELECT code FROM accounts WHERE entity_id=$1 AND active AND code=ANY($2::text[])",
-        [command.entity_id, accountCodes],
-      )
-    ).rows;
-    if (accounts.length !== accountCodes.length)
-      throw new Problem(400, "Choose accounts from this legal entity's chart.");
-    const lines = command.lines.map((line) => ({
-      account: line.account_code,
-      debit: minor(line.debit),
-      credit: minor(line.credit),
-      memo: line.memo,
-    }));
-    if (lines.some((line) => line.debit > 0n === line.credit > 0n))
-      throw new Problem(
-        400,
-        "Each line needs either a debit or a credit, not both.",
-      );
-    const debit = lines.reduce((sum, line) => sum + line.debit, 0n);
-    const credit = lines.reduce((sum, line) => sum + line.credit, 0n);
-    if (debit === 0n || debit !== credit)
-      throw new Problem(400, "Journal debits and credits must balance.");
-    if (debit > 9_000_000_000_000_000n)
-      throw new Problem(400, "Journal total exceeds the supported amount.");
+    if (command.auto_reverse_on && command.auto_reverse_on <= command.date)
+      throw new Problem(400, "The reversal date must follow the posting date.");
+    const { lines, debit } = await validatedManualLines(
+      tx,
+      command.entity_id,
+      command.lines,
+    );
     const id = await post(
       tx,
       ctx,
@@ -118,6 +140,11 @@ export async function executeManualJournal(
       lines,
       { reference: command.reference, memo: command.memo, requestHash: hash },
     );
+    if (command.auto_reverse_on)
+      await tx.query(
+        "INSERT INTO journal_reversal_tasks(id,tenant_id,entity_id,original_journal_id,due_date) VALUES($1,$2,$3,$4,$5)",
+        [uuid(), ctx.tenantId, command.entity_id, id, command.auto_reverse_on],
+      );
     await audit(tx, ctx, id, "manual-journal.post", {
       entity_id: command.entity_id,
       date: command.date,
@@ -189,5 +216,9 @@ export async function executeManualJournal(
     date: command.date,
     reason: command.reason,
   });
+  await tx.query(
+    "UPDATE journal_reversal_tasks SET status='Posted',reversal_journal_id=$2,posted_on=$3 WHERE original_journal_id=$1 AND status='Pending review'",
+    [original.id, id, command.date],
+  );
   return { id };
 }

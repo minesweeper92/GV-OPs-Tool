@@ -284,6 +284,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     date,
     reference: text,
     memo: text,
+    auto_reverse_on: date.nullable().optional(),
     lines: z
       .array(
         z.strictObject({
@@ -303,6 +304,50 @@ export const commandSchema = z.discriminatedUnion("action", [
     date,
     reason: text,
     request_key: id,
+  }),
+  z.strictObject({
+    action: z.literal("journal-schedule.create"),
+    entity_id: id,
+    name: text,
+    reference: text,
+    memo: text,
+    lines: z
+      .array(
+        z.strictObject({
+          account_code: z.string().regex(/^[A-Za-z0-9]{1,12}$/),
+          debit: money,
+          credit: money,
+          memo: z.string().trim().max(400),
+        }),
+      )
+      .min(2)
+      .max(100),
+    start_date: date,
+    end_date: date.nullable(),
+    frequency: z.enum(["weekly", "monthly", "quarterly", "yearly"]),
+    timezone: z.enum(["UTC", "Asia/Karachi"]),
+    occurrences: z.number().int().min(1).max(1200).nullable(),
+    reverse_next_month: z.boolean(),
+    request_key: id,
+  }),
+  z.strictObject({
+    action: z.literal("journal-schedule.status"),
+    id,
+    version: z.number().int().positive(),
+    status: z.enum(["Active", "Paused", "Stopped"]),
+  }),
+  z.strictObject({ action: z.literal("journal-schedule.run"), id }),
+  z.strictObject({
+    action: z.literal("journal-schedule.skip"),
+    id,
+    reason: text,
+  }),
+  z.strictObject({ action: z.literal("journal-schedule.post"), id }),
+  z.strictObject({
+    action: z.literal("journal-reversal.post"),
+    id,
+    date,
+    reason: text,
   }),
   z.strictObject({
     action: z.literal("account.create"),

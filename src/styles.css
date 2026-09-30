@@ -1124,6 +1124,35 @@ tbody tr:hover {
   font-size: 13px;
   font-weight: 650;
 }
+.manual-journal-form label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.manual-journal-form label.checkbox input {
+  width: auto;
+}
+.journal-schedule-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 16px 0;
+}
+.journal-schedule-row > div:first-child {
+  min-width: 240px;
+  flex: 1;
+}
+.journal-schedule-row p {
+  margin: 4px 0 0;
+}
+.journal-schedule-row form {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
 .manual-journal-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

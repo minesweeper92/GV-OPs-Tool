@@ -2,6 +2,7 @@ import { createHash, randomUUID as uuid } from "node:crypto";
 import type { SQL } from "./db.ts";
 import { audit, Problem, type Context } from "./domain.ts";
 import type { Command } from "../shared/commands.ts";
+import { occurrenceDate } from "../shared/recurring.ts";
 
 type Transition = Extract<Command, { action: "period.transition" }>;
 type LegacyUnlock = Extract<Command, { action: "period.legacy-unlock" }>;
@@ -48,39 +49,73 @@ export async function periodPreview(
       [entityId, start],
     )
   ).rows[0];
-  const [banks, invoiceDrafts, billDrafts, recurringReview, balances] =
-    await Promise.all([
-      tx.query(
-        "SELECT name,last_reconciled_on FROM bank_accounts WHERE entity_id=$1 AND opening_on<=$2 AND last_reconciled_on<$2 ORDER BY name",
-        [entityId, end],
-      ),
-      tx.query(
-        "SELECT count(*)::integer AS count FROM invoices WHERE entity_id=$1 AND issue_date<=$2 AND status='Draft'",
-        [entityId, end],
-      ),
-      tx.query(
-        "SELECT count(*)::integer AS count FROM bills WHERE entity_id=$1 AND bill_date<=$2 AND status IN ('Draft','Pending approval')",
-        [entityId, end],
-      ),
-      tx.query(
-        `SELECT count(*)::integer AS count FROM recurring_occurrences o
+  const [
+    banks,
+    invoiceDrafts,
+    billDrafts,
+    recurringReview,
+    journalDrafts,
+    reversalTasks,
+    schedules,
+    balances,
+  ] = await Promise.all([
+    tx.query(
+      "SELECT name,last_reconciled_on FROM bank_accounts WHERE entity_id=$1 AND opening_on<=$2 AND last_reconciled_on<$2 ORDER BY name",
+      [entityId, end],
+    ),
+    tx.query(
+      "SELECT count(*)::integer AS count FROM invoices WHERE entity_id=$1 AND issue_date<=$2 AND status='Draft'",
+      [entityId, end],
+    ),
+    tx.query(
+      "SELECT count(*)::integer AS count FROM bills WHERE entity_id=$1 AND bill_date<=$2 AND status IN ('Draft','Pending approval')",
+      [entityId, end],
+    ),
+    tx.query(
+      `SELECT count(*)::integer AS count FROM recurring_occurrences o
          JOIN recurring_profiles p ON p.id=o.profile_id
          WHERE p.entity_id=$1 AND o.scheduled_date<=$2 AND o.status='Pending review'`,
-        [entityId, end],
-      ),
-      tx.query(
-        `SELECT coalesce(sum(l.debit_minor-l.credit_minor),0)::text AS difference,
+      [entityId, end],
+    ),
+    tx.query(
+      "SELECT count(*)::integer AS count FROM journal_schedule_occurrences WHERE entity_id=$1 AND scheduled_date<=$2 AND status='Pending review'",
+      [entityId, end],
+    ),
+    tx.query(
+      "SELECT count(*)::integer AS count FROM journal_reversal_tasks WHERE entity_id=$1 AND due_date<=$2 AND status='Pending review'",
+      [entityId, end],
+    ),
+    tx.query(
+      "SELECT start_date,frequency,next_index,end_date,occurrences FROM journal_schedules WHERE entity_id=$1 AND status='Active'",
+      [entityId],
+    ),
+    tx.query(
+      `SELECT coalesce(sum(l.debit_minor-l.credit_minor),0)::text AS difference,
          coalesce(sum(CASE WHEN l.account_code='3900' THEN l.debit_minor-l.credit_minor ELSE 0 END),0)::text AS clearing
          FROM journals j JOIN journal_lines l ON l.journal_id=j.id
          WHERE j.entity_id=$1 AND j.posted_on<=$2`,
-        [entityId, end],
-      ),
-    ]);
+      [entityId, end],
+    ),
+  ]);
   const bankNames = banks.rows.map((r) => r.name as string);
   const bankCount = bankNames.length;
   const invoices = Number(invoiceDrafts.rows[0].count);
   const bills = Number(billDrafts.rows[0].count);
   const recurring = Number(recurringReview.rows[0].count);
+  const scheduledDrafts = Number(journalDrafts.rows[0].count);
+  const reversals = Number(reversalTasks.rows[0].count);
+  const notGenerated = schedules.rows.filter((s) => {
+    const next = occurrenceDate(
+      String(s.start_date).slice(0, 10),
+      s.frequency,
+      Number(s.next_index),
+    );
+    return (
+      next <= end &&
+      (s.end_date === null || next <= String(s.end_date).slice(0, 10)) &&
+      (s.occurrences === null || Number(s.next_index) < Number(s.occurrences))
+    );
+  }).length;
   const difference = balances.rows[0].difference as string;
   const clearing = balances.rows[0].clearing as string;
   const check = (
@@ -137,6 +172,22 @@ export async function periodPreview(
       recurring
         ? `${recurring} occurrence(s) due on or before month-end.`
         : "No due recurring expenses awaiting review.",
+    ),
+    check(
+      "journal-schedules",
+      "Recurring journal drafts due for review",
+      scheduledDrafts + notGenerated,
+      scheduledDrafts + notGenerated
+        ? `${scheduledDrafts} generated draft(s); ${notGenerated} schedule(s) still need generation.`
+        : "No due recurring journal drafts.",
+    ),
+    check(
+      "journal-reversals",
+      "Scheduled reversals due for review",
+      reversals,
+      reversals
+        ? `${reversals} reversal(s) due on or before month-end.`
+        : "No scheduled reversals awaiting review.",
     ),
     check(
       "clearing",
