@@ -30,7 +30,7 @@ test("inline company creation preserves a rich contact draft and saves its affil
     .getByLabel("Job title", { exact: true })
     .fill("Marketing director");
   await page
-    .getByText("Full details and custom fields", { exact: true })
+    .getByText("Full details, owner and custom fields", { exact: true })
     .click();
   await page.getByLabel("Department", { exact: true }).fill("Brand marketing");
   await page
@@ -83,6 +83,10 @@ test("inline company creation preserves a rich contact draft and saves its affil
     .getByLabel("Company", { exact: true })
     .inputValue();
   expect(companyId).not.toBe("");
+  await page.getByText("Lifecycle and lead status").click();
+  await expect(
+    page.getByLabel("Relationship role at this company"),
+  ).toHaveValue("Contact");
   await expect(page.getByLabel("First name", { exact: true })).toHaveValue(
     firstName,
   );
@@ -112,6 +116,49 @@ test("inline company creation preserves a rich contact draft and saves its affil
     ),
   ).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("a contact can be captured with only a name and enriched later", async ({
+  page,
+}) => {
+  await openContact(page);
+  const firstName = `Quick ${randomUUID().slice(0, 8)}`;
+  await expect(page.getByLabel("First name", { exact: true })).toBeFocused();
+  await expect(
+    page.getByText("Start with a name and whatever contact details you have.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("Lifecycle and lead status")).toBeVisible();
+  await expect(
+    page.getByLabel("Relationship role at this company"),
+  ).toHaveCount(0);
+  await page.getByLabel("First name", { exact: true }).fill(firstName);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const data = await (await page.request.get("/api/data")).json();
+  const contact = data.contacts.find((c: any) => c.first_name === firstName);
+  expect(contact).toBeTruthy();
+  expect(contact.lifecycle).toBe("Lead");
+  expect(data.affiliations.some((a: any) => a.contact_id === contact.id)).toBe(
+    false,
+  );
+});
+
+test("a company can be captured with only its name", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await page.getByRole("link", { name: "Companies", exact: true }).click();
+  await page.getByRole("button", { name: "New company", exact: true }).click();
+  const name = `Quick company ${randomUUID().slice(0, 8)}`;
+  await expect(page.getByLabel("Company name")).toBeFocused();
+  await page.getByLabel("Company name").fill(name);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const data = await (await page.request.get("/api/data")).json();
+  expect(data.companies.find((c: any) => c.name === name)).toBeTruthy();
 });
 
 test("Back, Escape and duplicate selection preserve contact and company drafts", async ({

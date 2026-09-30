@@ -122,6 +122,7 @@ test("contact workspace supports quick logging, status filters and create anothe
   await page.getByRole("button", { name: "New contact" }).click();
   await page.getByLabel("First name", { exact: true }).fill(first);
   await page.getByLabel("Last name", { exact: true }).fill("Example");
+  await page.getByText("Lifecycle and lead status").click();
   await page
     .getByLabel("Lead status", { exact: true })
     .selectOption("Connected");

@@ -19,7 +19,7 @@ test("full contact creation works without an employer and persists optional deta
     .getByLabel("Primary email", { exact: true })
     .fill(`${randomUUID()}@example.test`);
   await page
-    .getByText("Full details and custom fields", { exact: true })
+    .getByText("Full details, owner and custom fields", { exact: true })
     .click();
   await page.getByLabel("Department", { exact: true }).fill("Brand marketing");
   await page

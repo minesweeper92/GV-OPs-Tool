@@ -1312,6 +1312,16 @@ tbody tr:hover {
   margin: 0;
   min-width: 0;
 }
+.crm-capture-hint {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--nav);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
 .crm-filters {
   display: flex;
   gap: 16px;

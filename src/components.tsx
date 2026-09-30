@@ -122,18 +122,22 @@ export function Drawer({
   close,
   dirty,
   wide = false,
+  initialFocus,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   dirty: boolean;
   wide?: boolean;
+  initialFocus?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null),
     previous = useRef<HTMLElement | null>(null);
   useEffect(() => {
     previous.current = document.activeElement as HTMLElement;
     ref.current?.showModal();
+    if (initialFocus)
+      ref.current?.querySelector<HTMLElement>(initialFocus)?.focus();
     return () => {
       previous.current?.focus();
     };

@@ -9,6 +9,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onBusyChange: (busy: boolean) => void;
   onChange: () => void;
+  onSelectionChange?: (companyId: string) => void;
 };
 const normalized = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -18,6 +19,7 @@ export function ContactCompanyField({
   onOpenChange,
   onBusyChange,
   onChange,
+  onSelectionChange,
 }: Props) {
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
@@ -57,6 +59,7 @@ export function ContactCompanyField({
   };
   function finish(id: string, message: string) {
     setSelected(id);
+    onSelectionChange?.(id);
     setNotice(message);
     setError("");
     toggle(false);
@@ -121,6 +124,7 @@ export function ContactCompanyField({
             value={selected}
             onChange={(e) => {
               setSelected(e.target.value);
+              onSelectionChange?.(e.target.value);
               setNotice("");
               onChange();
             }}

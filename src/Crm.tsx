@@ -448,6 +448,7 @@ export function CrmEditor({
   const isNew = !state.record_id;
   const [addingCompany, setAddingCompany] = useState(false);
   const [companyBusy, setCompanyBusy] = useState(false);
+  const [contactCompanyId, setContactCompanyId] = useState("");
   const contact =
       data.contacts.find((c) => c.id === state.record_id) ||
       (state.mode === "contact"
@@ -735,6 +736,13 @@ export function CrmEditor({
     <Drawer
       title={title}
       dirty={dirty}
+      initialFocus={
+        isNew && state.mode === "contact"
+          ? '[name="first_name"]'
+          : isNew && state.mode === "company"
+            ? '[name="name"]'
+            : undefined
+      }
       close={() => {
         if (!busy && !companyBusy) close();
       }}
@@ -748,50 +756,18 @@ export function CrmEditor({
           {error ? <ErrorBox error={error} /> : null}
           {state.mode === "contact" && contact ? (
             <>
+              {isNew ? (
+                <p className="crm-capture-hint">
+                  Start with a name and whatever contact details you have. You
+                  can fill in the rest later.
+                </p>
+              ) : null}
               <div className="form-row">
                 {input("first_name", "First name", contact.first_name, true)}
                 {input("last_name", "Last name", contact.last_name)}
               </div>
-              {input("title", "Job title", contact.title)}
               {input("email", "Primary email", contact.email, false, "email")}
               {input("phone", "Primary phone", contact.phone)}
-              <div className="form-row">
-                <Field label="Lifecycle stage">
-                  <select name="lifecycle" defaultValue={contact.lifecycle}>
-                    {[
-                      "Subscriber",
-                      "Lead",
-                      "MQL",
-                      "SQL",
-                      "Opportunity",
-                      "Customer",
-                      "Evangelist",
-                    ].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Lead status">
-                  <select
-                    value={String(profile.lead_status || "New")}
-                    onChange={(e) => {
-                      setProfile({ ...profile, lead_status: e.target.value });
-                      setDirty(true);
-                    }}
-                  >
-                    {[
-                      "New",
-                      "Attempted to contact",
-                      "Connected",
-                      "In progress",
-                      "Open deal",
-                      "Unqualified",
-                    ].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
               {isNew ? (
                 <>
                   <ContactCompanyField
@@ -800,10 +776,61 @@ export function CrmEditor({
                     onOpenChange={setAddingCompany}
                     onBusyChange={setCompanyBusy}
                     onChange={() => setDirty(true)}
+                    onSelectionChange={setContactCompanyId}
                   />
-                  {input("role", "Relationship role", "Contact")}
                 </>
               ) : null}
+              {input("title", "Job title", contact.title)}
+              <details open={!isNew}>
+                <summary>Lifecycle and lead status</summary>
+                <div className="form-row">
+                  <Field
+                    label="Lifecycle stage"
+                    hint="Defaults to Lead. Change it when the relationship progresses."
+                  >
+                    <select name="lifecycle" defaultValue={contact.lifecycle}>
+                      {[
+                        "Subscriber",
+                        "Lead",
+                        "MQL",
+                        "SQL",
+                        "Opportunity",
+                        "Customer",
+                        "Evangelist",
+                      ].map((s) => (
+                        <option key={s}>{s}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Lead status">
+                    <select
+                      value={String(profile.lead_status || "New")}
+                      onChange={(e) => {
+                        setProfile({ ...profile, lead_status: e.target.value });
+                        setDirty(true);
+                      }}
+                    >
+                      {[
+                        "New",
+                        "Attempted to contact",
+                        "Connected",
+                        "In progress",
+                        "Open deal",
+                        "Unqualified",
+                      ].map((s) => (
+                        <option key={s}>{s}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                {isNew && contactCompanyId
+                  ? input(
+                      "role",
+                      "Relationship role at this company",
+                      "Contact",
+                    )
+                  : null}
+              </details>
               <details open={!isNew}>
                 <summary>Communication, relationship and preferences</summary>
                 <h3>Additional email addresses</h3>
@@ -993,26 +1020,14 @@ export function CrmEditor({
             </>
           ) : state.mode === "company" && company ? (
             <>
+              {isNew ? (
+                <p className="crm-capture-hint">
+                  Add the company now; billing and tax details can be completed
+                  before you create a financial document.
+                </p>
+              ) : null}
               {input("name", "Company name", company.name, true)}
-              {input("trading_name", "Trading name", company.trading_name)}
               {input("domain", "Website domain", company.domain)}
-              {input("industry", "Industry", company.industry)}
-              {input("size", "Company size", company.size)}
-              {input("tax_id", "Tax registration", company.tax_id)}
-              <Field label="Billing address">
-                <textarea
-                  name="address"
-                  defaultValue={company.address}
-                  maxLength={4000}
-                />
-              </Field>
-              <Field label="Shipping address">
-                <textarea
-                  name="shipping_address"
-                  defaultValue={company.shipping_address}
-                  maxLength={4000}
-                />
-              </Field>
               <div className="checks">
                 <label>
                   <input
@@ -1031,23 +1046,44 @@ export function CrmEditor({
                   Vendor
                 </label>
               </div>
-              <Field label="Usually serviced by">
-                <select
-                  name="service_entity_id"
-                  defaultValue={company.service_entity_id || ""}
-                >
-                  <option value="">Choose for each project</option>
-                  {data.entities.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <p className="muted">
-                Changes do not rewrite the customer name, addresses or entity on
-                existing quotes and invoices.
-              </p>
+              <details open={!isNew}>
+                <summary>Business, billing and service details</summary>
+                {input("trading_name", "Trading name", company.trading_name)}
+                {input("industry", "Industry", company.industry)}
+                {input("size", "Company size", company.size)}
+                {input("tax_id", "Tax registration", company.tax_id)}
+                <Field label="Billing address">
+                  <textarea
+                    name="address"
+                    defaultValue={company.address}
+                    maxLength={4000}
+                  />
+                </Field>
+                <Field label="Shipping address">
+                  <textarea
+                    name="shipping_address"
+                    defaultValue={company.shipping_address}
+                    maxLength={4000}
+                  />
+                </Field>
+                <Field label="Usually serviced by">
+                  <select
+                    name="service_entity_id"
+                    defaultValue={company.service_entity_id || ""}
+                  >
+                    <option value="">Choose for each project</option>
+                    {data.entities.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <p className="muted">
+                  Changes do not rewrite the customer name, addresses or entity
+                  on existing quotes and invoices.
+                </p>
+              </details>
             </>
           ) : state.mode === "lead" && lead ? (
             <>
@@ -1116,23 +1152,26 @@ export function CrmEditor({
                 </>
               ) : null}
               {input("title", "Lead title", lead.title, true)}
-              {input("source", "Lead source", lead.source)}
-              <Field label="Lead status">
-                <select
-                  value={leadStatus}
-                  onChange={(e) => setLeadStatus(e.target.value)}
-                >
-                  {[
-                    "New",
-                    "Attempted",
-                    "Connected",
-                    "Qualified",
-                    "Disqualified",
-                  ].map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </Field>
+              <details open={!isNew}>
+                <summary>Source and lead status</summary>
+                {input("source", "Lead source", lead.source)}
+                <Field label="Lead status">
+                  <select
+                    value={leadStatus}
+                    onChange={(e) => setLeadStatus(e.target.value)}
+                  >
+                    {[
+                      "New",
+                      "Attempted",
+                      "Connected",
+                      "Qualified",
+                      "Disqualified",
+                    ].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                </Field>
+              </details>
               {leadStatus === "Disqualified" ? (
                 input(
                   "reason",
@@ -1312,23 +1351,23 @@ export function CrmEditor({
           )}
           {profileMode ? (
             <>
-              <Field label="Record owner">
-                <select name="owner_id" defaultValue={currentOwner}>
-                  {!owners.some((m) => m.id === currentOwner) ? (
-                    <option value={currentOwner}>
-                      Current owner (unavailable; ask an administrator to
-                      reassign)
-                    </option>
-                  ) : null}
-                  {owners.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
               <details open={!isNew}>
-                <summary>Full details and custom fields</summary>
+                <summary>Full details, owner and custom fields</summary>
+                <Field label="Record owner">
+                  <select name="owner_id" defaultValue={currentOwner}>
+                    {!owners.some((m) => m.id === currentOwner) ? (
+                      <option value={currentOwner}>
+                        Current owner (unavailable; ask an administrator to
+                        reassign)
+                      </option>
+                    ) : null}
+                    {owners.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <ProfileFields
                   kind={state.mode}
                   value={profile}
