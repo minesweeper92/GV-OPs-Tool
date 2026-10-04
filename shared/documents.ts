@@ -4,6 +4,7 @@ import { minor, scaled, totals } from "./money.ts";
 const text = z.string().trim().max(4000).default("");
 const short = z.string().trim().max(200).default("");
 const money = z.string().regex(/^\d{1,13}(\.\d{1,2})?$/);
+const signedMoney = z.string().regex(/^-?\d{1,13}(\.\d{1,2})?$/);
 export const documentLine = z.strictObject({
   description: z.string().trim().min(1).max(2000),
   quantity: z.string().regex(/^\d{1,7}(\.\d{1,3})?$/),
@@ -30,6 +31,7 @@ export const documentDetails = z.strictObject({
   document_discount: money.default("0"),
   shipping_amount: money.default("0"),
   shipping_tax: money.default("0"),
+  adjustment_amount: signedMoney.default("0"),
   customer_notes: text,
   inclusions: text,
   exclusions: text,
@@ -59,6 +61,7 @@ export function documentTotals(
     | "document_discount"
     | "shipping_amount"
     | "shipping_tax"
+    | "adjustment_amount"
   >,
 ) {
   const items = totals(lines, {
@@ -80,7 +83,13 @@ export function documentTotals(
     : null;
   const net = BigInt(items.net) + shipping;
   const tax = BigInt(items.tax) + BigInt(charge?.tax || "0");
-  const total = net + tax;
+  const adjustmentValue = details.adjustment_amount;
+  const adjustment = adjustmentValue.startsWith("-")
+    ? -minor(adjustmentValue.slice(1))
+    : minor(adjustmentValue);
+  const total = net + tax + adjustment;
+  if (total <= 0n)
+    throw new Error("Adjustment must leave a positive document total.");
   if (total > 9_000_000_000_000_000n)
     throw new Error("Document total is outside the supported range.");
   return {
@@ -92,6 +101,7 @@ export function documentTotals(
     ],
     net: String(net),
     tax: String(tax),
+    adjustment: String(adjustment),
     total: String(total),
     beforeDiscount: items.beforeDiscount,
     documentDiscountMinor: items.documentDiscountMinor,

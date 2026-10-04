@@ -79,8 +79,9 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await page.getByLabel("Tax % 1", { exact: true }).fill("0");
   await page.getByLabel("Overall discount").fill("10");
   await page.getByLabel("Shipping charges").fill("5000");
+  await page.getByLabel("Adjustment (after tax)").fill("2500");
   await expect(page.locator(".quote-totals-grand")).toContainText(
-    "PKR 50,000.00",
+    "PKR 52,500.00",
   );
   await page.screenshot({
     path: "test-results/quote-composer-desktop.png",
@@ -94,6 +95,8 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   expect(quote.details.reference).toBe("BRAND-2026");
   expect(quote.details.document_discount).toBe("10");
   expect(quote.details.shipping_amount).toBe("5000");
+  expect(quote.adjustment_minor).toBe("250000");
+  expect(quote.total_minor).toBe("5250000");
   expect(quote.lines[0].subtotal).toBe("4500000");
   expect(quote.lines[1].kind).toBe("shipping");
   await expect(page).toHaveURL(new RegExp(`#quote/${quote.id}$`));
@@ -136,6 +139,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     page.getByText("Identity concept and design", { exact: true }),
   ).toBeVisible();
   await expect(page.locator(".document")).toContainText("Shipping charges");
+  await expect(page.locator(".document .totals")).toContainText("Adjustment");
   await expect(page.locator(".document .totals")).toContainText(
     "Overall discount",
   );
@@ -269,7 +273,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await page
     .getByRole("button", { name: "Record payment", exact: true })
     .click();
-  await page.getByLabel("Money received (PKR)").fill("50000");
+  await page.getByLabel("Money received (PKR)").fill("52500");
   await page.getByLabel("Withholding deducted (PKR)").fill("0");
   await page.getByLabel("Bank or receipt reference").fill("PORTAL-BANK-001");
   await page
@@ -280,7 +284,19 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   const final = await (await page.request.get("/api/data")).json();
   const invoiced = final.invoices.find((i: any) => i.quote_id === quote.id);
   expect(invoiced.number).toBe(`${prefix}0012`);
-  expect(invoiced.total_minor).toBe("5000000");
+  expect(invoiced.total_minor).toBe("5250000");
+  expect(invoiced.adjustment_minor).toBe("250000");
+  const reports = await (
+    await page.request.get(
+      `/api/reports?entityId=${entity.id}&from=2026-01-01&to=2026-12-31`,
+    )
+  ).json();
+  const adjustmentJournal = reports.journals.find((journal: any) =>
+    journal.lines.some((line: any) => line.account === "4020"),
+  );
+  expect(adjustmentJournal?.lines).toContainEqual(
+    expect.objectContaining({ account: "4020", credit: "250000" }),
+  );
   expect(invoiced.lines.some((line: any) => line.kind === "shipping")).toBe(
     true,
   );

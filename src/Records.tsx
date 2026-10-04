@@ -1308,6 +1308,12 @@ export function DocumentRecord({
             ) : null}
             <dt>Tax</dt>
             <dd>{money(quote.tax_minor, quote.currency)}</dd>
+            {BigInt(quote.adjustment_minor || "0") !== 0n ? (
+              <>
+                <dt>Adjustment</dt>
+                <dd>{money(quote.adjustment_minor, quote.currency)}</dd>
+              </>
+            ) : null}
             <dt>Total</dt>
             <dd>
               <strong>{money(quote.total_minor, quote.currency)}</strong>
@@ -1468,6 +1474,12 @@ export function DocumentRecord({
               ) : null}
               <dt>Tax</dt>
               <dd>{money(doc.tax_minor, doc.currency)}</dd>
+              {BigInt(doc.adjustment_minor || "0") !== 0n ? (
+                <>
+                  <dt>Adjustment</dt>
+                  <dd>{money(doc.adjustment_minor, doc.currency)}</dd>
+                </>
+              ) : null}
               <dt>Total</dt>
               <dd>
                 <strong>{money(doc.total_minor, doc.currency)}</strong>

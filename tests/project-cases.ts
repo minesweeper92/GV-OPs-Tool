@@ -40,6 +40,34 @@ export async function verifyProjects(t: TestContext, db: Database) {
       await seedAccounts(tx, tenant, id);
     }
   });
+  const quoteForAllocation = {
+    net_minor: "10000",
+    adjustment_minor: "500",
+    lines: [
+      {
+        description: "Work",
+        quantity: "1",
+        price: "100",
+        tax: "18",
+        subtotal: "10000",
+        taxMinor: "1800",
+      },
+    ],
+  };
+  const firstPart = allocateInvoice(quoteForAllocation, [], 5000n);
+  const lastPart = allocateInvoice(
+    quoteForAllocation,
+    [{ net_minor: firstPart.net, lines: firstPart.lines }],
+    5000n,
+    500n,
+  );
+  assert.equal(firstPart.adjustment, "0");
+  assert.equal(lastPart.adjustment, "500");
+  assert.equal(
+    BigInt(firstPart.total) + BigInt(lastPart.total),
+    12300n,
+    "split invoices include the quote adjustment exactly once",
+  );
   const app = createApp(db, "http://127.0.0.1:4320");
   await app.ready();
   t.after(() => app.close());

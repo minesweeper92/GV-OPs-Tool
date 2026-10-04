@@ -221,6 +221,11 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
         [i.id],
       )
     ).rows[0];
+    if (net + tax > BigInt(i.total_minor))
+      throw new Problem(
+        409,
+        "The selected item credit exceeds the invoice total after its post-tax adjustment.",
+      );
     if (i.billing_kind === "earned" && c.treatment !== "earned")
       throw new Problem(
         400,

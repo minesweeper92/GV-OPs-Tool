@@ -559,7 +559,7 @@ export function InvoiceComposer({
                 <div className="quote-field-grid invoice-allocation">
                   <Field
                     label={`Subtotal to invoice (${quote.currency}, before tax)`}
-                    hint={`Available after draft invoices and planned milestones: ${money(available, quote.currency)}.`}
+                    hint={`Available after draft invoices and planned milestones: ${money(available, quote.currency)}.${BigInt(quote.adjustment_minor || "0") !== 0n ? " The quote adjustment is applied to the final invoice only." : ""}`}
                   >
                     <input
                       required

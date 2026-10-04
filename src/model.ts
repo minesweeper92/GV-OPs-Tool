@@ -118,6 +118,7 @@ export interface Quote {
   lines: Line[];
   net_minor: string;
   tax_minor: string;
+  adjustment_minor: string;
   total_minor: string;
   customer_name: string;
   issuer_name: string;
@@ -145,6 +146,7 @@ export interface Invoice {
   total_minor: string;
   net_minor: string;
   tax_minor: string;
+  adjustment_minor: string;
   fx_micros: string;
   currency: string;
   lines: Line[];

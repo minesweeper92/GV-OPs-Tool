@@ -13,6 +13,11 @@ const finance = (ctx: Context) => {
     );
 };
 const date = (v: unknown) => String(v).slice(0, 10);
+const decimal = (minor: bigint) => {
+  const sign = minor < 0n ? "-" : "";
+  const absolute = minor < 0n ? -minor : minor;
+  return `${sign}${absolute / 100n}.${String(absolute % 100n).padStart(2, "0")}`;
+};
 async function get(tx: SQL, table: string, id: string, lock = true) {
   const r = (
     await tx.query(
@@ -47,7 +52,12 @@ async function activeInvoices(tx: SQL, deal: string) {
 
 // Per-line allocation preserves each original tax rate and clears
 // rounding residuals on the final invoice. Drafts reserve amounts too.
-export function allocateInvoice(q: Row, existing: Row[], amount: bigint) {
+export function allocateInvoice(
+  q: Row,
+  existing: Row[],
+  amount: bigint,
+  adjustment = 0n,
+) {
   const used = q.lines.map((_: Row, index: number) =>
     existing.reduce(
       (sum: { net: bigint; tax: bigint }, i: Row) => {
@@ -116,7 +126,8 @@ export function allocateInvoice(q: Row, existing: Row[], amount: bigint) {
     lines,
     net: String(net),
     tax: String(tax),
-    total: String(net + tax),
+    adjustment: String(adjustment),
+    total: String(net + tax + adjustment),
   };
 }
 export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
@@ -225,8 +236,21 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
     );
   if (c.due_date < c.issue_date)
     throw new Problem(400, "Due date cannot precede invoice date.");
-  const calculated = allocateInvoice(q, invoices, amount),
+  const remaining =
+    BigInt(q.net_minor) -
+    invoices.reduce(
+      (sum: bigint, invoice: Row) => sum + BigInt(invoice.net_minor),
+      0n,
+    );
+  const adjustment =
+    amount === remaining ? BigInt(q.adjustment_minor || 0) : 0n;
+  const calculated = allocateInvoice(q, invoices, amount, adjustment),
     id = uuid();
+  if (BigInt(calculated.total) <= 0n)
+    throw new Problem(
+      400,
+      "The final invoice adjustment must leave a positive total.",
+    );
   if (baseAmount(BigInt(calculated.net), BigInt(q.fx_micros)) <= 0n)
     throw new Problem(400, "The invoice subtotal rounds to zero in PKR.");
   const number = await allocateNumber(
@@ -237,8 +261,8 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
     c.number_series_id,
   );
   await tx.query(
-    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros,details,number)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+    `INSERT INTO invoices(id,tenant_id,entity_id,deal_id,quote_id,issue_date,due_date,lines,net_minor,tax_minor,adjustment_minor,total_minor,billing_kind,label,milestone_id,request_key,request_payload,currency,fx_micros,details,number)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
     [
       id,
       ctx.tenantId,
@@ -250,6 +274,7 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
       JSON.stringify(calculated.lines),
       calculated.net,
       calculated.tax,
+      calculated.adjustment,
       calculated.total,
       kind,
       label,
@@ -258,7 +283,11 @@ export async function createProjectInvoice(tx: SQL, ctx: Context, c: Row) {
       JSON.stringify(c),
       q.currency,
       q.fx_micros,
-      JSON.stringify(c.details || q.details || {}),
+      JSON.stringify({
+        ...(q.details || {}),
+        ...(c.details || {}),
+        adjustment_amount: decimal(BigInt(calculated.adjustment)),
+      }),
       number,
     ],
   );

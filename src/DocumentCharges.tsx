@@ -57,10 +57,25 @@ export function DocumentCharges({
             onChange={(event) => onChange("shipping_tax", event.target.value)}
           />
         </Field>
+        <Field
+          label="Adjustment (after tax)"
+          hint="Use a negative amount to reduce the total."
+        >
+          <input
+            required
+            inputMode="decimal"
+            value={details.adjustment_amount}
+            onChange={(event) =>
+              onChange("adjustment_amount", event.target.value)
+            }
+            aria-label="Adjustment (after tax)"
+          />
+        </Field>
       </div>
       <p className="muted document-charge-hint">
         The overall discount is spread across items before tax. Shipping is a
-        separate charge; set its own tax rate where applicable.
+        separate charge; set its own tax rate where applicable. The adjustment
+        is applied after tax and posted to Sales adjustments.
       </p>
       <div className="quote-totals">
         <div>
@@ -87,6 +102,12 @@ export function DocumentCharges({
           <span>Tax (items and shipping)</span>
           <strong>{amounts ? money(amounts.tax, currency) : "—"}</strong>
         </div>
+        {amounts && BigInt(amounts.adjustment) !== 0n ? (
+          <div>
+            <span>Adjustment</span>
+            <strong>{money(amounts.adjustment, currency)}</strong>
+          </div>
+        ) : null}
         <div className="quote-totals-grand">
           <span>Total ({currency})</span>
           <strong>

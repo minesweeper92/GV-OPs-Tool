@@ -46,6 +46,7 @@ export const chart = [
   ["3000", "Owner equity", "Equity"],
   ["3900", "Opening balance clearing", "Equity"],
   ["4000", "Service revenue", "Income"],
+  ["4020", "Sales adjustments", "Income"],
   ["4100", "Realised exchange gain", "Income"],
   ["5000", "Operating expenses", "Expense"],
   ["5100", "Realised exchange loss", "Expense"],
@@ -612,8 +613,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         c.number_series_id,
       );
       await tx.query(
-        `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by,details,number)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        `INSERT INTO quotes(id,tenant_id,deal_id,entity_id,option_name,revision,currency,fx_micros,lines,net_minor,tax_minor,adjustment_minor,total_minor,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,created_by,details,number)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
         [
           id,
           t,
@@ -626,6 +627,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           JSON.stringify(calculated.lines),
           calculated.net,
           calculated.tax,
+          calculated.adjustment,
           calculated.total,
           company.name,
           e.name,
@@ -708,6 +710,20 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
       const number = i.number || (await allocateNumber(tx, t, e.id, "invoice"));
       const net = baseAmount(BigInt(i.net_minor), BigInt(i.fx_micros)),
         total = baseAmount(BigInt(i.total_minor), BigInt(i.fx_micros));
+      const rawAdjustment = BigInt(i.adjustment_minor || 0),
+        postedAdjustment =
+          rawAdjustment < 0n
+            ? -baseAmount(-rawAdjustment, BigInt(i.fx_micros))
+            : baseAmount(rawAdjustment, BigInt(i.fx_micros));
+      let adjustment = postedAdjustment,
+        tax = total - net - adjustment;
+      // Foreign-currency rounding can make an otherwise zero tax remainder
+      // negative by a paisa. Keep tax non-negative and absorb that residual
+      // in the adjustment account so the posted entry still exactly balances.
+      if (tax < 0n) {
+        adjustment = total - net;
+        tax = 0n;
+      }
       if (total <= 0n) reject(400, "Base-currency total rounds to zero.");
       await post(
         tx,
@@ -723,7 +739,13 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
             account: i.billing_kind === "advance" ? "2300" : "4000",
             credit: net,
           },
-          { account: "2100", credit: total - net },
+          { account: "2100", credit: tax },
+          {
+            account: "4020",
+            ...(adjustment >= 0n
+              ? { credit: adjustment }
+              : { debit: -adjustment }),
+          },
         ],
       );
       await tx.query(

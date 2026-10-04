@@ -67,6 +67,18 @@ test("document discount allocates before tax and shipping has its own tax", () =
   assert.equal(result.net, "19000");
   assert.equal(result.tax, "1800");
   assert.equal(result.total, "20800");
+  const added = documentTotals(lines, { ...details, adjustment_amount: "5" });
+  assert.equal(added.adjustment, "500");
+  assert.equal(added.total, "21300");
+  const reduced = documentTotals(lines, {
+    ...details,
+    adjustment_amount: "-5",
+  });
+  assert.equal(reduced.adjustment, "-500");
+  assert.equal(reduced.total, "20300");
+  assert.throws(() =>
+    documentTotals(lines, { ...details, adjustment_amount: "-208" }),
+  );
   assert.equal(result.lines[0].subtotal, "9000");
   assert.equal(result.lines[1].subtotal, "9000");
   assert.equal("kind" in result.lines[2] && result.lines[2].kind, "shipping");

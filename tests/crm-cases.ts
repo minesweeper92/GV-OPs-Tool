@@ -773,6 +773,26 @@ export async function verifyCrm(t: TestContext, db: Database) {
         ledger.rows.find((r) => r.account_code === "4000")?.credit_minor,
         "18000",
       );
+      const reducedInvoice = (
+        await cmd({
+          ...c,
+          label: "Invoice with a reduction",
+          details: { ...details, adjustment_amount: "-5" },
+          request_key: uuid(),
+        })
+      ).id;
+      await cmd({ action: "invoice.issue", id: reducedInvoice });
+      const reducedLedger = await inTenant(db, tenant, (tx) =>
+        tx.query(
+          "SELECT account_code,debit_minor,credit_minor FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_id=$1",
+          [reducedInvoice],
+        ),
+      );
+      assert.equal(
+        reducedLedger.rows.find((r) => r.account_code === "4020")?.debit_minor,
+        "500",
+        "a negative adjustment debits the Sales adjustments account",
+      );
       const credit = (
         await cmd({
           action: "credit.create",

@@ -154,6 +154,7 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
       "document_discount",
       "shipping_amount",
       "shipping_tax",
+      "adjustment_amount",
     ] as const)
       if (oldDetails[key] !== newDetails[key])
         throw new Problem(
@@ -191,8 +192,8 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
       c.number_series_id,
     );
     await tx.query(
-      `INSERT INTO invoices(id,tenant_id,entity_id,company_id,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,issue_date,due_date,lines,net_minor,tax_minor,total_minor,currency,fx_micros,billing_kind,label,request_key,request_payload,details,number)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+      `INSERT INTO invoices(id,tenant_id,entity_id,company_id,customer_name,issuer_name,issuer_address,issuer_tax_id,terms,issue_date,due_date,lines,net_minor,tax_minor,adjustment_minor,total_minor,currency,fx_micros,billing_kind,label,request_key,request_payload,details,number)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
       [
         id,
         ctx.tenantId,
@@ -208,6 +209,7 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
         JSON.stringify(calculated.lines),
         calculated.net,
         calculated.tax,
+        calculated.adjustment,
         calculated.total,
         c.currency,
         String(fx),
