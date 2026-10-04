@@ -285,6 +285,16 @@ export interface Data {
     reference: string;
     created_at: string;
   }[];
+  documentAttachments: {
+    id: string;
+    quote_id: string | null;
+    invoice_id: string | null;
+    filename: string;
+    content_type: string;
+    size_bytes: number;
+    uploaded_by: string;
+    created_at: string;
+  }[];
   invoices: Invoice[];
   payments: Payment[];
   expenses: Expense[];

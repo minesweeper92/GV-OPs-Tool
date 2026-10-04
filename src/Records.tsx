@@ -748,6 +748,8 @@ export function DocumentRecord({
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
   useEffect(() => {
     setShareOpen(false);
     setInvoiceEmailOpen(false);
@@ -816,6 +818,37 @@ export function DocumentRecord({
           })
           .filter((c): c is { id: string; name: string; email: string } => !!c)
       : [];
+  const attachments = data.documentAttachments.filter((file) =>
+    invoice ? file.invoice_id === invoice.id : file.quote_id === quote?.id,
+  );
+  async function uploadAttachment(file?: File) {
+    if (!file) return;
+    setAttachmentError("");
+    if (file.size > 10 * 1024 * 1024) {
+      setAttachmentError("Each file must be 10 MB or smaller.");
+      return;
+    }
+    setAttachmentBusy(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000)
+        binary += String.fromCharCode(
+          ...bytes.subarray(offset, offset + 0x8000),
+        );
+      await request(
+        `documents/${invoice ? "invoice" : "quote"}/${id}/attachments`,
+        "POST",
+        { filename: file.name, contentType: file.type, data: btoa(binary) },
+        me.csrf,
+      );
+      await cache.invalidateQueries({ queryKey: ["data"] });
+    } catch (error) {
+      setAttachmentError((error as Error).message);
+    } finally {
+      setAttachmentBusy(false);
+    }
+  }
   async function prepareCustomerLink() {
     if (!quote || !shareContactId) return;
     setShareBusy(true);
@@ -1469,6 +1502,38 @@ export function DocumentRecord({
             className="document-context"
             aria-label="Document actions and history"
           >
+            <h3>Internal attachments</h3>
+            <p className="muted small">
+              Stored privately with this record. Attachments are not included in
+              the customer quote link or invoice email.
+            </p>
+            {attachments.map((file) => (
+              <div className="association-item" key={file.id}>
+                <a href={`/api/documents/attachments/${file.id}`}>
+                  {file.filename}
+                </a>
+                <small>
+                  {(file.size_bytes / (1024 * 1024)).toFixed(2)} MB ·{" "}
+                  {day(file.created_at)}
+                </small>
+              </div>
+            ))}
+            {["admin", "finance", "sales"].includes(me.user.role) ? (
+              <label className="attachment-upload-field">
+                <span>{attachmentBusy ? "Uploading…" : "Add attachment"}</span>
+                <input
+                  aria-label="Add internal attachment"
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.csv,application/pdf,image/png,image/jpeg,image/webp,text/csv"
+                  disabled={attachmentBusy}
+                  onChange={(event) => {
+                    void uploadAttachment(event.currentTarget.files?.[0]);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            ) : null}
+            {attachmentError ? <ErrorBox error={attachmentError} /> : null}
             {invoice && finance(me) ? (
               <div className="vertical-actions">
                 {["Issued", "Paid", "Settled"].includes(invoice.status) ? (

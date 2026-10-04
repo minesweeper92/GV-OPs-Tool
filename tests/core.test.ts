@@ -6,6 +6,7 @@ import { seed } from "../server/seed.ts";
 import { createApp } from "../server/app.ts";
 import { minor, totals, baseAmount } from "../shared/money.ts";
 import { documentDetails, documentTotals } from "../shared/documents.ts";
+import { decodeAttachment } from "../server/attachment-store.ts";
 import { post, type Context } from "../server/domain.ts";
 import { verifyPayables } from "./payables-cases.ts";
 import { verifyReporting } from "./reporting-cases.ts";
@@ -78,6 +79,23 @@ test("document discount allocates before tax and shipping has its own tax", () =
   );
   assert.throws(() =>
     documentTotals(lines, { ...details, shipping_tax: "101" }),
+  );
+});
+
+test("attachment upload validates file signatures and strips paths", () => {
+  const pdf = Buffer.from("%PDF-1.7\nExample\n%%EOF");
+  const attached = decodeAttachment(
+    "../quote.pdf",
+    "application/pdf",
+    pdf.toString("base64"),
+  );
+  assert.equal(attached.filename, "quote.pdf");
+  assert.equal(attached.bytes.toString(), pdf.toString());
+  assert.throws(() =>
+    decodeAttachment("bad.pdf", "application/pdf", "aGVsbG8="),
+  );
+  assert.throws(() =>
+    decodeAttachment("unsafe.svg", "image/svg+xml", "PHN2Zz48L3N2Zz4="),
   );
 });
 

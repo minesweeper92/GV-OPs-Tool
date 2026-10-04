@@ -105,6 +105,30 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     "Overall discount",
   );
   await page.getByRole("button", { name: "PDF preview" }).click();
+  const attachmentName = `scope-${randomUUID().slice(0, 6)}.pdf`;
+  await page.getByLabel("Add internal attachment").setInputFiles({
+    name: attachmentName,
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.7\nGV attachment test\n%%EOF"),
+  });
+  const attachedLink = page.getByRole("link", {
+    name: attachmentName,
+    exact: true,
+  });
+  await expect(attachedLink).toBeVisible();
+  const afterUpload = await (await page.request.get("/api/data")).json();
+  const fileId = afterUpload.documentAttachments.find(
+    (file: any) => file.filename === attachmentName,
+  )?.id;
+  expect(fileId).toBeTruthy();
+  const download = await page.request.get(
+    `/api/documents/attachments/${fileId}`,
+  );
+  expect(download.status()).toBe(200);
+  expect(download.headers()["content-disposition"]).toContain("attachment;");
+  expect(await download.body()).toEqual(
+    Buffer.from("%PDF-1.7\nGV attachment test\n%%EOF"),
+  );
   await expect(page.locator(".document .document-number")).toHaveText(
     quote.number,
   );

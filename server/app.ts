@@ -1,9 +1,10 @@
 import Fastify from "fastify";
+import { randomUUID as uuid } from "node:crypto";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { inTenant, type Database } from "./db.ts";
-import { execute, snapshot, reports, Problem } from "./domain.ts";
+import { audit, execute, snapshot, reports, Problem } from "./domain.ts";
 import { commandSchema } from "../shared/commands.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
@@ -17,6 +18,13 @@ import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 import { crmSnapshot, executeCrm } from "./crm.ts";
 import { executeProfile } from "./profiles.ts";
 import { executeDocument } from "./documents.ts";
+import {
+  attachmentRequestLimit,
+  decodeAttachment,
+  persistAttachment,
+  readAttachmentFile,
+  removeAttachmentFile,
+} from "./attachment-store.ts";
 import { executeManualJournal } from "./manual-journals.ts";
 import {
   executeJournalSchedule,
@@ -248,6 +256,124 @@ export function createApp(
     const issued = await access.switchOrganization(sessions.get(req)!, id);
     res.setCookie(cookieName, issued.raw, cookieOptions);
     return { ok: true };
+  });
+  app.post(
+    "/api/documents/:type/:id/attachments",
+    { bodyLimit: attachmentRequestLimit },
+    async (req) => {
+      const params = z
+        .strictObject({ type: z.enum(["quote", "invoice"]), id: z.uuid() })
+        .parse(req.params);
+      const body = z
+        .strictObject({
+          filename: z.string().min(1).max(500),
+          contentType: z.string().max(150),
+          data: z.string().max(attachmentRequestLimit),
+        })
+        .parse(req.body);
+      const ctx = access.context(sessions.get(req)!);
+      if (!["admin", "finance", "sales"].includes(ctx.role))
+        throw new Problem(403, "Your role cannot add document attachments.");
+      const document = await inTenant(db, ctx.tenantId, async (tx) => {
+        const sql =
+          params.type === "quote"
+            ? "SELECT q.id,d.owner_id FROM quotes q JOIN deals d ON d.id=q.deal_id WHERE q.id=$1"
+            : "SELECT i.id,d.owner_id FROM invoices i LEFT JOIN deals d ON d.id=i.deal_id WHERE i.id=$1";
+        return (await tx.query(sql, [params.id])).rows[0];
+      });
+      if (
+        !document ||
+        (ctx.role === "sales" && document.owner_id !== ctx.userId)
+      )
+        throw new Problem(404, "Document not found.");
+      const file = decodeAttachment(body.filename, body.contentType, body.data);
+      const id = uuid();
+      await persistAttachment(id, file.bytes);
+      try {
+        return await inTenant(db, ctx.tenantId, async (tx) => {
+          const count = (
+            await tx.query(
+              "SELECT count(*)::int AS count FROM document_attachments WHERE quote_id=$1 OR invoice_id=$1",
+              [params.id],
+            )
+          ).rows[0].count;
+          if (count >= 20)
+            throw new Problem(409, "A document can have up to 20 attachments.");
+          const result = await tx.query(
+            `INSERT INTO document_attachments
+             (id,tenant_id,quote_id,invoice_id,filename,content_type,size_bytes,storage_key,uploaded_by)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             RETURNING id,quote_id,invoice_id,filename,content_type,size_bytes,uploaded_by,created_at`,
+            [
+              id,
+              ctx.tenantId,
+              params.type === "quote" ? params.id : null,
+              params.type === "invoice" ? params.id : null,
+              file.filename,
+              file.contentType,
+              file.bytes.length,
+              id,
+              ctx.userId,
+            ],
+          );
+          await audit(tx, ctx, params.id, "document.attachment.added", {
+            attachment_id: id,
+            filename: file.filename,
+            content_type: file.contentType,
+            size_bytes: file.bytes.length,
+          });
+          return result.rows[0];
+        });
+      } catch (error) {
+        await removeAttachmentFile(id);
+        throw error;
+      }
+    },
+  );
+  app.get("/api/documents/attachments/:id", async (req, res) => {
+    const { id } = z.strictObject({ id: z.uuid() }).parse(req.params);
+    const ctx = access.context(sessions.get(req)!);
+    const attachment = await inTenant(
+      db,
+      ctx.tenantId,
+      async (tx) =>
+        (
+          await tx.query(
+            `SELECT a.id,a.filename,a.content_type,a.storage_key,d.owner_id
+           FROM document_attachments a
+           LEFT JOIN quotes q ON q.id=a.quote_id
+           LEFT JOIN invoices i ON i.id=a.invoice_id
+           LEFT JOIN deals d ON d.id=coalesce(q.deal_id,i.deal_id)
+           WHERE a.id=$1`,
+            [id],
+          )
+        ).rows[0],
+    );
+    if (
+      !attachment ||
+      (ctx.role === "sales" && attachment.owner_id !== ctx.userId)
+    )
+      throw new Problem(404, "Attachment not found.");
+    let bytes: Buffer;
+    try {
+      bytes = await readAttachmentFile(attachment.storage_key);
+    } catch {
+      throw new Problem(404, "Attachment file is unavailable.");
+    }
+    const fallback = attachment.filename
+      .replace(/[^\x20-\x7e]/g, "_")
+      .replace(/["\\]/g, "_");
+    const encoded = encodeURIComponent(attachment.filename).replaceAll(
+      "'",
+      "%27",
+    );
+    return res
+      .header(
+        "Content-Disposition",
+        `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`,
+      )
+      .type(attachment.content_type)
+      .send(bytes);
   });
   const role = z.enum(["admin", "finance", "sales", "viewer"]);
   const idBody = z.object({ id: z.uuid() }).strict();

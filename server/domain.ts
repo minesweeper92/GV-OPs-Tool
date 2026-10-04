@@ -252,6 +252,15 @@ export async function snapshot(tx: SQL, ctx: Context) {
       [invoices.map((i) => i.id)],
     )
   ).rows;
+  const documentAttachments = (
+    await tx.query(
+      `SELECT id,quote_id,invoice_id,filename,content_type,size_bytes,uploaded_by,created_at
+       FROM document_attachments
+       WHERE quote_id=ANY($1::uuid[]) OR invoice_id=ANY($2::uuid[])
+       ORDER BY created_at DESC`,
+      [quotes.map((q) => q.id), invoices.map((i) => i.id)],
+    )
+  ).rows;
   const storedSeries = (
     await tx.query(
       "SELECT * FROM number_series ORDER BY entity_id,kind,is_default DESC,name",
@@ -314,6 +323,7 @@ export async function snapshot(tx: SQL, ctx: Context) {
     quotes,
     quoteEvents,
     invoiceDeliveryEvents,
+    documentAttachments,
     numberSeries,
     invoices,
     payments,
