@@ -22,7 +22,11 @@ export async function verifyJournalSchedules(t: TestContext, db: Database) {
     sales = uuid();
   const today = new Date(),
     prior = new Date(
-      Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 15),
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth() - (today.getUTCDate() < 15 ? 2 : 1),
+        15,
+      ),
     );
   const first = date(prior);
   const next = date(

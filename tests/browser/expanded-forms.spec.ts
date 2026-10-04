@@ -83,6 +83,12 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   await page.getByLabel("Discount 1", { exact: true }).fill("10");
   await page.getByLabel("Unit 1", { exact: true }).fill("days");
   await page.getByLabel("Section 1", { exact: true }).fill("Strategy");
+  await page.getByLabel("Overall discount").fill("10");
+  await page.getByLabel("Shipping charges").fill("100");
+  await page.getByLabel("Shipping tax %").fill("18");
+  await expect(page.locator(".quote-totals-grand")).toContainText(
+    "PKR 2,029.60",
+  );
   await page.getByText("More customer, billing and PDF details").click();
   await page
     .getByLabel("Purchase order number", { exact: true })
@@ -119,11 +125,29 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
     (i: any) => i.details.purchase_order === reference,
   );
   expect(invoice.deal_id).toBe(null);
-  expect(invoice.net_minor).toBe("180000");
-  expect(invoice.tax_minor).toBe("32400");
+  expect(invoice.net_minor).toBe("172000");
+  expect(invoice.tax_minor).toBe("30960");
+  expect(invoice.lines[1].kind).toBe("shipping");
   expect(
     saved.catalogItems.some((i: any) => i.name === "Brand strategy workshop"),
   ).toBe(true);
+  const me = await (await page.request.get("/api/me")).json();
+  const changedAmounts = await page.request.post("/api/commands", {
+    headers: {
+      origin: "http://127.0.0.1:4322",
+      "x-csrf-token": me.csrf,
+    },
+    data: {
+      action: "document.invoice-edit",
+      id: invoice.id,
+      version: invoice.version,
+      issue_date: invoice.issue_date,
+      due_date: invoice.due_date,
+      terms: invoice.terms,
+      details: { ...invoice.details, shipping_amount: "999" },
+    },
+  });
+  expect(changedAmounts.status()).toBe(409);
   await page.goto(`/?view=invoice/${invoice.id}`);
   await expect(page.getByText(reference, { exact: true })).toBeVisible();
   await page

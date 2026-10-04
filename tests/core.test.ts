@@ -5,6 +5,7 @@ import { openDatabase, openPostgres, migrate, inTenant } from "../server/db.ts";
 import { seed } from "../server/seed.ts";
 import { createApp } from "../server/app.ts";
 import { minor, totals, baseAmount } from "../shared/money.ts";
+import { documentDetails, documentTotals } from "../shared/documents.ts";
 import { post, type Context } from "../server/domain.ts";
 import { verifyPayables } from "./payables-cases.ts";
 import { verifyReporting } from "./reporting-cases.ts";
@@ -45,6 +46,39 @@ test("integer pricing, tax rounding and FX remain exact", () => {
     ]);
     assert.equal(BigInt(result.net) + BigInt(result.tax), BigInt(result.total));
   }
+});
+
+test("document discount allocates before tax and shipping has its own tax", () => {
+  const lines = [
+    { description: "Design", quantity: "1", price: "100", tax: "18" },
+    { description: "Production", quantity: "1", price: "100", tax: "0" },
+  ];
+  const details = documentDetails.parse({
+    document_discount_type: "amount",
+    document_discount: "20",
+    shipping_amount: "10",
+    shipping_tax: "18",
+  });
+  const result = documentTotals(lines, details);
+  assert.equal(result.beforeDiscount, "20000");
+  assert.equal(result.documentDiscountMinor, "2000");
+  assert.equal(result.shippingMinor, "1000");
+  assert.equal(result.net, "19000");
+  assert.equal(result.tax, "1800");
+  assert.equal(result.total, "20800");
+  assert.equal(result.lines[0].subtotal, "9000");
+  assert.equal(result.lines[1].subtotal, "9000");
+  assert.equal("kind" in result.lines[2] && result.lines[2].kind, "shipping");
+  assert.equal(result.lines[2].taxMinor, "180");
+  assert.throws(() =>
+    documentTotals(lines, {
+      ...details,
+      document_discount: "201",
+    }),
+  );
+  assert.throws(() =>
+    documentTotals(lines, { ...details, shipping_tax: "101" }),
+  );
 });
 
 test("fresh integrated platform", async (t) => {

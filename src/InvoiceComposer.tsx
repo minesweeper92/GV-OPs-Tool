@@ -3,8 +3,8 @@ import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { ErrorBox, Field } from "./components";
 import { NumberSeriesField } from "./NumberSeriesField";
 import { decimal, money, rate, today, type Data, type Line } from "./model";
-import { documentDetails } from "../shared/documents";
-import { totals } from "../shared/money";
+import { documentDetails, documentTotals } from "../shared/documents";
+import { DocumentCharges } from "./DocumentCharges";
 
 const blankLine = (): Line => ({
   description: "",
@@ -221,10 +221,10 @@ export function InvoiceComposer({
       setItemBusy(false);
     }
   }
-  let calculated: ReturnType<typeof totals> | null = null;
+  let calculated: ReturnType<typeof documentTotals> | null = null;
   if (!quote)
     try {
-      calculated = totals(lines);
+      calculated = documentTotals(lines, details);
     } catch {
       /* Incomplete rows while typing. */
     }
@@ -762,28 +762,12 @@ export function InvoiceComposer({
                 >
                   <Plus size={16} /> Add new row
                 </button>
-                <div className="quote-totals">
-                  <div>
-                    <span>Sub total</span>
-                    <strong>
-                      {calculated ? money(calculated.net, currency) : "—"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Tax</span>
-                    <strong>
-                      {calculated ? money(calculated.tax, currency) : "—"}
-                    </strong>
-                  </div>
-                  <div className="quote-totals-grand">
-                    <span>Total ({currency})</span>
-                    <strong>
-                      {calculated
-                        ? money(calculated.total, currency)
-                        : "Complete the line items"}
-                    </strong>
-                  </div>
-                </div>
+                <DocumentCharges
+                  details={details}
+                  onChange={setDetail}
+                  amounts={calculated}
+                  currency={currency}
+                />
                 <Field label="Billing stage">
                   <input
                     value={label}

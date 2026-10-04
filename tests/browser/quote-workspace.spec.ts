@@ -77,6 +77,11 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     .fill("Identity design");
   await page.getByLabel("Unit price 1", { exact: true }).fill("50000");
   await page.getByLabel("Tax % 1", { exact: true }).fill("0");
+  await page.getByLabel("Overall discount").fill("10");
+  await page.getByLabel("Shipping charges").fill("5000");
+  await expect(page.locator(".quote-totals-grand")).toContainText(
+    "PKR 50,000.00",
+  );
   await page.screenshot({
     path: "test-results/quote-composer-desktop.png",
     fullPage: true,
@@ -87,10 +92,17 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   const quote = saved.quotes.find((q: any) => q.deal_id === deal);
   expect(quote.number).toMatch(/^QT-\d{6}$/);
   expect(quote.details.reference).toBe("BRAND-2026");
+  expect(quote.details.document_discount).toBe("10");
+  expect(quote.details.shipping_amount).toBe("5000");
+  expect(quote.lines[0].subtotal).toBe("4500000");
+  expect(quote.lines[1].kind).toBe("shipping");
   await expect(page).toHaveURL(new RegExp(`#quote/${quote.id}$`));
   await expect(page.locator(".page-heading h1")).toHaveText(quote.number);
   await expect(page.locator(".quote-summary-card")).toContainText(
     "Identity concept and design",
+  );
+  await expect(page.locator(".quote-summary-totals")).toContainText(
+    "Overall discount",
   );
   await page.getByRole("button", { name: "PDF preview" }).click();
   await expect(page.locator(".document .document-number")).toHaveText(
@@ -99,6 +111,10 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await expect(
     page.getByText("Identity concept and design", { exact: true }),
   ).toBeVisible();
+  await expect(page.locator(".document")).toContainText("Shipping charges");
+  await expect(page.locator(".document .totals")).toContainText(
+    "Overall discount",
+  );
   await expect(
     page.getByText("Next step: create a private customer link", {
       exact: false,
@@ -123,6 +139,12 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   ).toBeVisible();
   await expect(
     customerPage.getByRole("button", { name: "Accept quote" }),
+  ).toBeVisible();
+  await expect(
+    customerPage.getByText("Overall discount", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    customerPage.getByText("Shipping charges").first(),
   ).toBeVisible();
   expect(
     (await new AxeBuilder({ page: customerPage }).analyze()).violations,
@@ -234,6 +256,10 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   const final = await (await page.request.get("/api/data")).json();
   const invoiced = final.invoices.find((i: any) => i.quote_id === quote.id);
   expect(invoiced.number).toBe(`${prefix}0012`);
+  expect(invoiced.total_minor).toBe("5000000");
+  expect(invoiced.lines.some((line: any) => line.kind === "shipping")).toBe(
+    true,
+  );
   expect(
     final.invoiceDeliveryEvents.some(
       (e: any) =>
@@ -311,6 +337,11 @@ test("new customer and project can be created without losing a quote draft", asy
     .fill("Film production");
   await page.getByLabel("Unit price 1", { exact: true }).fill("10000");
   await page
+    .getByLabel("Discount type", { exact: true })
+    .selectOption("amount");
+  await page.getByLabel("Overall discount").fill("1000");
+  await page.getByLabel("Shipping charges").fill("1000");
+  await page
     .getByLabel("Sent message reference")
     .fill("Outlook message draft ref 123");
   await page.getByRole("button", { name: "Save & mark as sent" }).click();
@@ -320,4 +351,29 @@ test("new customer and project can be created without losing a quote draft", asy
   await expect(page.locator(".quote-action-bar")).toContainText("Sent");
   await page.getByRole("tab", { name: "Activity" }).click();
   await expect(page.getByText("Outlook message draft ref 123")).toBeVisible();
+  await page.getByRole("tab", { name: "Quote details" }).click();
+  await page.getByRole("button", { name: "Create revision" }).click();
+  await expect(page.getByLabel("Overall discount")).toHaveValue("1000");
+  await expect(page.getByLabel("Shipping charges")).toHaveValue("1000");
+  await expect(page.getByLabel("Discount type", { exact: true })).toHaveValue(
+    "amount",
+  );
+  await expect(page.getByLabel("Description 1", { exact: true })).toHaveValue(
+    "Film production",
+  );
+  await expect(page.getByLabel("Description 2", { exact: true })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Save as draft" }).click();
+  const revisions = (
+    await (await page.request.get("/api/data")).json()
+  ).quotes.filter(
+    (quote: any) =>
+      quote.option_name === "Director A" &&
+      quote.customer_name === customerName,
+  );
+  expect(revisions).toHaveLength(2);
+  expect(revisions.find((quote: any) => quote.revision === 2).total_minor).toBe(
+    "1000000",
+  );
 });

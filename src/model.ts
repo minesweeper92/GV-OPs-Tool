@@ -89,11 +89,13 @@ export interface Deal {
   accepted_quote_id: string | null;
 }
 export interface Line {
+  kind?: "shipping";
   unit?: string;
   section?: string;
   discount_type?: "percent" | "amount";
   discount?: string;
   discountMinor?: string;
+  documentDiscountMinor?: string;
   description: string;
   quantity: string;
   price: string;

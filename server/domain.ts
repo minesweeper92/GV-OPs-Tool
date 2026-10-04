@@ -1,6 +1,7 @@
 import { randomUUID as uuid } from "node:crypto";
 import type { SQL, Row } from "./db.ts";
-import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
+import { minor, scaled, baseAmount, round } from "../shared/money.ts";
+import { documentTotals } from "../shared/documents.ts";
 import { cashAccount } from "./bank-account.ts";
 import { createProjectInvoice } from "./projects.ts";
 import { detailsSnapshot } from "./documents.ts";
@@ -576,9 +577,10 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           400,
           "Base-currency documents must use an exchange rate of 1. Foreign rates must be positive.",
         );
+      const details = detailsSnapshot(company, c.details);
       let calculated;
       try {
-        calculated = totals(c.lines);
+        calculated = documentTotals(c.lines, details);
       } catch (error) {
         throw new Problem(400, (error as Error).message);
       }
@@ -621,7 +623,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           e.tax_id,
           c.terms,
           ctx.userId,
-          JSON.stringify(detailsSnapshot(company, c.details)),
+          JSON.stringify(details),
           number,
         ],
       );

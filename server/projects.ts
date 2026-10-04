@@ -89,6 +89,7 @@ export function allocateInvoice(q: Row, existing: Row[], amount: bigint) {
       throw new Problem(409, "The remaining tax allocation needs review.");
     const price = `${part / 100n}.${String(part % 100n).padStart(2, "0")}`;
     lines.push({
+      ...(l.kind === "shipping" ? { kind: "shipping" } : {}),
       unit: l.unit || "",
       section: l.section || "",
       discount_type:
@@ -96,6 +97,10 @@ export function allocateInvoice(q: Row, existing: Row[], amount: bigint) {
       discount: part === lineNet && used[n].net === 0n ? l.discount : "0",
       discountMinor:
         part === lineNet && used[n].net === 0n ? l.discountMinor : "0",
+      documentDiscountMinor:
+        part === lineNet && used[n].net === 0n
+          ? l.documentDiscountMinor || "0"
+          : "0",
       quoteLine: n,
       description: l.description,
       quantity: part === lineNet && used[n].net === 0n ? l.quantity : "1",

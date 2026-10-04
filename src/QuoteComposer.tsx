@@ -3,9 +3,9 @@ import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { Field, ErrorBox } from "./components";
 import { CustomFields } from "./ProfileFields";
 import { today, money, rate, type Data, type Line } from "./model";
-import { documentDetails } from "../shared/documents";
+import { documentDetails, documentTotals } from "../shared/documents";
 import { NumberSeriesField } from "./NumberSeriesField";
-import { totals } from "../shared/money";
+import { DocumentCharges } from "./DocumentCharges";
 
 const emptyLine = (): Line => ({
   description: "",
@@ -73,27 +73,29 @@ export function QuoteComposer({
   );
   const [lines, setLines] = useState<Line[]>(() =>
     initialQuote
-      ? initialQuote.lines.map(
-          ({
-            description,
-            quantity,
-            price,
-            tax,
-            unit,
-            section,
-            discount_type,
-            discount,
-          }) => ({
-            description,
-            quantity,
-            price,
-            tax,
-            unit,
-            section,
-            discount_type,
-            discount,
-          }),
-        )
+      ? initialQuote.lines
+          .filter((line) => line.kind !== "shipping")
+          .map(
+            ({
+              description,
+              quantity,
+              price,
+              tax,
+              unit,
+              section,
+              discount_type,
+              discount,
+            }) => ({
+              description,
+              quantity,
+              price,
+              tax,
+              unit,
+              section,
+              discount_type,
+              discount,
+            }),
+          )
       : [emptyLine()],
   );
   const [details, setDetails] = useState(() =>
@@ -124,9 +126,9 @@ export function QuoteComposer({
   const matchedCompanies = data.companies.filter((c) =>
     normalized(c.name).includes(normalized(customerSearch)),
   );
-  let amounts: ReturnType<typeof totals> | null = null;
+  let amounts: ReturnType<typeof documentTotals> | null = null;
   try {
-    amounts = totals(lines);
+    amounts = documentTotals(lines, details);
   } catch {
     // Incomplete rows are normal while a quote is being drafted.
   }
@@ -859,24 +861,12 @@ export function QuoteComposer({
             >
               <Plus size={16} /> Add new row
             </button>
-            <div className="quote-totals">
-              <div>
-                <span>Sub total</span>
-                <strong>{amounts ? money(amounts.net, currency) : "—"}</strong>
-              </div>
-              <div>
-                <span>Tax</span>
-                <strong>{amounts ? money(amounts.tax, currency) : "—"}</strong>
-              </div>
-              <div className="quote-totals-grand">
-                <span>Total ({currency})</span>
-                <strong>
-                  {amounts
-                    ? money(amounts.total, currency)
-                    : "Complete the line items"}
-                </strong>
-              </div>
-            </div>
+            <DocumentCharges
+              details={details}
+              onChange={setDetail}
+              amounts={amounts}
+              currency={currency}
+            />
           </section>
 
           <section className="quote-composer-section quote-bottom-fields">

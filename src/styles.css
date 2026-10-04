@@ -2405,6 +2405,22 @@ details[open] summary {
   margin: 16px 0;
   color: var(--accent);
 }
+.document-charge-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.6fr);
+  gap: 12px;
+  width: min(400px, 100%);
+  margin-left: auto;
+}
+.document-charge-fields .field {
+  min-width: 0;
+  margin: 0;
+}
+.document-charge-hint {
+  width: min(400px, 100%);
+  margin: 8px 0 16px auto;
+  font-size: 12px;
+}
 .quote-totals {
   margin-left: auto;
   width: min(400px, 100%);

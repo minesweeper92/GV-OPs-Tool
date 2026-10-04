@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { customFields } from "./profiles.ts";
+import { minor, scaled, totals } from "./money.ts";
 const text = z.string().trim().max(4000).default("");
 const short = z.string().trim().max(200).default("");
 const money = z.string().regex(/^\d{1,13}(\.\d{1,2})?$/);
@@ -25,6 +26,10 @@ export const documentDetails = z.strictObject({
   attention: short,
   recipients: z.array(z.email()).max(20).default([]),
   payment_terms: short,
+  document_discount_type: z.enum(["percent", "amount"]).default("percent"),
+  document_discount: money.default("0"),
+  shipping_amount: money.default("0"),
+  shipping_tax: money.default("0"),
   customer_notes: text,
   inclusions: text,
   exclusions: text,
@@ -46,6 +51,54 @@ export const documentDetails = z.strictObject({
     .default([]),
 });
 export type DocumentDetails = z.infer<typeof documentDetails>;
+export function documentTotals(
+  lines: Parameters<typeof totals>[0],
+  details: Pick<
+    DocumentDetails,
+    | "document_discount_type"
+    | "document_discount"
+    | "shipping_amount"
+    | "shipping_tax"
+  >,
+) {
+  const items = totals(lines, {
+    type: details.document_discount_type,
+    amount: details.document_discount,
+  });
+  const shipping = minor(details.shipping_amount);
+  if (scaled(details.shipping_tax, 2) > 10000n)
+    throw new Error("Shipping tax must be between 0 and 100%.");
+  const charge = shipping
+    ? totals([
+        {
+          description: "Shipping charges",
+          quantity: "1",
+          price: details.shipping_amount,
+          tax: details.shipping_tax,
+        },
+      ])
+    : null;
+  const net = BigInt(items.net) + shipping;
+  const tax = BigInt(items.tax) + BigInt(charge?.tax || "0");
+  const total = net + tax;
+  if (total > 9_000_000_000_000_000n)
+    throw new Error("Document total is outside the supported range.");
+  return {
+    lines: [
+      ...items.lines,
+      ...(charge
+        ? charge.lines.map((line) => ({ ...line, kind: "shipping" }))
+        : []),
+    ],
+    net: String(net),
+    tax: String(tax),
+    total: String(total),
+    beforeDiscount: items.beforeDiscount,
+    documentDiscountMinor: items.documentDiscountMinor,
+    shippingMinor: String(shipping),
+    shippingTaxMinor: charge?.tax || "0",
+  };
+}
 export const documentCommands = [
   z.strictObject({
     action: z.literal("document.item-save"),

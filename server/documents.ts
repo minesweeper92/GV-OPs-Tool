@@ -2,7 +2,7 @@ import { randomUUID as uuid } from "node:crypto";
 import type { SQL, Row } from "./db.ts";
 import { Problem, audit, type Context } from "./domain.ts";
 import { totals, scaled, baseAmount } from "../shared/money.ts";
-import { documentDetails } from "../shared/documents.ts";
+import { documentDetails, documentTotals } from "../shared/documents.ts";
 import { allocateNumber } from "./numbering.ts";
 
 export function detailsSnapshot(company: Row, details?: Row) {
@@ -147,15 +147,22 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
       );
   }
   if (invoice) {
+    const oldDetails = detailsSnapshot({}, invoice.details);
+    const newDetails = detailsSnapshot({}, c.details);
+    for (const key of [
+      "document_discount_type",
+      "document_discount",
+      "shipping_amount",
+      "shipping_tax",
+    ] as const)
+      if (oldDetails[key] !== newDetails[key])
+        throw new Problem(
+          409,
+          "Draft amounts cannot be changed in the details editor. Create a new draft for different charges or discounts.",
+        );
     await tx.query(
       "UPDATE invoices SET issue_date=$2,due_date=$3,terms=$4,details=$5 WHERE id=$1",
-      [
-        id,
-        c.issue_date,
-        c.due_date,
-        c.terms,
-        JSON.stringify(detailsSnapshot({}, c.details)),
-      ],
+      [id, c.issue_date, c.due_date, c.terms, JSON.stringify(newDetails)],
     );
   } else {
     const company = (
@@ -167,9 +174,10 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
     const fx = scaled(c.fx, 6);
     if (fx <= 0n || (c.currency === e.currency && fx !== 1000000n))
       throw new Problem(400, "Enter a positive exchange rate; PKR uses 1.");
+    const details = detailsSnapshot(company, c.details);
     let calculated;
     try {
-      calculated = totals(c.lines);
+      calculated = documentTotals(c.lines, details);
     } catch (error) {
       throw new Problem(400, (error as Error).message);
     }
@@ -207,7 +215,7 @@ export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
         c.label || "Direct invoice",
         c.request_key,
         JSON.stringify(c),
-        JSON.stringify(detailsSnapshot(company, c.details)),
+        JSON.stringify(details),
         number,
       ],
     );

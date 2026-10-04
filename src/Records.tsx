@@ -765,6 +765,18 @@ export function DocumentRecord({
         Return to the document list and select a record you can access.
       </Empty>
     );
+  const itemLines = doc.lines.filter((line) => line.kind !== "shipping");
+  const shippingMinor = doc.lines.reduce(
+    (sum, line) =>
+      sum + (line.kind === "shipping" ? BigInt(line.subtotal || "0") : 0n),
+    0n,
+  );
+  const overallDiscountMinor = itemLines.reduce(
+    (sum, line) => sum + BigInt(line.documentDiscountMinor || "0"),
+    0n,
+  );
+  const itemBeforeDiscount =
+    BigInt(doc.net_minor) - shippingMinor + overallDiscountMinor;
   const deal = data.deals.find((d) => d.id === doc.deal_id),
     entity = data.entities.find((e) => e.id === doc.entity_id);
   const quoteEvents = quote
@@ -1222,10 +1234,10 @@ export function DocumentRecord({
             </div>
           </div>
           <h3>
-            Items <span className="quote-item-count">{quote.lines.length}</span>
+            Items <span className="quote-item-count">{itemLines.length}</span>
           </h3>
           <Table headers={["Item", "Qty", "Rate", "Tax", "Amount"]}>
-            {quote.lines.map((line, index) => (
+            {itemLines.map((line, index) => (
               <tr key={index}>
                 <td className="preserve">{line.description}</td>
                 <td>{line.quantity}</td>
@@ -1243,8 +1255,24 @@ export function DocumentRecord({
             ))}
           </Table>
           <dl className="quote-summary-totals">
-            <dt>Subtotal</dt>
-            <dd>{money(quote.net_minor, quote.currency)}</dd>
+            <dt>
+              {overallDiscountMinor > 0n
+                ? "Items before overall discount"
+                : "Items subtotal"}
+            </dt>
+            <dd>{money(itemBeforeDiscount, quote.currency)}</dd>
+            {overallDiscountMinor > 0n ? (
+              <>
+                <dt>Overall discount</dt>
+                <dd>− {money(overallDiscountMinor, quote.currency)}</dd>
+              </>
+            ) : null}
+            {shippingMinor > 0n ? (
+              <>
+                <dt>Shipping charges</dt>
+                <dd>{money(shippingMinor, quote.currency)}</dd>
+              </>
+            ) : null}
             <dt>Tax</dt>
             <dd>{money(quote.tax_minor, quote.currency)}</dd>
             <dt>Total</dt>
@@ -1363,7 +1391,7 @@ export function DocumentRecord({
                 "Total",
               ]}
             >
-              {doc.lines.map((l, i) => (
+              {itemLines.map((l, i) => (
                 <tr key={i}>
                   <td className="preserve">
                     {l.section ? <small>{l.section}</small> : null}
@@ -1387,8 +1415,24 @@ export function DocumentRecord({
               ))}
             </Table>
             <dl className="totals">
-              <dt>Subtotal</dt>
-              <dd>{money(doc.net_minor, doc.currency)}</dd>
+              <dt>
+                {overallDiscountMinor > 0n
+                  ? "Items before overall discount"
+                  : "Items subtotal"}
+              </dt>
+              <dd>{money(itemBeforeDiscount, doc.currency)}</dd>
+              {overallDiscountMinor > 0n ? (
+                <>
+                  <dt>Overall discount</dt>
+                  <dd>− {money(overallDiscountMinor, doc.currency)}</dd>
+                </>
+              ) : null}
+              {shippingMinor > 0n ? (
+                <>
+                  <dt>Shipping charges</dt>
+                  <dd>{money(shippingMinor, doc.currency)}</dd>
+                </>
+              ) : null}
               <dt>Tax</dt>
               <dd>{money(doc.tax_minor, doc.currency)}</dd>
               <dt>Total</dt>
