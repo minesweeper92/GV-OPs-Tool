@@ -33,6 +33,7 @@ import {
   type Report,
 } from "./model";
 import { Heading, Badge, Table, Empty, ErrorBox } from "./components";
+import { Brand } from "./Brand";
 const Editor = lazy(() =>
   import("./Editor").then((m) => ({ default: m.Editor })),
 );
@@ -194,8 +195,7 @@ function Login({ done }: { done: () => void }) {
     return (
       <main className="login">
         <div className="brand">
-          <span className="brand-mark">gv</span>
-          <strong>Workspace</strong>
+          <Brand />
         </div>
         <h1>
           Your relationships.
@@ -221,8 +221,7 @@ function Login({ done }: { done: () => void }) {
   return (
     <main className="login">
       <div className="brand">
-        <span className="brand-mark">gv</span>
-        <strong>Workspace</strong>
+        <Brand />
       </div>
       <p className="eyebrow space-top">FRESH BUILD · LOCAL PREVIEW</p>
       <h1>
@@ -1837,8 +1836,7 @@ export default function App() {
         aria-label="Workspace navigation"
       >
         <a className="brand" href="#home">
-          <span className="brand-mark">gv</span>
-          <strong>Workspace</strong>
+          <Brand />
         </a>
         <a
           className="organization-name organization-link"
@@ -2090,9 +2088,10 @@ export default function App() {
           <Suspense fallback={<p role="status">Opening workspace…</p>}>
             {editor?.kind === "quote" && data && me ? (
               <QuoteComposer
-                key={editor.id || "new-quote"}
+                key={`${me.organization.id}:${me.user.id}:${editor.id || "new-quote"}`}
                 id={editor.id || ""}
                 data={data}
+                draftScope={`${me.organization.id}:${me.user.id}`}
                 entityId={entity}
                 canManageNumbering={
                   me.user.role === "admin" || me.user.role === "finance"

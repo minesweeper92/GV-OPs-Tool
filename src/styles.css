@@ -241,15 +241,11 @@ small,
   text-decoration: none;
 }
 .brand-mark {
-  background: var(--text);
-  color: var(--surface);
-  font-size: 20px;
-  line-height: 32px;
   width: 34px;
-  text-align: center;
-  border-radius: 7px;
-  font-weight: 650;
-  letter-spacing: -1.6px;
+  height: 34px;
+  display: block;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 .organization-name {
   font-size: 12px;
@@ -2643,10 +2639,6 @@ details[open] summary {
 .sidebar .profile small {
   color: #f4f5fb;
 }
-.sidebar .brand-mark {
-  background: #b93820;
-  color: #fff;
-}
 .sidebar .organization-link small {
   color: #b9c2d8;
 }
@@ -3168,4 +3160,15 @@ details[open] summary {
 }
 .cutover-checks .cutover-error strong {
   color: var(--danger);
+}
+.quote-draft-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  background: #fff5df;
+  color: #51432b;
+  font-size: 13px;
+  flex-wrap: wrap;
 }

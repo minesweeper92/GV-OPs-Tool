@@ -83,12 +83,35 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await expect(page.locator(".quote-totals-grand")).toContainText(
     "PKR 52,500.00",
   );
+  await page.getByRole("button", { name: "Keep draft & close" }).click();
+  await page.reload();
+  await page
+    .locator("main#main")
+    .getByRole("button", { name: "New quote", exact: true })
+    .click();
+  await expect(page.getByLabel("Customer name")).toHaveValue(company);
+  await expect(page.getByLabel("Related opportunity")).toHaveValue(deal);
+  await expect(page.getByLabel("Named option")).toHaveValue("Director A");
+  await expect(page.getByLabel("Reference number")).toHaveValue("BRAND-2026");
+  await expect(page.getByLabel("Description 1", { exact: true })).toHaveValue(
+    "Identity design",
+  );
+  await expect(page.locator(".quote-totals-grand")).toContainText(
+    "PKR 52,500.00",
+  );
   await page.screenshot({
     path: "test-results/quote-composer-desktop.png",
     fullPage: true,
   });
   await page.getByRole("button", { name: "Save as draft" }).click();
   await expect(page.getByRole("heading", { name: "New quote" })).toHaveCount(0);
+  expect(
+    await page.evaluate(() =>
+      Object.keys(sessionStorage).filter((key) =>
+        key.startsWith("gv-quote-draft-v1:"),
+      ),
+    ),
+  ).toEqual([]);
   const saved = await (await page.request.get("/api/data")).json();
   const quote = saved.quotes.find((q: any) => q.deal_id === deal);
   expect(quote.number).toMatch(/^QT-\d{6}$/);

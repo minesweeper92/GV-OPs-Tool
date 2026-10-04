@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { z } from "zod";
 import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { Field, ErrorBox } from "./components";
 import { CustomFields } from "./ProfileFields";
@@ -18,9 +19,51 @@ const emptyLine = (): Line => ({
 const normalized = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
+const quoteDraft = z.object({
+  savedAt: z.number(),
+  companyId: z.string(),
+  dealId: z.string(),
+  optionName: z.string(),
+  currency: z.string(),
+  fx: z.string(),
+  terms: z.string(),
+  shareReference: z.string(),
+  numberSeriesId: z.string(),
+  savedQuoteId: z.string(),
+  details: documentDetails,
+  lines: z
+    .array(
+      z.object({
+        description: z.string(),
+        quantity: z.string(),
+        price: z.string(),
+        tax: z.string(),
+        unit: z.string().optional(),
+        section: z.string().optional(),
+        discount_type: z.enum(["percent", "amount"]).optional(),
+        discount: z.string().optional(),
+      }),
+    )
+    .max(500),
+});
+
+function readDraft(key: string) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw || raw.length > 256000) return null;
+    const parsed = quoteDraft.safeParse(JSON.parse(raw));
+    if (!parsed.success || Date.now() - parsed.data.savedAt > 86400000)
+      return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
 export function QuoteComposer({
   id,
   data,
+  draftScope,
   entityId,
   canManageNumbering,
   create,
@@ -29,18 +72,27 @@ export function QuoteComposer({
 }: {
   id: string;
   data: Data;
+  draftScope: string;
   entityId: string;
   canManageNumbering: boolean;
   create: (command: Record<string, unknown>) => Promise<{ id: string }>;
   close: () => void;
   done: (quoteId: string) => void;
 }) {
+  const draftKey = `gv-quote-draft-v1:${draftScope}:${id || "new"}`;
+  const [restored] = useState(() => readDraft(draftKey));
+  const hydrated = useRef(false);
+  const [draftStored, setDraftStored] = useState(!!restored);
   const initialQuote = data.quotes.find((q) => q.id === id);
   const initialDeal = data.deals.find(
     (d) => d.id === (initialQuote?.deal_id || id),
   );
-  const [companyId, setCompanyId] = useState(initialDeal?.company_id || "");
-  const [dealId, setDealId] = useState(initialDeal?.id || "");
+  const [companyId, setCompanyId] = useState(
+    restored?.companyId ?? initialDeal?.company_id ?? "",
+  );
+  const [dealId, setDealId] = useState(
+    restored?.dealId ?? initialDeal?.id ?? "",
+  );
   const [customerSearch, setCustomerSearch] = useState("");
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
@@ -62,49 +114,119 @@ export function QuoteComposer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [dirty, setDirty] = useState(false);
-  const [savedQuoteId, setSavedQuoteId] = useState("");
-  const [shareReference, setShareReference] = useState("");
-  const [numberSeriesId, setNumberSeriesId] = useState("");
-  const [optionName, setOptionName] = useState(initialQuote?.option_name || "");
-  const [currency, setCurrency] = useState(initialQuote?.currency || "PKR");
+  const [dirty, setDirty] = useState(!!restored);
+  const [savedQuoteId, setSavedQuoteId] = useState(
+    restored?.savedQuoteId ?? "",
+  );
+  const [shareReference, setShareReference] = useState(
+    restored?.shareReference ?? "",
+  );
+  const [numberSeriesId, setNumberSeriesId] = useState(
+    restored?.numberSeriesId ?? "",
+  );
+  const [optionName, setOptionName] = useState(
+    restored?.optionName ?? initialQuote?.option_name ?? "",
+  );
+  const [currency, setCurrency] = useState(
+    restored?.currency ?? initialQuote?.currency ?? "PKR",
+  );
   const [fx, setFx] = useState(
-    initialQuote ? rate(initialQuote.fx_micros) : "1",
+    restored?.fx ?? (initialQuote ? rate(initialQuote.fx_micros) : "1"),
   );
-  const [lines, setLines] = useState<Line[]>(() =>
-    initialQuote
-      ? initialQuote.lines
-          .filter((line) => line.kind !== "shipping")
-          .map(
-            ({
-              description,
-              quantity,
-              price,
-              tax,
-              unit,
-              section,
-              discount_type,
-              discount,
-            }) => ({
-              description,
-              quantity,
-              price,
-              tax,
-              unit,
-              section,
-              discount_type,
-              discount,
-            }),
-          )
-      : [emptyLine()],
+  const [lines, setLines] = useState<Line[]>(
+    () =>
+      restored?.lines ??
+      (initialQuote
+        ? initialQuote.lines
+            .filter((line) => line.kind !== "shipping")
+            .map(
+              ({
+                description,
+                quantity,
+                price,
+                tax,
+                unit,
+                section,
+                discount_type,
+                discount,
+              }) => ({
+                description,
+                quantity,
+                price,
+                tax,
+                unit,
+                section,
+                discount_type,
+                discount,
+              }),
+            )
+        : [emptyLine()]),
   );
-  const [details, setDetails] = useState(() =>
-    documentDetails.parse({
-      ...initialQuote?.details,
-      quote_date: initialQuote?.details?.quote_date || today(),
-    }),
+  const [details, setDetails] = useState(
+    () =>
+      restored?.details ??
+      documentDetails.parse({
+        ...initialQuote?.details,
+        quote_date: initialQuote?.details?.quote_date || today(),
+      }),
   );
-  const [terms, setTerms] = useState(initialQuote?.terms || "");
+  const [terms, setTerms] = useState(
+    restored?.terms ?? initialQuote?.terms ?? "",
+  );
+
+  useEffect(() => {
+    if (!hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+    if (!dirty) return;
+    try {
+      const snapshot = JSON.stringify({
+        savedAt: Date.now(),
+        companyId,
+        dealId,
+        optionName,
+        currency,
+        fx,
+        lines,
+        details,
+        terms,
+        shareReference,
+        numberSeriesId,
+        savedQuoteId,
+      });
+      if (snapshot.length > 256000) {
+        setDraftStored(false);
+        return;
+      }
+      sessionStorage.setItem(draftKey, snapshot);
+      setDraftStored(true);
+    } catch {
+      setDraftStored(false);
+    }
+  }, [
+    draftKey,
+    dirty,
+    companyId,
+    dealId,
+    optionName,
+    currency,
+    fx,
+    lines,
+    details,
+    terms,
+    shareReference,
+    numberSeriesId,
+    savedQuoteId,
+  ]);
+
+  const clearDraft = () => {
+    try {
+      sessionStorage.removeItem(draftKey);
+    } catch {
+      /* Storage may be blocked. */
+    }
+  };
 
   useEffect(() => {
     const preventLostDraft = (event: BeforeUnloadEvent) => {
@@ -143,7 +265,10 @@ export function QuoteComposer({
     setDirty(true);
   };
   const attemptClose = () => {
-    if (!dirty || window.confirm("Discard your unsaved quote?")) close();
+    if (!dirty || window.confirm("Discard your unsaved quote?")) {
+      clearDraft();
+      close();
+    }
   };
 
   async function addCustomer() {
@@ -299,6 +424,7 @@ export function QuoteComposer({
         });
       }
       setDirty(false);
+      clearDraft();
       done(quoteId);
     } catch (e) {
       setError((e as Error).message);
@@ -328,6 +454,20 @@ export function QuoteComposer({
         onChange={() => setDirty(true)}
       >
         <div className="quote-composer-scroll">
+          {dirty && (
+            <div className="quote-draft-notice" role="status">
+              <span>
+                {draftStored
+                  ? "Quote fields saved in this tab for 24 hours. Inline customer/project forms and attachments are not included."
+                  : "Draft recovery is unavailable. Save your quote before leaving."}
+              </span>
+              {draftStored && (
+                <button type="button" disabled={busy} onClick={close}>
+                  Keep draft & close
+                </button>
+              )}
+            </div>
+          )}
           <section className="quote-composer-section quote-customer-block">
             <h2>Customer and location</h2>
             <div className="quote-main-fields">
