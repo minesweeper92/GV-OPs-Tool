@@ -551,7 +551,7 @@ export async function projectSnapshot(tx: SQL, ctx: Context) {
  UNION ALL SELECT b.deal_id,j.id FROM vendor_payment_reversals r JOIN vendor_payments p ON p.id=r.payment_id JOIN bills b ON b.id=p.bill_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'
  ), amounts AS (
  SELECT s.deal_id,
- coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code='4000'),0)::text AS revenue,
+ coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code IN ('4000','4020')),0)::text AS revenue,
  coalesce(sum(l.debit_minor-l.credit_minor) FILTER(WHERE l.account_code IN ('5000','5200','5300')),0)::text AS cost,
  coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code IN ('4100','5100')),0)::text AS fx_result,
  coalesce(sum(l.debit_minor-l.credit_minor) FILTER(WHERE j.source_type='payment' AND (l.account_code='1000' OR l.account_code LIKE '10B%')),0)::text AS cash,

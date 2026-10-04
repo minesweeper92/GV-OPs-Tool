@@ -3,6 +3,7 @@ import { Problem, post, audit, type Context } from "./domain.ts";
 import type { SQL, Row } from "./db.ts";
 import { minor, scaled, round, baseAmount } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
+import { signedMinor } from "../shared/banking.ts";
 const day = (v: unknown) => String(v).slice(0, 10);
 const sum = (rows: Row[], key: string) =>
   rows.reduce((s, r) => s + BigInt(r[key]), 0n);
@@ -221,7 +222,30 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
         [i.id],
       )
     ).rows[0];
-    if (net + tax > BigInt(i.total_minor))
+    const adjustment = signedMinor(c.adjustment_amount || "0"),
+      originalAdjustment = BigInt(i.adjustment_minor || 0),
+      remainingAdjustment =
+        originalAdjustment - sum(existing, "adjustment_minor"),
+      total = net + tax + adjustment;
+    if (
+      adjustment !== 0n &&
+      (originalAdjustment === 0n ||
+        adjustment > 0n !== originalAdjustment > 0n ||
+        (adjustment < 0n ? -adjustment : adjustment) >
+          (remainingAdjustment < 0n
+            ? -remainingAdjustment
+            : remainingAdjustment))
+    )
+      throw new Problem(
+        409,
+        "Adjustment exceeds the invoice’s remaining adjustment or has the wrong sign.",
+      );
+    if (total <= 0n)
+      throw new Problem(
+        400,
+        "Credit total must be positive after its adjustment.",
+      );
+    if (total + sum(existing, "total_minor") > BigInt(i.total_minor))
       throw new Problem(
         409,
         "The selected item credit exceeds the invoice total after its post-tax adjustment.",
@@ -232,9 +256,21 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
         "This invoice contains earned revenue, not an advance.",
       );
     const bucket = existing.filter((x) => x.treatment === c.treatment);
-    const fullNetBase = baseAmount(BigInt(i.net_minor), BigInt(i.fx_micros)),
-      fullTaxBase =
-        baseAmount(BigInt(i.total_minor), BigInt(i.fx_micros)) - fullNetBase;
+    const posted = (
+      await tx.query(
+        `SELECT l.account_code, sum(l.credit_minor-l.debit_minor)::text AS amount
+       FROM journal_lines l JOIN journals j ON j.id=l.journal_id
+       WHERE j.source_type='invoice' AND j.source_id=$1 GROUP BY l.account_code`,
+        [i.id],
+      )
+    ).rows;
+    const postedAmount = (account: string) =>
+      BigInt(posted.find((l) => l.account_code === account)?.amount || 0);
+    const fullNetBase = postedAmount(
+        i.billing_kind === "advance" ? "2300" : "4000",
+      ),
+      fullTaxBase = postedAmount("2100"),
+      fullAdjustmentBase = postedAmount("4020");
     const bucketNet =
       i.billing_kind === "earned"
         ? BigInt(i.net_minor)
@@ -252,19 +288,42 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
         409,
         "Credit exceeds the selected earned/deferred revenue balance.",
       );
-    const netBase = round(
-      (bucketBase - sum(bucket, "net_base_minor")) * net,
-      bucketNet - sum(bucket, "net_minor"),
-    );
+    const netBase =
+      net === 0n
+        ? 0n
+        : round(
+            (bucketBase - sum(bucket, "net_base_minor")) * net,
+            bucketNet - sum(bucket, "net_minor"),
+          );
     const remainingTax = BigInt(i.tax_minor) - sum(existing, "tax_minor"),
       taxBase =
         tax === 0n
-          ? 0n
+          ? BigInt(i.tax_minor) === 0n && net > 0n
+            ? round(
+                (fullTaxBase - sum(existing, "tax_base_minor")) * net,
+                BigInt(i.net_minor) - sum(existing, "net_minor"),
+              )
+            : 0n
           : round(
               (fullTaxBase - sum(existing, "tax_base_minor")) * tax,
               remainingTax,
             ),
-      base = netBase + taxBase;
+      remainingAdjustmentBase =
+        fullAdjustmentBase - sum(existing, "adjustment_base_minor"),
+      adjustmentBase =
+        adjustment === 0n
+          ? 0n
+          : (remainingAdjustmentBase < 0n ? -1n : 1n) *
+            round(
+              (remainingAdjustmentBase < 0n
+                ? -remainingAdjustmentBase
+                : remainingAdjustmentBase) *
+                (adjustment < 0n ? -adjustment : adjustment),
+              remainingAdjustment < 0n
+                ? -remainingAdjustment
+                : remainingAdjustment,
+            ),
+      base = netBase + taxBase + adjustmentBase;
     if (base <= 0n) throw new Problem(400, "Credit rounds to zero in PKR.");
     const number = `${e.code}-CN-${String(e.next_credit).padStart(5, "0")}`;
     await tx.query(
@@ -272,8 +331,8 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
       [e.id],
     );
     await tx.query(
-      `INSERT INTO credit_notes(id,tenant_id,entity_id,invoice_id,number,credit_date,lines,net_minor,tax_minor,total_minor,net_base_minor,tax_base_minor,base_minor,treatment,reason,request_key,request_payload)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+      `INSERT INTO credit_notes(id,tenant_id,entity_id,invoice_id,number,credit_date,lines,net_minor,tax_minor,total_minor,net_base_minor,tax_base_minor,base_minor,treatment,reason,request_key,request_payload,adjustment_minor,adjustment_base_minor)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [
         id,
         ctx.tenantId,
@@ -284,7 +343,7 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
         JSON.stringify(lines),
         String(net),
         String(tax),
-        String(net + tax),
+        String(total),
         String(netBase),
         String(taxBase),
         String(base),
@@ -292,6 +351,8 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
         c.reason,
         c.request_key,
         JSON.stringify(c),
+        String(adjustment),
+        String(adjustmentBase),
       ],
     );
     await post(
@@ -308,6 +369,12 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
           debit: netBase,
         },
         { account: "2100", debit: taxBase },
+        {
+          account: "4020",
+          ...(adjustmentBase >= 0n
+            ? { debit: adjustmentBase }
+            : { credit: -adjustmentBase }),
+        },
         { account: "2400", credit: base },
       ],
     );

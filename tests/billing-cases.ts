@@ -93,7 +93,12 @@ export async function verifyBilling(t: TestContext, db: Database) {
       role: "Buyer",
     })
   ).id;
-  async function accepted(name: string, currency = "USD", entityId = entity) {
+  async function accepted(
+    name: string,
+    currency = "USD",
+    entityId = entity,
+    adjustment = "0",
+  ) {
     const lead = (
       await cmd({
         action: "lead.create",
@@ -112,6 +117,7 @@ export async function verifyBilling(t: TestContext, db: Database) {
         deal_id: deal,
         option_name: "Approved",
         currency,
+        details: { adjustment_amount: adjustment },
         fx: currency === "PKR" ? "1" : "280",
         lines: [
           { description: "Service", quantity: "1", price: "100", tax: "18" },
@@ -121,8 +127,13 @@ export async function verifyBilling(t: TestContext, db: Database) {
     await cmd({ action: "quote.accept", id: quote, reference: "Signed" });
     return { deal, quote };
   }
-  async function issued(name: string, currency = "USD", entityId = entity) {
-    const a = await accepted(name, currency, entityId);
+  async function issued(
+    name: string,
+    currency = "USD",
+    entityId = entity,
+    adjustment = "0",
+  ) {
+    const a = await accepted(name, currency, entityId, adjustment);
     const id = (
       await cmd({
         action: "invoice.create",
@@ -136,6 +147,211 @@ export async function verifyBilling(t: TestContext, db: Database) {
     return { ...a, id };
   }
   const base = await issued("Credit adjustments");
+  await t.test(
+    "signed adjustments credit, apply, refund and reverse with exact ledger balances",
+    async () => {
+      for (const adjustment of ["10", "-10"]) {
+        const source = await issued(
+          `Adjusted ${adjustment}`,
+          "USD",
+          entity,
+          adjustment,
+        );
+        await cmd({
+          action: "project.create",
+          quote_id: source.quote,
+          entity_id: entity,
+          name: `Adjustment project ${adjustment}`,
+          code: adjustment === "10" ? "ADJ-POS" : "ADJ-NEG",
+          start_date: "2026-01-01",
+          end_date: null,
+          budget: "100",
+        });
+        assert.equal(
+          (await data()).projects.find((p: any) => p.deal_id === source.deal)
+            .revenue,
+          adjustment === "10" ? "3080000" : "2520000",
+        );
+        const make = (amount: string, value: string) => ({
+          action: "credit.create",
+          invoice_id: source.id,
+          date: "2026-01-02",
+          lines: amount === "0" ? [] : [{ index: 0, amount }],
+          adjustment_amount: value,
+          treatment: "earned",
+          reason: "Scope reduction",
+          request_key: uuid(),
+        });
+        await cmd(make("1", adjustment === "10" ? "-1" : "1"), 409);
+        await cmd(make("1", adjustment === "10" ? "11" : "-11"), 409);
+        const firstCommand = make("40", adjustment === "10" ? "4" : "-4");
+        const first = (await cmd(firstCommand)).id;
+        assert.equal((await cmd(firstCommand)).id, first);
+        const second = (await cmd(make("60", adjustment === "10" ? "6" : "-6")))
+          .id;
+        assert.equal(
+          (await data()).projects.find((p: any) => p.deal_id === source.deal)
+            .revenue,
+          "0",
+        );
+        await cmd(make("0", adjustment === "10" ? "0.01" : "-0.01"), 409);
+        const rows = (await data()).credits.filter(
+          (c: any) => c.invoice_id === source.id,
+        );
+        assert.equal(
+          rows.reduce((s: bigint, c: any) => s + BigInt(c.total_minor), 0n),
+          adjustment === "10" ? 12800n : 10800n,
+        );
+        const balance = (
+          await inTenant(db, tenant, (tx) =>
+            tx.query(
+              `SELECT l.account_code,sum(l.debit_minor-l.credit_minor)::text AS balance
+         FROM journal_lines l JOIN journals j ON j.id=l.journal_id
+         WHERE (j.source_type='invoice' AND j.source_id=$1) OR (j.source_type='credit' AND j.source_id IN ($2,$3))
+         GROUP BY l.account_code`,
+              [source.id, first, second],
+            ),
+          )
+        ).rows;
+        for (const account of ["4000", "2100", "4020"])
+          assert.equal(
+            balance.find((l) => l.account_code === account)?.balance,
+            "0",
+          );
+        const firstTotal = adjustment === "10" ? "51.20" : "43.20";
+        await cmd({
+          action: "credit.apply",
+          credit_id: first,
+          invoice_id: source.id,
+          amount: firstTotal,
+          date: "2026-01-03",
+          request_key: uuid(),
+        });
+        const secondTotal = adjustment === "10" ? "76.80" : "64.80";
+        await cmd({
+          action: "payment.create",
+          invoice_id: source.id,
+          amount: secondTotal,
+          wht: "0",
+          fx: "281",
+          date: "2026-01-03",
+          reference: "Balance paid",
+          request_key: uuid(),
+        });
+        const refund = (
+          await cmd({
+            action: "credit.refund",
+            credit_id: second,
+            amount: secondTotal,
+            fx: "282",
+            bank_account_id: null,
+            date: "2026-01-04",
+            reference: "Refund",
+            request_key: uuid(),
+          })
+        ).id;
+        await cmd({
+          action: "credit.reverse-refund",
+          id: refund,
+          date: "2026-01-05",
+          reason: "Refund correction",
+        });
+        await cmd({
+          action: "credit.reverse",
+          id: second,
+          date: "2026-01-06",
+          reason: "Scope restored",
+        });
+        const replacement = (
+          await cmd({
+            ...make("60", adjustment === "10" ? "6" : "-6"),
+            date: "2026-01-06",
+          })
+        ).id;
+        assert.ok(replacement);
+        const reports = await call(
+          `/api/financial-reports?entityId=${entity}&from=2026-01-01&to=2026-01-31`,
+        );
+        assert.equal(reports.receivables.difference, "0");
+        assert.equal(reports.balanceDifference, "0");
+        assert.equal(reports.cash.difference, "0");
+      }
+      const source = await issued(
+        "Adjustment-only credit",
+        "PKR",
+        entity,
+        "10",
+      );
+      await cmd({
+        action: "credit.create",
+        invoice_id: source.id,
+        date: "2026-01-02",
+        lines: [],
+        adjustment_amount: "10",
+        treatment: "earned",
+        reason: "Remove surcharge",
+        request_key: uuid(),
+      });
+      const rounded = (
+        await cmd({
+          action: "document.invoice-create",
+          entity_id: entity,
+          company_id: company,
+          issue_date: "2026-01-01",
+          due_date: "2026-01-31",
+          currency: "USD",
+          fx: "1.4",
+          billing_kind: "earned",
+          label: "Rounding",
+          terms: "",
+          details: { adjustment_amount: "0.01" },
+          lines: [
+            {
+              description: "Tiny service",
+              quantity: "1",
+              price: "0.01",
+              tax: "0",
+            },
+          ],
+          request_key: uuid(),
+        })
+      ).id;
+      await cmd({ action: "invoice.issue", id: rounded });
+      const roundingCredit = (
+        await cmd({
+          action: "credit.create",
+          invoice_id: rounded,
+          date: "2026-01-02",
+          lines: [{ index: 0, amount: "0.01" }],
+          adjustment_amount: "0.01",
+          treatment: "earned",
+          reason: "Full rounding credit",
+          request_key: uuid(),
+        })
+      ).id;
+      const roundedCredit = (await data()).credits.find(
+        (c: any) => c.id === roundingCredit,
+      );
+      assert.equal(roundedCredit.total_minor, "2");
+      assert.equal(roundedCredit.base_minor, "3");
+      const roundingBalances = (
+        await inTenant(db, tenant, (tx) =>
+          tx.query(
+            `SELECT l.account_code,sum(l.debit_minor-l.credit_minor)::text AS balance
+         FROM journal_lines l JOIN journals j ON j.id=l.journal_id
+         WHERE (j.source_type='invoice' AND j.source_id=$1) OR (j.source_type='credit' AND j.source_id=$2)
+         GROUP BY l.account_code`,
+            [rounded, roundingCredit],
+          ),
+        )
+      ).rows;
+      for (const account of ["4000", "2100", "4020"])
+        assert.equal(
+          roundingBalances.find((l) => l.account_code === account)?.balance,
+          "0",
+        );
+    },
+  );
   const creditCommand = {
     action: "credit.create",
     invoice_id: base.id,

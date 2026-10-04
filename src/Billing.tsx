@@ -69,6 +69,12 @@ export function Credits({ data, entity, id, initialInvoice, run }: Props) {
                 </tr>
               ))}
             </Table>
+            {BigInt(credit.adjustment_minor || "0") !== 0n ? (
+              <p>
+                Post-tax adjustment:{" "}
+                {money(credit.adjustment_minor, credit.currency)}
+              </p>
+            ) : null}
             <p>
               <strong>
                 Total {money(credit.total_minor, credit.currency)}
@@ -270,6 +276,7 @@ function CreditEditor({
         date: v("date"),
         reason: v("reason"),
         treatment: v("treatment"),
+        adjustment_amount: v("adjustment_amount") || "0",
         request_key: form.key,
         lines: i?.lines
           .map((_, index) => ({ index, amount: v(`line-${index}`) || "0" }))
@@ -375,6 +382,36 @@ function CreditEditor({
                       </Field>
                     );
                   })}
+                  {BigInt(i.adjustment_minor || "0") !== 0n
+                    ? (() => {
+                        const remaining =
+                          BigInt(i.adjustment_minor) -
+                          data.credits
+                            .filter(
+                              (c) => c.invoice_id === i.id && !c.reversal_date,
+                            )
+                            .reduce(
+                              (s, c) => s + BigInt(c.adjustment_minor || "0"),
+                              0n,
+                            );
+                        return (
+                          <Field
+                            label="Post-tax adjustment to credit"
+                            hint={`Remaining ${money(remaining, i.currency)}. Keep the original sign; use zero to leave it unchanged.`}
+                          >
+                            <input
+                              name="adjustment_amount"
+                              type="number"
+                              step="0.01"
+                              min={decimal(remaining < 0n ? remaining : 0n)}
+                              max={decimal(remaining > 0n ? remaining : 0n)}
+                              defaultValue={decimal(remaining)}
+                              required
+                            />
+                          </Field>
+                        );
+                      })()
+                    : null}
                   <Field label="Revenue adjustment">
                     <select name="treatment">
                       <option value="earned">

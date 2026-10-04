@@ -9,9 +9,13 @@ export const billingCommands = [
     action: z.literal("credit.create"),
     invoice_id: id,
     date,
+    adjustment_amount: z
+      .string()
+      .regex(/^-?\d{1,13}(\.\d{1,2})?$/)
+      .default("0"),
     lines: z
       .array(z.strictObject({ index: z.number().int().min(0).max(99), amount }))
-      .min(1)
+      .min(0)
       .max(100),
     treatment: z.enum(["earned", "deferred"]),
     reason: text,
@@ -68,6 +72,7 @@ export interface CreditNote {
   }[];
   net_minor: string;
   tax_minor: string;
+  adjustment_minor: string;
   total_minor: string;
   base_minor: string;
   treatment: string;

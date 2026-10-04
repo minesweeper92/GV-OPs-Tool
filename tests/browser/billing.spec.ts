@@ -38,7 +38,7 @@ async function setup(page: Page) {
         role: "Buyer",
       })
     ).id;
-  const accepted = async (name: string) => {
+  const accepted = async (name: string, adjustment = "0") => {
     const lead = (
         await command({
           action: "lead.create",
@@ -58,6 +58,7 @@ async function setup(page: Page) {
           option_name: "Approved service",
           currency: "PKR",
           fx: "1",
+          details: { adjustment_amount: adjustment },
           lines: [
             {
               description: "Creative service",
@@ -79,7 +80,7 @@ test("credit issue, application, reversal and refund work through accessible scr
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const { command, accepted } = await setup(page),
-    quote = await accepted("Credit UI job");
+    quote = await accepted("Credit UI job", "-100");
   const id = (
     await command({
       action: "invoice.create",
@@ -94,6 +95,10 @@ test("credit issue, application, reversal and refund work through accessible scr
   await page.getByRole("link", { name: "Create credit note" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByLabel("Credit: Creative service").fill("200");
+  await expect(page.getByLabel("Post-tax adjustment to credit")).toHaveValue(
+    "-100.00",
+  );
+  await page.getByLabel("Post-tax adjustment to credit").fill("-20");
   await page.getByLabel("Reason", { exact: true }).fill("Scope reduction");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page
@@ -102,6 +107,8 @@ test("credit issue, application, reversal and refund work through accessible scr
   await expect(page.getByRole("dialog")).toHaveCount(0);
   const snapshot = await (await page.request.get("/api/data")).json(),
     credit = snapshot.credits.find((c: any) => c.invoice_id === id);
+  expect(credit.adjustment_minor).toBe("-2000");
+  expect(credit.total_minor).toBe("21600");
   await page.getByRole("link", { name: credit.number, exact: true }).click();
   await page
     .getByRole("button", { name: "Apply to invoice", exact: true })
