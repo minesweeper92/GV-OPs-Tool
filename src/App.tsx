@@ -76,6 +76,7 @@ const Credits = lazy(() =>
 const Recurring = lazy(() =>
   import("./Recurring").then((m) => ({ default: m.Recurring })),
 );
+const RecurringBills = lazy(() => import("./RecurringBills"));
 import {
   DealRecord,
   PersonRecord,
@@ -130,6 +131,7 @@ const groups = [
       ["purchase-orders", "Purchase orders", FileText],
       ["vendor-credits", "Vendor credits & refunds", Receipt],
       ["bills", "Bills", FileText],
+      ["recurring-bills", "Recurring bills", FileText],
       ["vendor-payments", "Payments made", Wallet],
       ["payables", "Payable balances", BookOpen],
       ["vendor-statements", "Vendor statements", BookOpen],
@@ -590,6 +592,18 @@ export default function App() {
           id={view === "schedule" ? id : undefined}
           kind={view === "recurring-expenses" ? "expense" : "invoice"}
           run={run}
+        />
+      ) : (
+        denied()
+      );
+    if (["recurring-bills", "bill-schedule"].includes(view))
+      return canFinance ? (
+        <RecurringBills
+          key={route + entity}
+          data={data}
+          me={me!}
+          entity={entity}
+          id={view === "bill-schedule" ? id : undefined}
         />
       ) : (
         denied()
@@ -1921,6 +1935,7 @@ export default function App() {
                       "credits",
                       "recurring",
                       "recurring-expenses",
+                      "recurring-bills",
                       "customer-statements",
                     ].includes(key),
                 );

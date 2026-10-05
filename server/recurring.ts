@@ -4,6 +4,7 @@ import { Problem, audit, execute, type Context } from "./domain.ts";
 import { minor, scaled, totals, round, baseAmount } from "../shared/money.ts";
 import { occurrenceDate } from "../shared/recurring.ts";
 import { runJournalSchedulesDue } from "./journal-schedules.ts";
+import { runRecurringBillsDue } from "./recurring-bills.ts";
 const day = (x: unknown) => String(x).slice(0, 10);
 const decimal = (x: bigint) =>
   `${x / 100n}.${String(x % 100n).padStart(2, "0")}`;
@@ -427,6 +428,7 @@ export function startRecurringWorker(db: Database) {
     pending = (async () => {
       await runRecurringDue(db);
       await runJournalSchedulesDue(db);
+      await runRecurringBillsDue(db);
     })()
       .catch(() => console.error("Recurring draft worker failed; will retry."))
       .finally(() => {

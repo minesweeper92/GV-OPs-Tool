@@ -8,6 +8,10 @@ import { createApp } from "../server/app.ts";
 import { partyStatement } from "../server/statements.ts";
 import { ageing, financialReports } from "../server/financial-reports.ts";
 import { bankDetail } from "../server/banking.ts";
+import {
+  executeBillSchedule,
+  runRecurringBillsDue,
+} from "../server/recurring-bills.ts";
 
 export async function verifyPayables(t: TestContext, db: Database) {
   const tenant = uuid(),
@@ -93,6 +97,343 @@ export async function verifyPayables(t: TestContext, db: Database) {
     service_entity_id: null,
   });
   const date = "2026-09-20";
+  await t.test(
+    "recurring vendor bills create reviewable anchored drafts with exact retries and future-only changes",
+    async () => {
+      const ctx = {
+        tenantId: tenant,
+        userId: finance,
+        role: "finance" as const,
+      };
+      const run = (id: string, now = "2034-03-31T12:00:00Z") =>
+        inTenant(db, tenant, (tx) =>
+          executeBillSchedule(
+            tx,
+            ctx,
+            { action: "bill-schedule.run", id },
+            new Date(now),
+          ),
+        );
+      const create = {
+        action: "bill-schedule.create",
+        entity_id: entity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        name: "Monthly rent",
+        currency: "USD",
+        fx: "280",
+        lines: [
+          {
+            description: "Rent",
+            quantity: "1",
+            price: "100",
+            tax: "18",
+            account_code: "5200",
+          },
+        ],
+        tax_treatment: "recoverable",
+        due_days: 15,
+        notes: "Review vendor invoice",
+        start_date: "2034-01-31",
+        end_date: null,
+        frequency: "monthly",
+        timezone: "Asia/Karachi",
+        occurrences: 4,
+        request_key: uuid(),
+      };
+      await rep.command(create, 403);
+      const p = await accountant.command(create);
+      assert.equal((await accountant.command(create)).id, p.id);
+      await accountant.command({ ...create, name: "Changed retry" }, 409);
+      await accountant.command(
+        { ...create, request_key: uuid(), currency: "PKR", fx: "280" },
+        400,
+      );
+      await accountant.command(
+        { ...create, request_key: uuid(), end_date: "2034-01-01" },
+        400,
+      );
+      const before = await accountant.get();
+      assert.equal(
+        before.billSchedules.find((s: any) => s.id === p.id).next_index,
+        0,
+      );
+      assert.equal((await rep.get()).billSchedules.length, 0);
+      const initialJournals = (
+        await db.query(
+          "SELECT count(*) AS n FROM journals WHERE tenant_id=$1",
+          [tenant],
+        )
+      ).rows[0].n;
+      assert.equal((await run(p.id, "2034-01-30T12:00:00Z")).generated, 0);
+      const results = await Promise.all([run(p.id), run(p.id), run(p.id)]);
+      assert.equal(
+        results.reduce((n, r) => n + (r.generated ?? 0), 0),
+        3,
+      );
+      let data = await accountant.get(),
+        profile = data.billSchedules.find((s: any) => s.id === p.id);
+      const cycles = data.billScheduleOccurrences
+        .filter((o: any) => o.schedule_id === p.id)
+        .sort((a: any, b: any) => a.cycle - b.cycle);
+      assert.deepEqual(
+        cycles.map((o: any) => o.scheduled_date),
+        ["2034-01-31", "2034-02-28", "2034-03-31"],
+      );
+      assert.equal(
+        (
+          await db.query(
+            "SELECT count(*) AS n FROM journals WHERE tenant_id=$1",
+            [tenant],
+          )
+        ).rows[0].n,
+        initialJournals,
+      );
+      for (const o of cycles) {
+        const b = data.bills.find((b: any) => b.id === o.bill_id);
+        assert.equal(b.status, "Draft");
+        assert.equal(b.total_minor, "11800");
+        assert.equal(b.fx_micros, "280000000");
+        assert.equal(o.template.version, o.cycle + 1);
+      }
+      const edit = {
+        action: "bill-schedule.edit",
+        id: p.id,
+        version: profile.version,
+        name: "Updated rent",
+        lines: [{ ...create.lines[0], price: "200" }],
+        fx: "300",
+        tax_treatment: "recoverable",
+        due_days: 30,
+        notes: "Future only",
+        end_date: null,
+        occurrences: 4,
+      };
+      await accountant.command({ ...edit, version: 1 }, 409);
+      await accountant.command(edit);
+      assert.equal((await run(p.id, "2034-04-30T12:00:00Z")).generated, 1);
+      data = await accountant.get();
+      profile = data.billSchedules.find((s: any) => s.id === p.id);
+      assert.equal(profile.status, "Completed");
+      const last = data.billScheduleOccurrences.find(
+          (o: any) => o.schedule_id === p.id && o.cycle === 3,
+        ),
+        lastBill = data.bills.find((b: any) => b.id === last.bill_id);
+      assert.equal(lastBill.total_minor, "23600");
+      assert.equal(lastBill.fx_micros, "300000000");
+      assert.equal(
+        data.bills.find((b: any) => b.id === cycles[0].bill_id).total_minor,
+        "11800",
+      );
+      assert.equal((await run(p.id, "2035-01-01T12:00:00Z")).generated, 0);
+      await accountant.command({ ...edit, version: profile.version }, 409);
+      await accountant.command({
+        action: "bill.submit",
+        id: lastBill.id,
+        version: lastBill.version,
+      });
+      const submitted = (await accountant.get()).bills.find(
+        (b: any) => b.id === lastBill.id,
+      );
+      await owner.command({
+        action: "bill.approve",
+        id: lastBill.id,
+        version: submitted.version,
+      });
+      assert.equal(
+        (await accountant.get()).bills.find((b: any) => b.id === lastBill.id)
+          .base_minor,
+        "7080000",
+      );
+      await assert.rejects(
+        () =>
+          inTenant(db, other, (tx) =>
+            executeBillSchedule(
+              tx,
+              { ...ctx, tenantId: other },
+              { action: "bill-schedule.run", id: p.id },
+            ),
+          ),
+        /not found/,
+      );
+      await assert.rejects(
+        () =>
+          inTenant(db, tenant, (tx) =>
+            tx.query(
+              "UPDATE bill_schedule_occurrences SET reason='rewrite' WHERE id=$1",
+              [last.id],
+            ),
+          ),
+        /immutable|permission denied/,
+      );
+    },
+  );
+  await t.test(
+    "recurring bill pause, skip, period locks, duplicate protection and revoked worker access preserve history",
+    async () => {
+      const ctx = {
+        tenantId: tenant,
+        userId: finance,
+        role: "finance" as const,
+      };
+      const create = {
+        action: "bill-schedule.create",
+        entity_id: secondEntity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        name: "Office lease",
+        currency: "PKR",
+        fx: "1",
+        lines: [
+          {
+            description: "Lease",
+            quantity: "1",
+            price: "123.45",
+            tax: "0",
+            account_code: "5200",
+          },
+        ],
+        tax_treatment: "expense",
+        due_days: 0,
+        notes: "",
+        start_date: "2035-01-31",
+        end_date: "2035-04-30",
+        frequency: "monthly",
+        timezone: "UTC",
+        occurrences: null,
+        request_key: uuid(),
+      };
+      const p = await accountant.command(create);
+      const read = async () =>
+        (await accountant.get()).billSchedules.find((s: any) => s.id === p.id);
+      const act = (
+        command: Record<string, unknown>,
+        date = "2035-04-30T12:00:00Z",
+      ) =>
+        inTenant(db, tenant, (tx) =>
+          executeBillSchedule(tx, ctx, command, new Date(date)),
+        );
+      await accountant.command({
+        action: "bill-schedule.status",
+        id: p.id,
+        version: 1,
+        status: "Paused",
+        reason: "Review lease",
+      });
+      await assert.rejects(
+        () => act({ action: "bill-schedule.run", id: p.id }),
+        /Resume/,
+      );
+      await assert.rejects(
+        () =>
+          act(
+            {
+              action: "bill-schedule.skip",
+              id: p.id,
+              version: 2,
+              reason: "Too early",
+            },
+            "2035-01-01T00:00:00Z",
+          ),
+        /due/,
+      );
+      await act({
+        action: "bill-schedule.skip",
+        id: p.id,
+        version: 2,
+        reason: "First month waived",
+      });
+      await accountant.command({
+        action: "bill-schedule.status",
+        id: p.id,
+        version: 3,
+        status: "Active",
+        reason: "Lease confirmed",
+      });
+      await db.query("UPDATE entities SET lock_date='2035-02-28' WHERE id=$1", [
+        secondEntity,
+      ]);
+      await runRecurringBillsDue(db, new Date("2035-04-30T12:00:00Z"));
+      assert.match((await read()).last_error, /locked period/);
+      let profile = await read();
+      await act({
+        action: "bill-schedule.skip",
+        id: p.id,
+        version: profile.version,
+        reason: "Already entered at cutover",
+      });
+      await accountant.command({
+        action: "bill.create",
+        entity_id: secondEntity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        reference: `Manual lease ${uuid()}`,
+        bill_date: "2035-03-31",
+        due_date: "2035-03-31",
+        currency: "PKR",
+        fx: "1",
+        lines: create.lines,
+        tax_treatment: "expense",
+        notes: "",
+        request_key: uuid(),
+      });
+      await runRecurringBillsDue(db, new Date("2035-04-30T12:00:00Z"));
+      profile = await read();
+      assert.match(profile.last_error, /Possible duplicate/);
+      assert.equal(profile.next_index, 2);
+      await act({
+        action: "bill-schedule.skip",
+        id: p.id,
+        version: profile.version,
+        reason: "Manual vendor invoice already entered",
+      });
+      await db.query(
+        "UPDATE memberships SET active=false WHERE tenant_id=$1 AND user_id=$2",
+        [tenant, finance],
+      );
+      await runRecurringBillsDue(db, new Date("2035-04-30T12:00:00Z"));
+      assert.equal(
+        (
+          await db.query("SELECT next_index FROM bill_schedules WHERE id=$1", [
+            p.id,
+          ])
+        ).rows[0].next_index,
+        3,
+      );
+      await db.query(
+        "UPDATE memberships SET active=true WHERE tenant_id=$1 AND user_id=$2",
+        [tenant, finance],
+      );
+      await runRecurringBillsDue(db, new Date("2035-04-30T12:00:00Z"));
+      assert.equal((await read()).status, "Completed");
+      const stopped = await accountant.command({
+        ...create,
+        request_key: uuid(),
+        start_date: "2036-01-01",
+        end_date: null,
+      });
+      await accountant.command({
+        action: "bill-schedule.status",
+        id: stopped.id,
+        version: 1,
+        status: "Stopped",
+        reason: "Cancelled lease",
+      });
+      await accountant.command(
+        {
+          action: "bill-schedule.status",
+          id: stopped.id,
+          version: 2,
+          status: "Active",
+          reason: "Reopen",
+        },
+        409,
+      );
+      await db.query("UPDATE entities SET lock_date=NULL WHERE id=$1", [
+        secondEntity,
+      ]);
+    },
+  );
   await t.test(
     "purchase orders reserve partial bills, retry safely and never post directly",
     async () => {

@@ -265,6 +265,8 @@ export interface Data {
   crmMembers: { id: string; name: string; role: string }[];
   recurringProfiles: import("../shared/recurring").RecurringProfile[];
   recurringOccurrences: import("../shared/recurring").RecurringOccurrence[];
+  billSchedules: import("../shared/recurring-bills").BillSchedule[];
+  billScheduleOccurrences: import("../shared/recurring-bills").BillScheduleOccurrence[];
   credits: import("../shared/billing").CreditNote[];
   creditApplications: import("../shared/billing").CreditApplication[];
   customerRefunds: import("../shared/billing").CustomerRefund[];
