@@ -38,7 +38,9 @@ const Editor = lazy(() =>
   import("./Editor").then((m) => ({ default: m.Editor })),
 );
 import { Organizations, Team, Onboarding } from "./Access";
-import { Payables } from "./Payables";
+const Payables = lazy(() =>
+  import("./Payables").then((m) => ({ default: m.Payables })),
+);
 const PurchaseOrders = lazy(() =>
   import("./PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })),
 );

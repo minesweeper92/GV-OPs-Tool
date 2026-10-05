@@ -26,6 +26,7 @@ import {
   type Line,
 } from "./model";
 import { totals } from "../shared/money";
+import { openRemittanceAdvice } from "./remittanceAdvice";
 import { z } from "zod";
 import {
   clearBrowserDraft,
@@ -245,6 +246,17 @@ export function Payables({
                   : "Recorded"}
               </td>
               <td>
+                <button
+                  onClick={() => {
+                    try {
+                      openRemittanceAdvice(data, p);
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  Remittance advice
+                </button>
                 {!p.reversal_date ? (
                   <button
                     onClick={() =>

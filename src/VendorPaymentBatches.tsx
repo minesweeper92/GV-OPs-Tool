@@ -14,6 +14,7 @@ import {
   type VendorPaymentBatch,
 } from "./model";
 import { minor } from "../shared/money";
+import { openRemittanceAdvice } from "./remittanceAdvice";
 import {
   readBrowserDraft,
   writeBrowserDraft,
@@ -183,6 +184,17 @@ export function VendorPaymentBatches({
               <td>{money(p.wht_minor, p.currency)}</td>
               <td>{money(p.fee_minor, p.currency)}</td>
               <td>
+                <button
+                  onClick={() => {
+                    try {
+                      openRemittanceAdvice(data, p);
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  Remittance advice
+                </button>
                 {p.reversal_date ? (
                   `Reversed ${day(p.reversal_date)}`
                 ) : (

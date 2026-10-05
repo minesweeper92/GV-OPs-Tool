@@ -123,6 +123,28 @@ test("one vendor payment allocates bills, recovers a lost response and reverses 
     "50000",
   );
   await page.getByRole("link", { name: reference, exact: true }).click();
+  const popupPromise = page.waitForEvent("popup");
+  await page
+    .getByRole("button", { name: "Remittance advice", exact: true })
+    .click();
+  const advice = await popupPromise;
+  await expect(
+    advice.getByRole("heading", { name: "Remittance advice", exact: true }),
+  ).toBeVisible();
+  await expect(
+    advice.getByRole("button", { name: "Print / Save PDF", exact: true }),
+  ).toBeVisible();
+  await expect(advice.locator("body")).toContainText(reference);
+  for (const ref of refs)
+    await expect(
+      advice.getByRole("cell", { name: ref, exact: true }),
+    ).toBeVisible();
+  expect(await advice.evaluate(() => window.opener)).toBeNull();
+  await advice.emulateMedia({ media: "print" });
+  await expect(
+    advice.getByRole("button", { name: "Print / Save PDF", exact: true }),
+  ).not.toBeVisible();
+  await advice.close();
   await page
     .getByRole("button", { name: "Reverse payment", exact: true })
     .click();
@@ -137,6 +159,20 @@ test("one vendor payment allocates bills, recovers a lost response and reverses 
   latest = await (await page.request.get("/api/data")).json();
   for (const id of ids)
     expect(latest.bills.find((b: any) => b.id === id).paid_minor).toBe("0");
+  const reversedPromise = page.waitForEvent("popup");
+  await page
+    .getByRole("button", { name: "Remittance advice", exact: true })
+    .click();
+  const reversedAdvice = await reversedPromise;
+  await expect(
+    reversedAdvice.getByText("REVERSED — not a current payment", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    reversedAdvice.getByText(/Wrong payment reference/),
+  ).toBeVisible();
+  await reversedAdvice.close();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
     page.getByRole("heading", { name: "Payments made", exact: true }),
