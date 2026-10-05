@@ -40,6 +40,9 @@ const Editor = lazy(() =>
 import { Organizations, Team, Onboarding } from "./Access";
 import { Payables } from "./Payables";
 import { FinancialReports } from "./FinancialReports";
+const PartyStatements = lazy(() =>
+  import("./PartyStatements").then((m) => ({ default: m.PartyStatements })),
+);
 import { Banking } from "./Banking";
 import { Projects } from "./Projects";
 import { QuoteComposer } from "./QuoteComposer";
@@ -111,6 +114,7 @@ const groups = [
       ["payments", "Payments received", Wallet],
       ["credits", "Credit notes & refunds", Receipt],
       ["recurring", "Recurring invoices", FileText],
+      ["customer-statements", "Customer statements", BookOpen],
     ],
   },
   {
@@ -120,6 +124,7 @@ const groups = [
       ["bills", "Bills", FileText],
       ["vendor-payments", "Payments made", Wallet],
       ["payables", "Payable balances", BookOpen],
+      ["vendor-statements", "Vendor statements", BookOpen],
       ["expenses", "Expenses", Receipt],
       ["recurring-expenses", "Recurring expenses", Receipt],
     ],
@@ -508,6 +513,19 @@ export default function App() {
           view={view}
           id={id}
           newVendor={() => edit({ kind: "company", id: "vendor" })}
+        />
+      ) : (
+        denied()
+      );
+    if (view === "customer-statements" || view === "vendor-statements")
+      return canFinance ? (
+        <PartyStatements
+          key={`${me!.organization.id}/${me!.user.id}/${view}/${id || ""}`}
+          data={data}
+          me={me!}
+          entity={entity}
+          kind={view === "customer-statements" ? "customer" : "vendor"}
+          initialCompanyId={id}
         />
       ) : (
         denied()
@@ -1865,9 +1883,12 @@ export default function App() {
                 .filter(
                   ([key]) =>
                     canFinance ||
-                    !["credits", "recurring", "recurring-expenses"].includes(
-                      key,
-                    ),
+                    ![
+                      "credits",
+                      "recurring",
+                      "recurring-expenses",
+                      "customer-statements",
+                    ].includes(key),
                 );
               const simple = ["Home", "Banking", "Reports"].includes(g.label);
               const groupOpen = openGroups.includes(g.label);

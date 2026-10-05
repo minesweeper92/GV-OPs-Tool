@@ -27,12 +27,13 @@ const sum = (rows: AccountBalance[], f: (r: AccountBalance) => bigint) =>
   rows.reduce((v, r) => v + f(r), 0n);
 const movement = (r: AccountBalance) => BigInt(r.debit) - BigInt(r.credit);
 
-async function ageing(
+export async function ageing(
   tx: SQL,
   ids: string[],
   asOf: string,
   kind: "ar" | "ap",
   control: bigint,
+  partyId: string | null = null,
 ): Promise<AgeingReport> {
   // Each effect is tied to its immutable journal date. Current document status and
   // cumulative paid totals cannot answer a historical "as at" question.
@@ -62,8 +63,8 @@ async function ageing(
     FROM effects ef JOIN journals j ON j.id=ef.journal LEFT JOIN (SELECT journal_id,sum(debit_minor-credit_minor) AS delta FROM journal_lines WHERE account_code=$3 GROUP BY journal_id) l ON l.journal_id=j.id
     WHERE j.entity_id=ANY($1::uuid[]) AND j.posted_on<=$2 GROUP BY ef.doc)
     SELECT d.*,e.code AS entity_code,b.outstanding,b.base FROM balances b JOIN documents d ON d.id=b.doc JOIN entities e ON e.id=d.entity_id
-    WHERE b.outstanding::numeric<>0 OR b.base::numeric<>0 ORDER BY d.due_date,e.code,d.party,d.number`,
-      [ids, asOf, kind === "ar" ? "1100" : "2000"],
+    WHERE ($4::uuid IS NULL OR d.party_id=$4) AND (b.outstanding::numeric<>0 OR b.base::numeric<>0) ORDER BY d.due_date,e.code,d.party,d.number`,
+      [ids, asOf, kind === "ar" ? "1100" : "2000", partyId],
     )
   ).rows;
   const buckets = [0n, 0n, 0n, 0n, 0n];

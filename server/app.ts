@@ -11,6 +11,8 @@ import { IdentityProvider, equalSecret } from "./oidc.ts";
 import { executePayable, payableSnapshot } from "./payables.ts";
 import { reportFilter } from "../shared/reporting.ts";
 import { financialReports, accountDetail } from "./financial-reports.ts";
+import { partyStatement } from "./statements.ts";
+import { statementFilter } from "../shared/statements.ts";
 import { bankAccounts, bankDetail, executeBank } from "./banking.ts";
 import { projectSnapshot, executeProject } from "./projects.ts";
 import { creditSnapshot, executeCredit } from "./credits.ts";
@@ -509,6 +511,11 @@ export function createApp(
       (tx) => financialReports(tx, ctx, q),
       true,
     );
+  });
+  app.get("/api/party-statement", async (req) => {
+    const q = statementFilter.parse(req.query),
+      ctx = access.context(sessions.get(req)!);
+    return inTenant(db, ctx.tenantId, (tx) => partyStatement(tx, ctx, q), true);
   });
   app.get("/api/banking", async (req) => {
     const q = z

@@ -172,6 +172,42 @@ export async function verifyReporting(t: TestContext, db: Database) {
   ).id;
   await cmd({ action: "bill.submit", id: bill, version: 1 });
   await cmd({ action: "bill.approve", id: bill, version: 2 });
+  const statement = (
+    kind: string,
+    from: string,
+    to: string,
+    entityId: string = entity,
+  ) =>
+    call(
+      `/api/party-statement?companyId=${company}&kind=${kind}&entityId=${entityId}&from=${from}&to=${to}`,
+    );
+  await t.test(
+    "party statements include posted documents only with separate currency and entity totals",
+    async () => {
+      const r = await statement("customer", "2026-01-01", "2026-01-31", "all");
+      assert.equal(r.groups.length, 1);
+      assert.equal(r.groups[0].currency, "USD");
+      assert.equal(r.groups[0].opening, "0");
+      assert.equal(r.groups[0].closing, "10000");
+      assert.equal(r.groups[0].closingBase, "2800000");
+      assert.equal(r.groups[0].outstanding, "10000");
+      assert.equal(r.groups[0].entries[0].link_id, invoice);
+      assert.equal(
+        (await statement("vendor", "2026-01-01", "2026-01-31")).groups[0]
+          .closing,
+        "8000",
+      );
+      assert.deepEqual(
+        (await statement("customer", "2025-01-01", "2025-12-31")).groups,
+        [],
+      );
+      assert.deepEqual(
+        (await statement("customer", "2026-01-01", "2026-01-31", second))
+          .groups,
+        [],
+      );
+    },
+  );
   await t.test(
     "accrual statements tie; an unpaid capital purchase is not a cash outflow",
     async () => {
@@ -270,6 +306,33 @@ export async function verifyReporting(t: TestContext, db: Database) {
     reason: "Supplier cancelled",
   });
   await t.test(
+    "statements preserve opening balances, withholding, carrying FX and later reversals",
+    async () => {
+      const c = (await statement("customer", "2026-02-01", "2026-02-28"))
+        .groups[0];
+      assert.equal(c.opening, "10000");
+      assert.equal(c.closing, "6000");
+      assert.equal(c.decreases, "4000");
+      assert.equal(c.closingBase, "1680000");
+      assert.equal(c.entries[0].type, "payment");
+      const v = (await statement("vendor", "2026-03-01", "2026-03-31"))
+        .groups[0];
+      assert.equal(v.opening, "4000");
+      assert.equal(v.closing, "0");
+      assert.equal(v.closingBase, "0");
+      assert.equal(v.documents.length, 0);
+      assert.deepEqual(
+        v.entries.map((e: any) => e.type),
+        ["vendor-payment-reversal", "bill-void"],
+      );
+      const url = `/api/party-statement?companyId=${company}&kind=customer&entityId=${entity}&from=2026-01-01&to=2026-02-28`;
+      await rep(url, undefined, 403);
+      await call(url.replace(company, uuid()), undefined, 404);
+      await call(url.replace(entity, uuid()), undefined, 404);
+      await call(url.replace("2026-02-28", "2025-01-01"), undefined, 400);
+    },
+  );
+  await t.test(
     "later reversals and voids preserve historical balances and cash classifications",
     async () => {
       assert.equal(
@@ -340,6 +403,88 @@ export async function verifyReporting(t: TestContext, db: Database) {
       );
       const flagged = await report("2026-01-01", "2026-01-31", second);
       assert.deepEqual(flagged.cash.unsupported, ["unclassified-test"]);
+    },
+  );
+  await t.test(
+    "customer statements count credits once and preserve refunds and all reversals historically",
+    async () => {
+      const credit = (
+        await cmd({
+          action: "credit.create",
+          invoice_id: invoice,
+          date: "2026-04-01",
+          lines: [{ index: 0, amount: "20" }],
+          treatment: "earned",
+          reason: "Reduced scope",
+          request_key: uuid(),
+        })
+      ).id;
+      const application = (
+        await cmd({
+          action: "credit.apply",
+          credit_id: credit,
+          invoice_id: invoice,
+          amount: "10",
+          date: "2026-04-02",
+          request_key: uuid(),
+        })
+      ).id;
+      const refund = (
+        await cmd({
+          action: "credit.refund",
+          credit_id: credit,
+          amount: "5",
+          fx: "300",
+          bank_account_id: null,
+          date: "2026-04-03",
+          reference: "Customer return",
+          request_key: uuid(),
+        })
+      ).id;
+      await cmd({
+        action: "credit.reverse-refund",
+        id: refund,
+        date: "2026-04-04",
+        reason: "Refund reversed",
+      });
+      await cmd({
+        action: "credit.unapply",
+        id: application,
+        date: "2026-04-05",
+        reason: "Application reversed",
+      });
+      await cmd({
+        action: "credit.reverse",
+        id: credit,
+        date: "2026-04-06",
+        reason: "Credit reversed",
+      });
+      for (const [date, net, unpaid, available] of [
+        ["2026-04-01", "4000", "6000", "2000"],
+        ["2026-04-02", "4000", "5000", "1000"],
+        ["2026-04-03", "4500", "5000", "500"],
+        ["2026-04-04", "4000", "5000", "1000"],
+        ["2026-04-05", "4000", "6000", "2000"],
+        ["2026-04-06", "6000", "6000", "0"],
+      ]) {
+        const g = (await statement("customer", "2026-04-01", date)).groups[0];
+        assert.equal(g.opening, "6000");
+        assert.equal(g.closing, net, date);
+        assert.equal(g.outstanding, unpaid, date);
+        assert.equal(g.availableCredit, available, date);
+        assert.equal(
+          BigInt(g.closing),
+          BigInt(g.outstanding) - BigInt(g.availableCredit),
+        );
+        assert.equal(g.entries.at(-1).balance, g.closing);
+      }
+      const g = (await statement("customer", "2026-04-01", "2026-04-06"))
+        .groups[0];
+      assert.equal(g.closingBase, "1680000");
+      assert.equal(
+        g.entries.find((e: any) => e.type === "credit-application").amount,
+        "0",
+      );
     },
   );
 }

@@ -587,6 +587,14 @@ export function PersonRecord({
               Add company
             </button>
           ) : null}
+          {company && finance(me) ? (
+            <div className="report-actions">
+              <a href={`#customer-statements/${company.id}`}>
+                Customer statement
+              </a>
+              <a href={`#vendor-statements/${company.id}`}>Vendor statement</a>
+            </div>
+          ) : null}
           {company?.vendor && finance(me) ? (
             <>
               <h3 className="space-top">Vendor bills</h3>
