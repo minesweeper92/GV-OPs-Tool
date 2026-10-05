@@ -486,12 +486,6 @@ export default function App() {
     });
   const props = data ? { data, me, edit, run, crmEdit } : null;
   function content() {
-    if (view === "tasks")
-      return <Tasks data={data!} me={me!} open={crmEdit} entity={entity} />;
-    if (view === "lead")
-      return (
-        <LeadRecord data={data!} me={me!} open={crmEdit} id={id} run={run} />
-      );
     if (view === "organizations" || view === "join")
       return <Organizations me={me!} />;
     if (view === "team") return <Team me={me!} />;
@@ -508,6 +502,12 @@ export default function App() {
         <ErrorBox
           error={dataQuery.error?.message || "Unable to load records."}
         />
+      );
+    if (view === "tasks")
+      return <Tasks data={data} me={me!} open={crmEdit} entity={entity} />;
+    if (view === "lead")
+      return (
+        <LeadRecord data={data} me={me!} open={crmEdit} id={id} run={run} />
       );
     if (view === "vendor-credits")
       return canFinance ? (

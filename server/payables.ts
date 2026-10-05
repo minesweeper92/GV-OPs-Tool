@@ -79,7 +79,7 @@ async function reverseJournal(
 }
 export async function payableSnapshot(tx: SQL, ctx: Context) {
   if (!["admin", "finance"].includes(ctx.role))
-    return { bills: [], vendorPayments: [] };
+    return { bills: [], vendorPayments: [], vendorPaymentBatches: [] };
   const bills = (
     await tx.query(
       "SELECT * FROM bills ORDER BY bill_date DESC,created_at DESC",
@@ -94,12 +94,253 @@ export async function payableSnapshot(tx: SQL, ctx: Context) {
   return {
     bills: bills.map(({ request_payload, ...b }) => b),
     vendorPayments: vendorPayments.map(({ request_payload, ...p }) => p),
+    vendorPaymentBatches: (
+      await tx.query(
+        "SELECT p.id,p.entity_id,p.vendor_id,c.name AS vendor_name,p.currency,p.payment_date,p.amount_minor,p.wht_minor,p.fee_minor,p.fx_micros,p.reference,p.bank_account_id,r.reversal_date,r.reason AS reversal_reason,coalesce((SELECT jsonb_agg(jsonb_build_object('bill_id',a.bill_id,'reference',b.reference,'amount_minor',a.amount_minor::text,'wht_minor',a.wht_minor::text) ORDER BY b.reference) FROM vendor_payment_batch_allocations a JOIN bills b ON b.id=a.bill_id WHERE a.payment_id=p.id),'[]'::jsonb) AS allocations FROM vendor_payment_batches p JOIN companies c ON c.id=p.vendor_id LEFT JOIN vendor_payment_batch_reversals r ON r.payment_id=p.id ORDER BY p.payment_date DESC,p.created_at DESC",
+      )
+    ).rows,
   };
 }
 export async function executePayable(tx: SQL, ctx: Context, c: Row) {
   requireFinance(ctx);
   const t = ctx.tenantId,
     id = uuid();
+  if (
+    c.action === "vendor-payment.batch-create" ||
+    c.action === "vendor-payment.batch-reverse"
+  ) {
+    const reversing = c.action === "vendor-payment.batch-reverse";
+    const original = reversing
+      ? (
+          await tx.query("SELECT * FROM vendor_payment_batches WHERE id=$1", [
+            c.id,
+          ])
+        ).rows[0]
+      : null;
+    if (reversing && !original) throw new Problem(404, "Payment not found.");
+    const allocations: Row[] = reversing
+      ? (
+          await tx.query(
+            "SELECT * FROM vendor_payment_batch_allocations WHERE payment_id=$1 ORDER BY bill_id",
+            [c.id],
+          )
+        ).rows
+      : [...c.allocations].sort((a, b) => a.bill_id.localeCompare(b.bill_id));
+    if (new Set(allocations.map((a) => a.bill_id)).size !== allocations.length)
+      throw new Problem(400, "Select each bill only once.");
+    const bills: Row[] = [];
+    for (const a of allocations) bills.push(await get(tx, "bills", a.bill_id));
+    const first = bills[0];
+    if (!first) throw new Problem(400, "Select at least one bill.");
+    // Sorted bill locks precede the shared entity lock, matching other payable commands.
+    await get(tx, "entities", first.entity_id);
+    const prior = (
+      await tx.query(
+        reversing
+          ? "SELECT * FROM vendor_payment_batch_reversals WHERE payment_id=$1"
+          : "SELECT * FROM vendor_payment_batches WHERE request_key=$1",
+        [reversing ? c.id : c.request_key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (
+        reversing
+          ? String(prior.reversal_date).slice(0, 10) !== c.date ||
+            prior.reason !== c.reason
+          : !isDeepStrictEqual(prior.request_payload, c)
+      )
+        throw new Problem(
+          409,
+          "This payment already has a different request or reversal.",
+        );
+      return { id: prior.id };
+    }
+    for (const b of bills) {
+      if (
+        b.entity_id !== first.entity_id ||
+        b.vendor_id !== first.vendor_id ||
+        b.currency !== first.currency
+      )
+        throw new Problem(
+          400,
+          "All bills must have the same vendor, legal entity and currency.",
+        );
+      await openDate(tx, b, c.date);
+    }
+    if (reversing) {
+      await cashAccount(
+        tx,
+        original!.entity_id,
+        original!.bank_account_id,
+        c.date,
+      );
+      await reverseJournal(
+        tx,
+        ctx,
+        first.entity_id,
+        "vendor-payment-batch",
+        original!.id,
+        c.date,
+        "vendor-payment-batch-reversal",
+        id,
+        `Reverse vendor payment ${original!.reference}: ${c.reason}`,
+      );
+      await tx.query(
+        "INSERT INTO vendor_payment_batch_reversals(id,tenant_id,payment_id,reversal_date,reason) VALUES($1,$2,$3,$4,$5)",
+        [id, t, c.id, c.date, c.reason],
+      );
+      for (const a of allocations) {
+        await tx.query(
+          "UPDATE bills SET paid_minor=paid_minor-$2,paid_base_minor=paid_base_minor-$3,status='Open',last_activity_on=$4,version=version+1 WHERE id=$1",
+          [
+            a.bill_id,
+            String(BigInt(a.amount_minor) + BigInt(a.wht_minor)),
+            a.carrying_minor,
+            c.date,
+          ],
+        );
+        await audit(tx, ctx, a.bill_id, c.action, {
+          paymentId: c.id,
+          text: `Reversed grouped vendor payment ${original!.reference}: ${c.reason}.`,
+        });
+      }
+      return { id };
+    }
+    const fx = scaled(c.fx, 6),
+      fee = minor(c.fee);
+    if (fx <= 0n || (first.currency === "PKR" && fx !== 1_000_000n))
+      throw new Problem(400, "Enter a valid exchange rate; PKR must use 1.");
+    const prepared = allocations.map((a, i) => {
+      const b = bills[i],
+        amount = minor(a.amount),
+        wht = minor(a.wht),
+        remaining =
+          BigInt(b.total_minor) -
+          BigInt(b.paid_minor) -
+          BigInt(b.credited_minor);
+      if (b.status !== "Open" || amount <= 0n || amount + wht > remaining)
+        throw new Problem(
+          400,
+          "Enter positive allocations within each approved bill's outstanding balance.",
+        );
+      return {
+        bill_id: a.bill_id as string,
+        amount,
+        wht,
+        carrying: round(
+          (BigInt(b.base_minor) -
+            BigInt(b.paid_base_minor) -
+            BigInt(b.credited_base_minor)) *
+            (amount + wht),
+          remaining,
+        ),
+      };
+    });
+    const amount = prepared.reduce((s, a) => s + a.amount, 0n),
+      wht = prepared.reduce((s, a) => s + a.wht, 0n),
+      carrying = prepared.reduce((s, a) => s + a.carrying, 0n),
+      cash = baseAmount(amount, fx),
+      withheld = baseAmount(wht, fx),
+      fees = baseAmount(fee, fx);
+    if (cash <= 0n)
+      throw new Problem(
+        400,
+        "Payment must convert to at least one PKR minor unit.",
+      );
+    const bankCode = await cashAccount(
+      tx,
+      first.entity_id,
+      c.bank_account_id,
+      c.date,
+    );
+    await tx.query(
+      "INSERT INTO vendor_payment_batches(id,tenant_id,entity_id,vendor_id,currency,payment_date,amount_minor,wht_minor,fee_minor,fx_micros,bank_account_id,reference,request_key,request_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+      [
+        id,
+        t,
+        first.entity_id,
+        first.vendor_id,
+        first.currency,
+        c.date,
+        String(amount),
+        String(wht),
+        String(fee),
+        String(fx),
+        c.bank_account_id || null,
+        c.reference,
+        c.request_key,
+        JSON.stringify(c),
+      ],
+    );
+    let cumulativeCash = 0n,
+      cumulativeWht = 0n,
+      previousCash = 0n,
+      previousWht = 0n,
+      previousFee = 0n;
+    for (const a of prepared) {
+      cumulativeCash += a.amount;
+      cumulativeWht += a.wht;
+      const cashTo = round(cash * cumulativeCash, amount),
+        whtTo = wht ? round(withheld * cumulativeWht, wht) : 0n,
+        feeTo = round(fees * cumulativeCash, amount);
+      await tx.query(
+        "INSERT INTO vendor_payment_batch_allocations(id,tenant_id,payment_id,bill_id,amount_minor,wht_minor,carrying_minor,cash_base_minor,wht_base_minor,fee_base_minor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        [
+          uuid(),
+          t,
+          id,
+          a.bill_id,
+          String(a.amount),
+          String(a.wht),
+          String(a.carrying),
+          String(cashTo - previousCash),
+          String(whtTo - previousWht),
+          String(feeTo - previousFee),
+        ],
+      );
+      previousCash = cashTo;
+      previousWht = whtTo;
+      previousFee = feeTo;
+      const b = bills.find((b) => b.id === a.bill_id)!;
+      await tx.query(
+        "UPDATE bills SET paid_minor=paid_minor+$2,paid_base_minor=paid_base_minor+$3,status=$4,last_activity_on=$5,version=version+1 WHERE id=$1",
+        [
+          a.bill_id,
+          String(a.amount + a.wht),
+          String(a.carrying),
+          BigInt(b.paid_minor) + BigInt(b.credited_minor) + a.amount + a.wht ===
+          BigInt(b.total_minor)
+            ? "Paid"
+            : "Open",
+          c.date,
+        ],
+      );
+      await audit(tx, ctx, a.bill_id, c.action, {
+        paymentId: id,
+        text: `Allocated grouped vendor payment ${c.reference}. No bank transfer was initiated.`,
+      });
+    }
+    const difference = cash + withheld - carrying;
+    await post(
+      tx,
+      ctx,
+      first.entity_id,
+      c.date,
+      "vendor-payment-batch",
+      id,
+      `Vendor payment ${c.reference} (${prepared.length} bills)`,
+      [
+        { account: "2000", debit: carrying },
+        { account: bankCode, credit: cash + fees },
+        { account: "2200", credit: withheld },
+        { account: "5300", debit: fees },
+        difference >= 0n
+          ? { account: "5100", debit: difference }
+          : { account: "4100", credit: -difference },
+      ],
+    );
+    return { id };
+  }
   if (c.action === "bill.create" || c.action === "bill.edit") {
     const old = c.action === "bill.edit" ? await get(tx, "bills", c.id) : null;
     if (old?.purchase_order_id)

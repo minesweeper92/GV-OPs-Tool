@@ -60,8 +60,8 @@ export async function ageing(
       : `SELECT id,entity_id,vendor_id AS party_id,vendor_name AS party,reference AS number,bill_date AS date,due_date,currency FROM bills`;
   const rows = (
     await tx.query(
-      `WITH effects AS (${effects}), documents AS (${documents}), balances AS (
-    SELECT ef.doc,sum(ef.amount)::text AS outstanding,coalesce(sum(${kind === "ar" ? "l.delta" : "-l.delta"}),0)::text AS base
+      `WITH original_effects AS (${effects}), effects AS (SELECT original_effects.*,NULL::bigint AS base_override FROM original_effects ${kind === "ap" ? `UNION ALL SELECT a.bill_id,j.id,-(a.amount_minor+a.wht_minor),-a.carrying_minor FROM vendor_payment_batch_allocations a JOIN journals j ON j.source_id=a.payment_id AND j.source_type='vendor-payment-batch' UNION ALL SELECT a.bill_id,j.id,a.amount_minor+a.wht_minor,a.carrying_minor FROM vendor_payment_batch_allocations a JOIN vendor_payment_batch_reversals r ON r.payment_id=a.payment_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-batch-reversal'` : ""}), documents AS (${documents}), balances AS (
+    SELECT ef.doc,sum(ef.amount)::text AS outstanding,coalesce(sum(coalesce(ef.base_override,${kind === "ar" ? "l.delta" : "-l.delta"})),0)::text AS base
     FROM effects ef JOIN journals j ON j.id=ef.journal LEFT JOIN (SELECT journal_id,sum(debit_minor-credit_minor) AS delta FROM journal_lines WHERE account_code=$3 GROUP BY journal_id) l ON l.journal_id=j.id
     WHERE j.entity_id=ANY($1::uuid[]) AND j.posted_on<=$2 GROUP BY ef.doc)
     SELECT d.*,e.code AS entity_code,b.outstanding,b.base FROM balances b JOIN documents d ON d.id=b.doc JOIN entities e ON e.id=d.entity_id
@@ -166,6 +166,24 @@ export async function financialReports(
     )
   ).rows;
   const allocationMap = new Map<string, bigint>();
+  const grouped = (
+    await tx.query(
+      `SELECT a.payment_id AS id,r.id AS reversal_id,a.cash_base_minor::text AS cash,b.base_minor::text AS total,coalesce((SELECT sum(l.debit_minor) FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_type='bill' AND j.source_id=b.id AND l.account_code='1500'),0)::text AS capital FROM vendor_payment_batch_allocations a JOIN vendor_payment_batches p ON p.id=a.payment_id JOIN bills b ON b.id=a.bill_id LEFT JOIN vendor_payment_batch_reversals r ON r.payment_id=p.id WHERE p.entity_id=ANY($1::uuid[])`,
+      [ids],
+    )
+  ).rows;
+  for (const a of grouped) {
+    const equipmentCash = round(
+      BigInt(a.cash) * BigInt(a.capital),
+      BigInt(a.total),
+    );
+    allocationMap.set(a.id, (allocationMap.get(a.id) || 0n) - equipmentCash);
+    if (a.reversal_id)
+      allocationMap.set(
+        a.reversal_id,
+        (allocationMap.get(a.reversal_id) || 0n) + equipmentCash,
+      );
+  }
   for (const a of allocations) {
     const equipmentCash = round(
       (BigInt(a.bank) - BigInt(a.fee)) * BigInt(a.capital),
@@ -176,7 +194,14 @@ export async function financialReports(
   }
   for (const j of cashJournals) {
     if (BigInt(j.cash) === 0n) continue; // Transfers between cash accounts are not cash flows.
-    if (["vendor-payment", "vendor-payment-reversal"].includes(j.source_type)) {
+    if (
+      [
+        "vendor-payment",
+        "vendor-payment-reversal",
+        "vendor-payment-batch",
+        "vendor-payment-batch-reversal",
+      ].includes(j.source_type)
+    ) {
       if (!allocationMap.has(j.source_id)) unsupported.add(j.source_type);
       else investing += allocationMap.get(j.source_id)!;
     } else if (

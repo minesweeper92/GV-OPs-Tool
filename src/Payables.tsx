@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -33,6 +33,11 @@ import {
   readBrowserDraft,
   writeBrowserDraft,
 } from "./browserDraft";
+const VendorPaymentBatches = lazy(() =>
+  import("./VendorPaymentBatches").then((m) => ({
+    default: m.VendorPaymentBatches,
+  })),
+);
 
 const billDraft = z.object({
   savedAt: z.number(),
@@ -456,6 +461,14 @@ export function Payables({
         <section className="panel">
           <h2>Payments and corrections</h2>
           {paymentTable(payments.filter((p) => p.bill_id === b.id))}
+          {(data.vendorPaymentBatches || [])
+            .filter((p) => p.allocations.some((a) => a.bill_id === b.id))
+            .map((p) => (
+              <p key={p.id}>
+                <a href={`#vendor-payments/${p.id}`}>{p.reference}</a> ·{" "}
+                {p.reversal_date ? "Reversed" : "Multi-bill payment"}
+              </p>
+            ))}
         </section>
         <section className="panel">
           <h2>Bill activity</h2>
@@ -466,13 +479,17 @@ export function Payables({
   } else if (view === "vendor-payments")
     content = (
       <>
-        <Heading
-          title="Payments made"
-          subtitle="Recorded vendor payments, withholding and reversals. No bank transfers are initiated here."
-        />
-        {paymentTable(
-          payments.filter((p) => entity === "all" || p.entity_id === entity),
-        )}
+        <Suspense fallback={<p>Loading payments…</p>}>
+          <VendorPaymentBatches data={data} me={me} entity={entity} id={id} />
+        </Suspense>
+        {!id ? <h2>Earlier single-bill payments</h2> : null}
+        {!id
+          ? paymentTable(
+              payments.filter(
+                (p) => entity === "all" || p.entity_id === entity,
+              ),
+            )
+          : null}
       </>
     );
   else if (view === "payables") {

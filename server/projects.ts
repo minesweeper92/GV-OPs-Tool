@@ -561,14 +561,15 @@ export async function projectSnapshot(tx: SQL, ctx: Context) {
  coalesce(sum(l.debit_minor-l.credit_minor) FILTER(WHERE l.account_code='1100'),0)::text AS receivable,
  coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code='2300'),0)::text AS deferred,
  coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE j.source_type IN ('customer-refund','customer-refund-reversal') AND (l.account_code='1000' OR l.account_code LIKE '10B%')),0)::text AS refunded
- FROM sources s JOIN journals j ON j.id=s.id JOIN journal_lines l ON l.journal_id=s.id GROUP BY s.deal_id)
+ FROM sources s JOIN journals j ON j.id=s.id JOIN journal_lines l ON l.journal_id=s.id GROUP BY s.deal_id), grouped_payments AS (
+ SELECT b.deal_id,sum(CASE WHEN r.id IS NULL THEN a.fee_base_minor ELSE 0 END) AS cost,sum(CASE WHEN r.id IS NULL THEN a.carrying_minor-a.cash_base_minor-a.wht_base_minor ELSE 0 END) AS fx_result FROM vendor_payment_batch_allocations a JOIN bills b ON b.id=a.bill_id LEFT JOIN vendor_payment_batch_reversals r ON r.payment_id=a.payment_id GROUP BY b.deal_id)
  SELECT p.*,q.customer_name,d.contact_id,q.currency,q.fx_micros,q.net_minor::text AS quote_net,q.total_minor::text AS quote_total,
- coalesce(a.revenue,'0') AS revenue,coalesce(a.cost,'0') AS cost,coalesce(a.cash,'0') AS cash,coalesce(a.withholding,'0') AS withholding,coalesce(a.receivable,'0') AS receivable,coalesce(a.deferred,'0') AS deferred,coalesce(a.fx_result,'0') AS fx_result,
+ coalesce(a.revenue,'0') AS revenue,(coalesce(a.cost,'0')::bigint+coalesce(g.cost,0))::text AS cost,coalesce(a.cash,'0') AS cash,coalesce(a.withholding,'0') AS withholding,coalesce(a.receivable,'0') AS receivable,coalesce(a.deferred,'0') AS deferred,(coalesce(a.fx_result,'0')::bigint+coalesce(g.fx_result,0))::text AS fx_result,
  coalesce(a.refunded,'0') AS refunded,
  (SELECT coalesce(sum(i.net_minor),0)::text FROM invoices i WHERE i.deal_id=p.deal_id AND i.status IN ('Issued','Paid','Settled')) AS billed_net,
  (SELECT coalesce(sum(i.net_minor),0)::text FROM invoices i WHERE i.deal_id=p.deal_id AND i.status='Draft') AS reserved_net,
  (SELECT coalesce(sum(m.net_minor),0)::text FROM project_milestones m WHERE m.project_id=p.id AND m.status='Planned' AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.milestone_id=m.id AND i.status NOT IN ('Cancelled','Voided'))) AS planned_net
- FROM projects p JOIN quotes q ON q.id=p.quote_id JOIN deals d ON d.id=p.deal_id LEFT JOIN amounts a ON a.deal_id=p.deal_id ORDER BY p.created_at DESC`)
+ FROM projects p JOIN quotes q ON q.id=p.quote_id JOIN deals d ON d.id=p.deal_id LEFT JOIN amounts a ON a.deal_id=p.deal_id LEFT JOIN grouped_payments g ON g.deal_id=p.deal_id ORDER BY p.created_at DESC`)
   ).rows;
   const milestones = (
     await tx.query(

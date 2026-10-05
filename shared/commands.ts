@@ -127,6 +127,25 @@ export const commandSchema = z.discriminatedUnion("action", [
     reason: text,
   }),
   z.strictObject({
+    action: z.literal("vendor-payment.batch-create"),
+    bank_account_id: id.nullable().optional(),
+    date,
+    fee: money,
+    fx,
+    reference: text,
+    request_key: id,
+    allocations: z
+      .array(z.strictObject({ bill_id: id, amount: money, wht: money }))
+      .min(1)
+      .max(100),
+  }),
+  z.strictObject({
+    action: z.literal("vendor-payment.batch-reverse"),
+    id,
+    date,
+    reason: text,
+  }),
+  z.strictObject({
     action: z.literal("company.create"),
     request_key: id.optional(),
     name: text,

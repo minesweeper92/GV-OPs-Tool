@@ -37,6 +37,8 @@ const vendorEffects = `
  FROM vendor_payments p JOIN bills b ON b.id=p.bill_id
  UNION ALL SELECT 'vendor-payment-reversal',r.id,b.vendor_id,b.currency,b.reference,p.amount_minor+p.wht_minor,0,'bill',b.id
  FROM vendor_payment_reversals r JOIN vendor_payments p ON p.id=r.payment_id JOIN bills b ON b.id=p.bill_id
+ UNION ALL SELECT 'vendor-payment-batch',p.id,p.vendor_id,p.currency,p.reference,-(p.amount_minor+p.wht_minor),0,'vendor-payments',p.id FROM vendor_payment_batches p
+ UNION ALL SELECT 'vendor-payment-batch-reversal',r.id,p.vendor_id,p.currency,p.reference,p.amount_minor+p.wht_minor,0,'vendor-payments',p.id FROM vendor_payment_batch_reversals r JOIN vendor_payment_batches p ON p.id=r.payment_id
  UNION ALL SELECT 'vendor-credit',v.id,b.vendor_id,b.currency,v.number,-v.total_minor,v.total_minor,'vendor-credits',v.id FROM vendor_credits v JOIN bills b ON b.id=v.bill_id
  UNION ALL SELECT 'vendor-credit-reversal',r.id,b.vendor_id,b.currency,v.number,v.total_minor,-v.total_minor,'vendor-credits',v.id FROM vendor_credit_reversals r JOIN vendor_credits v ON v.id=r.credit_id JOIN bills b ON b.id=v.bill_id
  UNION ALL SELECT 'vendor-credit-application',a.id,b.vendor_id,b.currency,v.number,0,-a.amount_minor,'bill',b.id FROM vendor_credit_applications a JOIN vendor_credits v ON v.id=a.credit_id JOIN bills b ON b.id=a.bill_id

@@ -16,7 +16,8 @@ export interface StatementEntry {
   base: string;
   balance: string;
   baseBalance: string;
-  link_type: "invoice" | "bill" | "credit" | "vendor-credits";
+  link_type:
+    "invoice" | "bill" | "credit" | "vendor-credits" | "vendor-payments";
   link_id: string;
 }
 export interface StatementGroup {

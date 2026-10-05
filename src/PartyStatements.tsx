@@ -26,6 +26,8 @@ const labels: Record<string, string> = {
   "bill-void": "Bill void",
   "vendor-payment": "Payment made (including withholding)",
   "vendor-payment-reversal": "Payment reversed",
+  "vendor-payment-batch": "Multi-bill payment (including withholding)",
+  "vendor-payment-batch-reversal": "Multi-bill payment reversed",
   "vendor-credit": "Vendor credit",
   "vendor-credit-reversal": "Vendor credit reversed",
   "vendor-credit-application": "Vendor credit applied",

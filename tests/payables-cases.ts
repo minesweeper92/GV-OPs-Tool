@@ -6,6 +6,8 @@ import { inTenant } from "../server/db.ts";
 import { seedAccounts } from "../server/domain.ts";
 import { createApp } from "../server/app.ts";
 import { partyStatement } from "../server/statements.ts";
+import { ageing, financialReports } from "../server/financial-reports.ts";
+import { bankDetail } from "../server/banking.ts";
 
 export async function verifyPayables(t: TestContext, db: Database) {
   const tenant = uuid(),
@@ -338,6 +340,279 @@ export async function verifyPayables(t: TestContext, db: Database) {
     await advance(result.id, "approve");
     return result.id;
   }
+  await t.test(
+    "multi-bill payments post one bank entry, allocate exactly, retry and reverse atomically",
+    async () => {
+      const a = await posted({
+          currency: "USD",
+          fx: "280",
+          bill_date: "2032-01-01",
+          due_date: "2032-02-01",
+        }),
+        b = await posted({
+          currency: "USD",
+          fx: "300",
+          bill_date: "2032-01-01",
+          due_date: "2032-02-01",
+        });
+      const c = {
+        action: "vendor-payment.batch-create",
+        date: "2032-01-02",
+        fx: "290.123456",
+        fee: "1.01",
+        reference: `BATCH-${uuid()}`,
+        request_key: uuid(),
+        allocations: [
+          { bill_id: a, amount: "1080", wht: "100" },
+          { bill_id: b, amount: "500", wht: "20" },
+        ],
+      };
+      await rep.command(c, 403);
+      await accountant.command(
+        { ...c, allocations: [c.allocations[0], c.allocations[0]] },
+        400,
+      );
+      await accountant.command(
+        {
+          ...c,
+          allocations: [
+            { ...c.allocations[0], amount: "1181" },
+            c.allocations[1],
+          ],
+        },
+        400,
+      );
+      assert.equal((await bill(a)).paid_minor, "0");
+      const p = await accountant.command(c);
+      assert.equal((await accountant.command(c)).id, p.id);
+      const retries = await Promise.all([
+        accountant.command(c),
+        owner.command(c),
+      ]);
+      assert.ok(retries.every((r) => r.id === p.id));
+      await accountant.command({ ...c, reference: "different" }, 409);
+      assert.equal((await bill(a)).status, "Paid");
+      assert.equal((await bill(b)).paid_minor, "52000");
+      const lines = await ledger("vendor-payment-batch", p.id);
+      assert.equal(lines.filter((l) => l.account_code === "1000").length, 1);
+      assert.equal(
+        lines.reduce(
+          (s, l) => s + BigInt(l.debit_minor) - BigInt(l.credit_minor),
+          0n,
+        ),
+        0n,
+      );
+      const allocations = (
+        await db.query(
+          "SELECT * FROM vendor_payment_batch_allocations WHERE payment_id=$1",
+          [p.id],
+        )
+      ).rows;
+      assert.equal(
+        allocations.reduce(
+          (s, a) => s + BigInt(a.cash_base_minor) + BigInt(a.fee_base_minor),
+          0n,
+        ),
+        BigInt(lines.find((l) => l.account_code === "1000")!.credit_minor),
+      );
+      assert.equal(
+        allocations.reduce((s, a) => s + BigInt(a.carrying_minor), 0n),
+        BigInt(lines.find((l) => l.account_code === "2000")!.debit_minor),
+      );
+      assert.equal((await rep.get()).vendorPaymentBatches.length, 0);
+      const statement = await inTenant(db, tenant, (tx) =>
+        partyStatement(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          {
+            kind: "vendor",
+            companyId: vendor.id,
+            entityId: entity,
+            from: "2032-01-01",
+            to: "2032-01-02",
+          },
+        ),
+      );
+      const group = statement.groups.find((g) => g.currency === "USD")!;
+      assert.equal(group.closing, "66000");
+      assert.equal(group.closingBase, "19800000");
+      assert.equal(
+        group.entries.filter((e) => e.type === "vendor-payment-batch").length,
+        1,
+      );
+      assert.equal(group.documents.find((d) => d.id === b)!.base, "19800000");
+      await inTenant(db, tenant, async (tx) => {
+        const control = (
+          await tx.query(
+            "SELECT coalesce(sum(l.credit_minor-l.debit_minor),0)::text AS total FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.entity_id=$1 AND j.posted_on<=$2 AND l.account_code='2000'",
+            [entity, "2032-01-02"],
+          )
+        ).rows[0].total;
+        const report = await ageing(
+          tx,
+          [entity],
+          "2032-01-02",
+          "ap",
+          BigInt(control),
+        );
+        assert.equal(
+          report.documents.find((i) => i.id === b)!.base,
+          "19800000",
+        );
+        assert.equal(
+          report.documents.some((i) => i.id === a),
+          false,
+        );
+        assert.equal(report.difference, "0");
+      });
+      await inTenant(db, other, async (tx) =>
+        assert.equal(
+          (await tx.query("SELECT * FROM vendor_payment_batches")).rows.length,
+          0,
+        ),
+      );
+      const r = {
+        action: "vendor-payment.batch-reverse",
+        id: p.id,
+        date: "2032-01-03",
+        reason: "Wrong bank reference",
+      };
+      await accountant.command({ ...r, date: "2032-01-01" }, 400);
+      const reversal = await accountant.command(r);
+      assert.equal((await accountant.command(r)).id, reversal.id);
+      await accountant.command({ ...r, reason: "Changed reason" }, 409);
+      for (const id of [a, b]) assert.equal((await bill(id)).paid_minor, "0");
+      const inverse = await ledger(
+        "vendor-payment-batch-reversal",
+        reversal.id,
+      );
+      for (const l of lines) {
+        const other = inverse.find((x) => x.account_code === l.account_code)!;
+        assert.equal(other.debit_minor, l.credit_minor);
+        assert.equal(other.credit_minor, l.debit_minor);
+      }
+      await accountant.command(c); // Retry remains safe even after reversal.
+      for (const id of [a, b])
+        await advance(id, "void", {
+          date: "2032-01-03",
+          reason: "Test cleanup",
+        });
+    },
+  );
+  await t.test(
+    "grouped payment boundaries and capital cash-flow attribution remain correct",
+    async () => {
+      const otherVendor = await accountant.command({
+        action: "company.create",
+        name: `Other batch vendor ${uuid()}`,
+        vendor: true,
+        customer: false,
+        service_entity_id: null,
+      });
+      const base = {
+        bill_date: "2033-01-01",
+        due_date: "2033-02-01",
+        lines: [
+          {
+            description: "Grouped payment fixture",
+            quantity: "1",
+            price: "50",
+            tax: "0",
+            account_code: "5200",
+          },
+        ],
+        tax_treatment: "expense",
+      };
+      const operating = await posted(base),
+        capital = await posted({
+          ...base,
+          lines: [{ ...base.lines[0], account_code: "1500" }],
+        }),
+        wrongVendor = await posted({ ...base, vendor_id: otherVendor.id }),
+        wrongEntity = await posted({ ...base, entity_id: secondEntity }),
+        wrongCurrency = await posted({ ...base, currency: "USD", fx: "280" });
+      const bank = await accountant.command({
+        action: "bank.create",
+        entity_id: entity,
+        name: `Grouped payment bank ${uuid()}`,
+        reference: "Batch test",
+        opening_on: "2032-12-31",
+        opening: "1000",
+        offset_code: "3900",
+        request_key: uuid(),
+      });
+      const c = {
+        action: "vendor-payment.batch-create",
+        bank_account_id: bank.id,
+        date: "2033-01-02",
+        fx: "1",
+        fee: "1",
+        reference: `CAPITAL-BATCH-${uuid()}`,
+        request_key: uuid(),
+        allocations: [
+          { bill_id: operating, amount: "50", wht: "0" },
+          { bill_id: capital, amount: "50", wht: "0" },
+        ],
+      };
+      for (const bill_id of [wrongVendor, wrongEntity, wrongCurrency])
+        await accountant.command(
+          {
+            ...c,
+            allocations: [c.allocations[0], { ...c.allocations[1], bill_id }],
+          },
+          400,
+        );
+      await accountant.command({ ...c, fx: "2" }, 400);
+      await accountant.command({ ...c, date: "2032-12-31" }, 400);
+      assert.equal((await bill(operating)).paid_minor, "0");
+      const p = await accountant.command(c);
+      await inTenant(db, tenant, async (tx) => {
+        const ctx = { tenantId: tenant, userId: admin, role: "admin" as const };
+        const detail = await bankDetail(tx, ctx, bank.id);
+        const entries = detail.books.filter(
+          (e) => e.source_type === "vendor-payment-batch",
+        );
+        assert.equal(entries.length, 1);
+        assert.equal(entries[0].amount, "-10100");
+        const report = await financialReports(tx, ctx, {
+          entityId: entity,
+          from: "2033-01-01",
+          to: "2033-01-02",
+        });
+        assert.equal(report.cash.investing, "-5000");
+        assert.equal(report.cash.operating, "-5100");
+        assert.equal(report.cash.difference, "0");
+        assert.deepEqual(report.cash.unsupported, []);
+      });
+      await accountant.command({
+        action: "vendor-payment.batch-reverse",
+        id: p.id,
+        date: "2033-01-03",
+        reason: "Fixture cleanup",
+      });
+      await inTenant(db, tenant, async (tx) => {
+        const report = await financialReports(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          { entityId: entity, from: "2033-01-01", to: "2033-01-03" },
+        );
+        assert.equal(report.cash.investing, "0");
+        assert.equal(report.cash.operating, "0");
+        assert.equal(report.cash.difference, "0");
+      });
+      for (const id of [
+        operating,
+        capital,
+        wrongVendor,
+        wrongEntity,
+        wrongCurrency,
+      ])
+        await advance(id, "void", {
+          date: "2033-01-03",
+          reason: "Fixture cleanup",
+        });
+    },
+  );
   await t.test(
     "vendor credits apply, refund and reverse with exact FX, historical statements and payable ageing",
     async () => {

@@ -275,6 +275,7 @@ export interface Data {
   bills: Bill[];
   purchaseOrders: import("../shared/purchase-orders").PurchaseOrder[];
   vendorPayments: VendorPayment[];
+  vendorPaymentBatches: VendorPaymentBatch[];
   vendorCredits: import("../shared/vendor-credits").VendorCredit[];
   vendorCreditApplications: import("../shared/vendor-credits").VendorCreditUse[];
   vendorRefunds: import("../shared/vendor-credits").VendorCreditUse[];
@@ -346,6 +347,28 @@ export interface VendorPayment {
   reference: string;
   reversal_date: string | null;
   reversal_reason: string | null;
+}
+export interface VendorPaymentBatch {
+  id: string;
+  entity_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  currency: string;
+  payment_date: string;
+  amount_minor: string;
+  wht_minor: string;
+  fee_minor: string;
+  fx_micros: string;
+  reference: string;
+  bank_account_id: string | null;
+  reversal_date: string | null;
+  reversal_reason: string | null;
+  allocations: {
+    bill_id: string;
+    reference: string;
+    amount_minor: string;
+    wht_minor: string;
+  }[];
 }
 export interface Me {
   user: { id: string; name: string; role: string; email: string };
