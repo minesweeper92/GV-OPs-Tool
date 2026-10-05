@@ -1,10 +1,23 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { ErrorBox, Field } from "./components";
 import { NumberSeriesField } from "./NumberSeriesField";
 import { decimal, money, rate, today, type Data, type Line } from "./model";
 import { documentDetails, documentTotals } from "../shared/documents";
 import { DocumentCharges } from "./DocumentCharges";
+import {
+  clearBrowserDraft,
+  invoiceDraft,
+  invoiceDraftKey,
+  readBrowserDraft,
+  writeBrowserDraft,
+} from "./browserDraft";
 
 const blankLine = (): Line => ({
   description: "",
@@ -18,6 +31,7 @@ const normalized = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 function plusDays(value: string, days: number) {
   const date = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
@@ -26,6 +40,7 @@ export function InvoiceComposer({
   id,
   kind,
   data,
+  draftScope,
   entityId,
   create,
   close,
@@ -35,44 +50,71 @@ export function InvoiceComposer({
   id: string;
   kind: "invoice" | "direct-invoice";
   data: Data;
+  draftScope: string;
   entityId: string;
   create: (command: Record<string, unknown>) => Promise<{ id: string }>;
   close: () => void;
   done: (invoiceId: string) => void;
   canManageNumbering: boolean;
 }) {
+  const draftKey = invoiceDraftKey(draftScope, kind, id);
+  const [restored] = useState(() => readBrowserDraft(draftKey, invoiceDraft));
+  const [draftStored, setDraftStored] = useState(!!restored);
   const quote =
     kind === "invoice" ? data.quotes.find((q) => q.id === id) : undefined;
   const deal = data.deals.find((d) => d.id === quote?.deal_id);
-  const [customerId, setCustomerId] = useState(deal?.company_id || "");
-  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerDomain, setNewCustomerDomain] = useState("");
-  const [newCustomerTaxId, setNewCustomerTaxId] = useState("");
-  const [newCustomerAddress, setNewCustomerAddress] = useState("");
+  const [customerId, setCustomerId] = useState(
+    restored?.customerId ?? deal?.company_id ?? "",
+  );
+  const [newCustomerOpen, setNewCustomerOpen] = useState(
+    restored?.newCustomerOpen ?? false,
+  );
+  const [newCustomerName, setNewCustomerName] = useState(
+    restored?.newCustomerName ?? "",
+  );
+  const [newCustomerDomain, setNewCustomerDomain] = useState(
+    restored?.newCustomerDomain ?? "",
+  );
+  const [newCustomerTaxId, setNewCustomerTaxId] = useState(
+    restored?.newCustomerTaxId ?? "",
+  );
+  const [newCustomerAddress, setNewCustomerAddress] = useState(
+    restored?.newCustomerAddress ?? "",
+  );
   const [createdCustomer, setCreatedCustomer] = useState<{
     id: string;
     name: string;
-  } | null>(null);
-  const customerRetry = useRef<{ key: string; payload: string } | null>(null);
+  } | null>(restored?.createdCustomer ?? null);
+  const customerRetry = useRef<{ key: string; payload: string } | null>(
+    restored?.customerRetry ?? null,
+  );
   const customerPicker = useRef<HTMLSelectElement>(null);
   const customerTrigger = useRef<HTMLButtonElement>(null);
   const [customerBusy, setCustomerBusy] = useState(false);
   const [customerError, setCustomerError] = useState("");
   const [issuerId, setIssuerId] = useState(
-    quote?.entity_id || (entityId === "all" ? "" : entityId),
+    restored?.issuerId ??
+      quote?.entity_id ??
+      (entityId === "all" ? "" : entityId),
   );
-  const [seriesId, setSeriesId] = useState("");
-  const [issueDate, setIssueDate] = useState(today());
+  const [seriesId, setSeriesId] = useState(restored?.seriesId ?? "");
+  const [issueDate, setIssueDate] = useState(restored?.issueDate ?? today());
   const customer = data.companies.find((c) => c.id === customerId);
   const [dueDate, setDueDate] = useState(
-    plusDays(today(), customer?.profile.payment_days ?? 30),
+    restored?.dueDate ??
+      plusDays(today(), customer?.profile.payment_days ?? 30),
   );
-  const [currency, setCurrency] = useState(quote?.currency || "PKR");
-  const [fx, setFx] = useState(quote ? rate(quote.fx_micros) : "1");
-  const [lines, setLines] = useState<Line[]>([blankLine()]);
+  const [currency, setCurrency] = useState(
+    restored?.currency ?? quote?.currency ?? "PKR",
+  );
+  const [fx, setFx] = useState(
+    restored?.fx ?? (quote ? rate(quote.fx_micros) : "1"),
+  );
+  const [lines, setLines] = useState<Line[]>(restored?.lines ?? [blankLine()]);
   const [label, setLabel] = useState(
-    quote?.details?.subject || "Accepted quote",
+    restored?.label ??
+      (quote?.details?.subject ||
+        (quote ? "Accepted quote" : "Direct invoice")),
   );
   const billed = quote
     ? data.invoices
@@ -91,24 +133,81 @@ export function InvoiceComposer({
     : 0n;
   const available = remaining - reserved;
   const [amount, setAmount] = useState(
-    quote ? decimal(available > 0n ? available : 0n) : "",
+    restored?.amount ?? (quote ? decimal(available > 0n ? available : 0n) : ""),
   );
   const [billingKind, setBillingKind] = useState<"earned" | "advance">(
-    "earned",
+    restored?.billingKind ?? "earned",
   );
-  const [terms, setTerms] = useState(quote?.terms || "");
-  const [details, setDetails] = useState(() =>
-    documentDetails.parse({
-      ...quote?.details,
-      quote_date: quote?.details?.quote_date || today(),
-    }),
+  const [terms, setTerms] = useState(restored?.terms ?? quote?.terms ?? "");
+  const [details, setDetails] = useState(
+    () =>
+      restored?.details ??
+      documentDetails.parse({
+        ...quote?.details,
+        quote_date: quote?.details?.quote_date || today(),
+      }),
   );
-  const [requestKey] = useState(() => crypto.randomUUID());
+  const [requestKey] = useState(
+    () => restored?.requestKey ?? crypto.randomUUID(),
+  );
   const [busy, setBusy] = useState(false);
   const [itemBusy, setItemBusy] = useState(false);
   const [itemNotice, setItemNotice] = useState("");
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(!!restored);
   const [error, setError] = useState("");
+  const storeDraft = useCallback(
+    () =>
+      writeBrowserDraft(draftKey, {
+        customerId,
+        issuerId,
+        seriesId,
+        issueDate,
+        dueDate,
+        currency,
+        fx,
+        lines,
+        label,
+        amount,
+        billingKind,
+        terms,
+        details,
+        requestKey,
+        newCustomerOpen,
+        newCustomerName,
+        newCustomerDomain,
+        newCustomerTaxId,
+        newCustomerAddress,
+        createdCustomer,
+        customerRetry: customerRetry.current,
+      }),
+    [
+      draftKey,
+      customerId,
+      issuerId,
+      seriesId,
+      issueDate,
+      dueDate,
+      currency,
+      fx,
+      lines,
+      label,
+      amount,
+      billingKind,
+      terms,
+      details,
+      requestKey,
+      newCustomerOpen,
+      newCustomerName,
+      newCustomerDomain,
+      newCustomerTaxId,
+      newCustomerAddress,
+      createdCustomer,
+      customerBusy,
+    ],
+  );
+  useEffect(() => {
+    if (dirty) setDraftStored(storeDraft());
+  }, [dirty, storeDraft]);
   useEffect(() => {
     const prevent = (event: BeforeUnloadEvent) => {
       if (dirty) event.preventDefault();
@@ -201,7 +300,11 @@ export function InvoiceComposer({
     setDirty(true);
   };
   const leave = () => {
-    if (!dirty || window.confirm("Discard your unsaved invoice?")) close();
+    if (busy || customerBusy || itemBusy) return;
+    if (!dirty || window.confirm("Discard your unsaved invoice?")) {
+      clearBrowserDraft(draftKey);
+      close();
+    }
   };
   async function saveItem(line: Line) {
     setItemBusy(true);
@@ -275,8 +378,11 @@ export function InvoiceComposer({
             request_key: requestKey,
             ...(seriesId ? { number_series_id: seriesId } : {}),
           };
+      setDirty(true);
+      setDraftStored(storeDraft());
       const result = await create(command);
       setDirty(false);
+      clearBrowserDraft(draftKey);
       done(result.id);
     } catch (e) {
       setError((e as Error).message);
@@ -306,6 +412,24 @@ export function InvoiceComposer({
         onChange={() => setDirty(true)}
       >
         <div className="quote-composer-scroll">
+          {dirty && (
+            <div className="quote-draft-notice" role="status">
+              <span>
+                {draftStored
+                  ? "Invoice draft saved in this tab for 24 hours. Resume here before issuing; this does not save or post it to your books."
+                  : "Draft recovery is unavailable. Save your invoice before leaving."}
+              </span>
+              {draftStored && (
+                <button
+                  type="button"
+                  disabled={busy || customerBusy || itemBusy}
+                  onClick={close}
+                >
+                  Keep draft & close
+                </button>
+              )}
+            </div>
+          )}
           <section className="quote-composer-section quote-customer-block">
             <h2>Customer and issuing company</h2>
             {quote ? (

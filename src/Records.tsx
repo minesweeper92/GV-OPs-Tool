@@ -8,6 +8,11 @@ import { request } from "./model";
 import type { CrmOpen } from "./Crm";
 import { ProfileSummary } from "./ProfileFields";
 import { DocumentExtras } from "./DocumentFields";
+import {
+  invoiceDraft,
+  invoiceDraftKey,
+  readBrowserDraft,
+} from "./browserDraft";
 const CrmPanel = lazy(() =>
   import("./Crm").then((m) => ({ default: m.CrmPanel })),
 );
@@ -761,6 +766,12 @@ export function DocumentRecord({
       type === "invoice" ? data.invoices.find((i) => i.id === id) : undefined,
     quote = type === "quote" ? data.quotes.find((q) => q.id === id) : undefined,
     doc = invoice || quote;
+  const invoiceRecovery = quote
+    ? readBrowserDraft(
+        invoiceDraftKey(`${me.organization.id}:${me.user.id}`, "invoice", id),
+        invoiceDraft,
+      )
+    : null;
   if (!doc)
     return (
       <Empty title="Document unavailable">
@@ -983,20 +994,23 @@ export function DocumentRecord({
             ) : null}
             {finance(me) &&
             deal?.accepted_quote_id === id &&
-            data.invoices
-              .filter(
-                (i) =>
-                  i.quote_id === id &&
-                  !["Voided", "Cancelled"].includes(i.status),
-              )
-              .reduce((sum, i) => sum + BigInt(i.net_minor), 0n) +
-              BigInt(
-                data.projects.find((p) => p.quote_id === id)?.planned_net ||
-                  "0",
-              ) <
-              BigInt(quote.net_minor) ? (
+            (invoiceRecovery ||
+              data.invoices
+                .filter(
+                  (i) =>
+                    i.quote_id === id &&
+                    !["Voided", "Cancelled"].includes(i.status),
+                )
+                .reduce((sum, i) => sum + BigInt(i.net_minor), 0n) +
+                BigInt(
+                  data.projects.find((p) => p.quote_id === id)?.planned_net ||
+                    "0",
+                ) <
+                BigInt(quote.net_minor)) ? (
               <button onClick={() => edit({ kind: "invoice", id })}>
-                Convert to invoice
+                {invoiceRecovery
+                  ? "Resume invoice draft"
+                  : "Convert to invoice"}
               </button>
             ) : null}
             <button onClick={printQuote}>PDF / Print</button>

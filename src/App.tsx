@@ -2108,10 +2108,11 @@ export default function App() {
               data &&
               me ? (
               <InvoiceComposer
-                key={`${editor.kind}-${editor.id || "new"}`}
+                key={`${me.organization.id}:${me.user.id}:${editor.kind}-${editor.id || "new"}`}
                 id={editor.id || ""}
                 kind={editor.kind}
                 data={data}
+                draftScope={`${me.organization.id}:${me.user.id}`}
                 entityId={entity}
                 create={runWithResult}
                 close={() => setEditor(null)}

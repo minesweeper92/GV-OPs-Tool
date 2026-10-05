@@ -7,6 +7,13 @@ import { today, money, rate, type Data, type Line } from "./model";
 import { documentDetails, documentTotals } from "../shared/documents";
 import { NumberSeriesField } from "./NumberSeriesField";
 import { DocumentCharges } from "./DocumentCharges";
+import {
+  clearBrowserDraft,
+  draftLines,
+  draftDetails,
+  readBrowserDraft,
+  writeBrowserDraft,
+} from "./browserDraft";
 
 const emptyLine = (): Line => ({
   description: "",
@@ -30,35 +37,9 @@ const quoteDraft = z.object({
   shareReference: z.string(),
   numberSeriesId: z.string(),
   savedQuoteId: z.string(),
-  details: documentDetails,
-  lines: z
-    .array(
-      z.object({
-        description: z.string(),
-        quantity: z.string(),
-        price: z.string(),
-        tax: z.string(),
-        unit: z.string().optional(),
-        section: z.string().optional(),
-        discount_type: z.enum(["percent", "amount"]).optional(),
-        discount: z.string().optional(),
-      }),
-    )
-    .max(500),
+  details: draftDetails,
+  lines: draftLines,
 });
-
-function readDraft(key: string) {
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw || raw.length > 256000) return null;
-    const parsed = quoteDraft.safeParse(JSON.parse(raw));
-    if (!parsed.success || Date.now() - parsed.data.savedAt > 86400000)
-      return null;
-    return parsed.data;
-  } catch {
-    return null;
-  }
-}
 
 export function QuoteComposer({
   id,
@@ -80,7 +61,7 @@ export function QuoteComposer({
   done: (quoteId: string) => void;
 }) {
   const draftKey = `gv-quote-draft-v1:${draftScope}:${id || "new"}`;
-  const [restored] = useState(() => readDraft(draftKey));
+  const [restored] = useState(() => readBrowserDraft(draftKey, quoteDraft));
   const hydrated = useRef(false);
   const [draftStored, setDraftStored] = useState(!!restored);
   const initialQuote = data.quotes.find((q) => q.id === id);
@@ -180,9 +161,8 @@ export function QuoteComposer({
       return;
     }
     if (!dirty) return;
-    try {
-      const snapshot = JSON.stringify({
-        savedAt: Date.now(),
+    setDraftStored(
+      writeBrowserDraft(draftKey, {
         companyId,
         dealId,
         optionName,
@@ -194,16 +174,8 @@ export function QuoteComposer({
         shareReference,
         numberSeriesId,
         savedQuoteId,
-      });
-      if (snapshot.length > 256000) {
-        setDraftStored(false);
-        return;
-      }
-      sessionStorage.setItem(draftKey, snapshot);
-      setDraftStored(true);
-    } catch {
-      setDraftStored(false);
-    }
+      }),
+    );
   }, [
     draftKey,
     dirty,
@@ -221,11 +193,7 @@ export function QuoteComposer({
   ]);
 
   const clearDraft = () => {
-    try {
-      sessionStorage.removeItem(draftKey);
-    } catch {
-      /* Storage may be blocked. */
-    }
+    clearBrowserDraft(draftKey);
   };
 
   useEffect(() => {

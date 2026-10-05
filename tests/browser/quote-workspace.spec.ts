@@ -263,6 +263,14 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   await expect(page.getByLabel("Related opportunity")).toHaveValue(
     "Identity refresh",
   );
+  await page.getByLabel("Due date", { exact: true }).fill("2026-11-30");
+  await page.getByRole("button", { name: "Keep draft & close" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Resume invoice draft" }).click();
+  await expect(page.getByLabel("Due date", { exact: true })).toHaveValue(
+    "2026-11-30",
+  );
+  await expect(page.getByLabel("Customer company")).toHaveValue(company);
   await page.getByRole("button", { name: "New prefix" }).click();
   const prefix = `QA${randomUUID().slice(0, 5).toUpperCase()}-`;
   await page.getByLabel("Series name").fill(`QA series ${prefix}`);

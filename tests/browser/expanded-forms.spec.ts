@@ -96,6 +96,30 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   await page
     .getByLabel("Billing address", { exact: true })
     .fill("Invoice snapshot address");
+  await page.getByRole("button", { name: "Keep draft & close" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "New invoice", exact: true }).click();
+  await expect(
+    page.getByLabel("Customer company", { exact: true }),
+  ).toHaveValue(company.id);
+  await expect(
+    page.getByLabel("Issuing legal entity", { exact: true }),
+  ).toHaveValue(entity.id);
+  await expect(page.getByLabel("Description 1", { exact: true })).toHaveValue(
+    "Brand strategy workshop",
+  );
+  await expect(page.locator(".quote-totals-grand")).toContainText(
+    "PKR 2,029.60",
+  );
+  await page.getByText("More customer, billing and PDF details").click();
+  await expect(page.getByLabel("Billing address", { exact: true })).toHaveValue(
+    "Invoice snapshot address",
+  );
+  await page.getByText("Unit, section and discount").click();
+  await expect(page.getByLabel("Unit 1", { exact: true })).toHaveValue("days");
+  await expect(page.getByLabel("Section 1", { exact: true })).toHaveValue(
+    "Strategy",
+  );
   await page
     .getByRole("button", { name: "Save line 1 to item library", exact: true })
     .click();
@@ -120,6 +144,13 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   await expect(page.getByRole("heading", { name: "New invoice" })).toHaveCount(
     0,
   );
+  expect(
+    await page.evaluate(() =>
+      Object.keys(sessionStorage).filter((key) =>
+        key.startsWith("gv-invoice-draft-v1:"),
+      ),
+    ),
+  ).toEqual([]);
   let saved = await (await page.request.get("/api/data")).json();
   const invoice = saved.invoices.find(
     (i: any) => i.details.purchase_order === reference,
@@ -213,6 +244,14 @@ test("Create menu opens invoice and inline customer creation preserves the draft
     .fill("invoice.example.test");
   await page.getByLabel("Tax registration (optional)").fill("NTN-123");
   await page.getByLabel("Billing address (optional)").fill("Office 12, Lahore");
+  await page.getByRole("button", { name: "Keep draft & close" }).click();
+  await page.reload();
+  await page.locator(".global-create > summary").click();
+  await page.getByRole("button", { name: "New invoice", exact: true }).click();
+  await expect(page.getByLabel("New customer company name")).toHaveValue(name);
+  await expect(page.getByLabel("Billing address (optional)")).toHaveValue(
+    "Office 12, Lahore",
+  );
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
