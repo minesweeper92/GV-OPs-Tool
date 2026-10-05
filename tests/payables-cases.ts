@@ -90,6 +90,205 @@ export async function verifyPayables(t: TestContext, db: Database) {
     service_entity_id: null,
   });
   const date = "2026-09-20";
+  await t.test(
+    "purchase orders reserve partial bills, retry safely and never post directly",
+    async () => {
+      const command = {
+        action: "purchase-order.create",
+        entity_id: entity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        order_date: date,
+        delivery_date: null,
+        currency: "PKR",
+        fx: "1",
+        lines: [
+          {
+            description: "Ordered production",
+            quantity: "10",
+            price: "100",
+            tax: "18",
+            account_code: "5200",
+          },
+        ],
+        tax_treatment: "expense",
+        reference: "PO reference",
+        notes: "",
+        terms: "",
+        delivery_address: "",
+        request_key: uuid(),
+      };
+      await rep.command(command, 403);
+      const p = await accountant.command(command);
+      await accountant.command(
+        { ...command, reference: "Changed retry payload" },
+        409,
+      );
+      assert.equal((await rep.get()).purchaseOrders.length, 0);
+      await inTenant(db, other, async (tx) =>
+        assert.equal(
+          (await tx.query("SELECT * FROM purchase_orders")).rows.length,
+          0,
+        ),
+      );
+      const series = await accountant.command({
+        action: "number-series.create",
+        entity_id: entity,
+        kind: "purchase-order",
+        name: "Production orders",
+        prefix: "PROD-PO-",
+        next_number: 8,
+        padding: 4,
+      });
+      const numbered = await accountant.command({
+        ...command,
+        number_series_id: series.id,
+        request_key: uuid(),
+      });
+      assert.equal(
+        (await accountant.get()).purchaseOrders.find(
+          (r: any) => r.id === numbered.id,
+        ).number,
+        "PROD-PO-0008",
+      );
+      assert.equal((await accountant.command(command)).id, p.id);
+      const order = async () =>
+        (await accountant.get()).purchaseOrders.find((r: any) => r.id === p.id);
+      assert.equal((await order()).number, "AP-PO-00001");
+      await inTenant(db, tenant, async (tx) =>
+        assert.equal(
+          (await tx.query("SELECT * FROM journals WHERE source_id=$1", [p.id]))
+            .rows.length,
+          0,
+        ),
+      );
+      await accountant.command({
+        action: "purchase-order.status",
+        id: p.id,
+        version: 1,
+        status: "Issued",
+        reason: "Vendor order approved",
+      });
+      await assert.rejects(
+        inTenant(db, tenant, (tx) =>
+          tx.query(
+            "UPDATE purchase_orders SET notes='Change issued details',version=version+1 WHERE id=$1",
+            [p.id],
+          ),
+        ),
+      );
+      await accountant.command(
+        {
+          ...command,
+          action: "purchase-order.edit",
+          id: p.id,
+          version: 2,
+          entity_id: undefined,
+          request_key: undefined,
+        },
+        409,
+      );
+      const conversion = {
+        action: "purchase-order.bill",
+        id: p.id,
+        version: 2,
+        reference: `PO-B-${uuid()}`,
+        bill_date: date,
+        due_date: "2026-10-20",
+        fx: "1",
+        allocations: [{ index: 0, quantity: "4" }],
+        acknowledge_duplicate: false,
+        request_key: uuid(),
+      };
+      const first = await accountant.command(conversion);
+      assert.equal((await accountant.command(conversion)).id, first.id);
+      assert.equal((await order()).allocations.length, 1);
+      const created = (await accountant.get()).bills.find(
+        (r: any) => r.id === first.id,
+      );
+      assert.equal(created.purchase_order_id, p.id);
+      assert.equal(created.total_minor, "47200");
+      assert.equal(created.status, "Draft");
+      await assert.rejects(
+        inTenant(db, tenant, (tx) =>
+          tx.query(
+            "UPDATE purchase_order_bill_lines SET quantity_millis=1 WHERE bill_id=$1",
+            [first.id],
+          ),
+        ),
+      );
+      await accountant.command(
+        {
+          ...conversion,
+          reference: `Over-${uuid()}`,
+          allocations: [{ index: 0, quantity: "7" }],
+          request_key: uuid(),
+        },
+        409,
+      );
+      await accountant.command(
+        {
+          action: "purchase-order.status",
+          id: p.id,
+          version: 2,
+          status: "Cancelled",
+          reason: "Cancel",
+        },
+        409,
+      );
+      await accountant.command({
+        action: "bill.void",
+        id: first.id,
+        version: 1,
+        reason: "Vendor corrected quantities",
+        date,
+      });
+      const full = await accountant.command({
+        ...conversion,
+        reference: `Full-${uuid()}`,
+        allocations: [{ index: 0, quantity: "10" }],
+        request_key: uuid(),
+      });
+      await accountant.command({
+        action: "bill.submit",
+        id: full.id,
+        version: 1,
+      });
+      await owner.command({ action: "bill.approve", id: full.id, version: 2 });
+      assert.equal(
+        (await order()).allocations.filter((a: any) => a.status !== "Voided")
+          .length,
+        1,
+      );
+      await accountant.command(
+        {
+          ...conversion,
+          reference: `Extra-${uuid()}`,
+          allocations: [{ index: 0, quantity: "1" }],
+          request_key: uuid(),
+        },
+        409,
+      );
+      await accountant.command({
+        action: "purchase-order.status",
+        id: p.id,
+        version: 2,
+        status: "Closed",
+        reason: "Complete",
+      });
+      await accountant.command(
+        { ...conversion, reference: `Closed-${uuid()}`, request_key: uuid() },
+        409,
+      );
+      await inTenant(db, tenant, async (tx) =>
+        assert.equal(
+          (await tx.query("SELECT * FROM journals WHERE source_id=$1", [p.id]))
+            .rows.length,
+          0,
+        ),
+      );
+    },
+  );
   function draft(overrides: Record<string, unknown> = {}) {
     return {
       action: "bill.create",

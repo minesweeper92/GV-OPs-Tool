@@ -5,6 +5,7 @@ import { billingCommands } from "./billing.ts";
 import { recurringCommands } from "./recurring.ts";
 import { crmCommands } from "./crm.ts";
 import { profileCommands } from "./profiles.ts";
+import { purchaseOrderCommands } from "./purchase-orders.ts";
 import {
   documentCommands,
   documentDetails,
@@ -39,6 +40,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   ...crmCommands,
   ...profileCommands,
   ...documentCommands,
+  ...purchaseOrderCommands,
   z.strictObject({
     action: z.literal("bill.create"),
     entity_id: id,
@@ -212,7 +214,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("number-series.create"),
     entity_id: id,
-    kind: z.enum(["quote", "invoice"]),
+    kind: z.enum(["quote", "invoice", "purchase-order"]),
     name: text,
     prefix: z
       .string()

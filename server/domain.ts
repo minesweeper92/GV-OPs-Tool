@@ -269,7 +269,7 @@ export async function snapshot(tx: SQL, ctx: Context) {
   ).rows;
   const numberSeries = [...storedSeries];
   for (const e of entities)
-    for (const kind of ["quote", "invoice"] as const)
+    for (const kind of ["quote", "invoice", "purchase-order"] as const)
       if (
         !storedSeries.some(
           (s) => s.entity_id === e.id && s.kind === kind && s.is_default,
@@ -280,9 +280,17 @@ export async function snapshot(tx: SQL, ctx: Context) {
           entity_id: e.id,
           kind,
           name: "Standard",
-          prefix: kind === "quote" ? "QT-" : `${e.code}-INV-`,
+          prefix:
+            kind === "quote"
+              ? "QT-"
+              : `${e.code}-${kind === "purchase-order" ? "PO" : "INV"}-`,
           padding: kind === "quote" ? 6 : 5,
-          next_number: kind === "quote" ? e.next_quote_number : e.next_invoice,
+          next_number:
+            kind === "quote"
+              ? e.next_quote_number
+              : kind === "purchase-order"
+                ? e.next_purchase_order
+                : e.next_invoice,
           is_default: true,
         });
   const payments = (

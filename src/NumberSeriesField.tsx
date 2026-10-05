@@ -15,7 +15,7 @@ export function NumberSeriesField({
 }: {
   data: Data;
   entityId: string;
-  kind: "quote" | "invoice";
+  kind: "quote" | "invoice" | "purchase-order";
   selectedId: string;
   onSelect: (id: string) => void;
   create: (command: Record<string, unknown>) => Promise<{ id: string }>;
@@ -65,7 +65,7 @@ export function NumberSeriesField({
   return (
     <div className="number-series-field">
       <Field
-        label={`${kind === "quote" ? "Quote" : "Invoice"} number`}
+        label={`${kind === "quote" ? "Quote" : kind === "purchase-order" ? "Purchase order" : "Invoice"} number`}
         hint={
           existingNumber
             ? "This saved number cannot be changed."

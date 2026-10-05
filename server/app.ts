@@ -9,6 +9,10 @@ import { commandSchema } from "../shared/commands.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
 import { executePayable, payableSnapshot } from "./payables.ts";
+import {
+  executePurchaseOrder,
+  purchaseOrderSnapshot,
+} from "./purchase-orders.ts";
 import { reportFilter } from "../shared/reporting.ts";
 import { financialReports, accountDetail } from "./financial-reports.ts";
 import { partyStatement } from "./statements.ts";
@@ -423,6 +427,7 @@ export function createApp(
       async (tx) => ({
         ...(await snapshot(tx, ctx)),
         ...(await payableSnapshot(tx, ctx)),
+        ...(await purchaseOrderSnapshot(tx, ctx)),
         bankAccounts: await bankAccounts(tx, ctx),
         ...(await projectSnapshot(tx, ctx)),
         ...(await creditSnapshot(tx, ctx)),
@@ -579,10 +584,12 @@ export function createApp(
                             ? executeProject(tx, ctx, c)
                             : c.action.startsWith("bank.")
                               ? executeBank(tx, ctx, c)
-                              : c.action.startsWith("bill.") ||
-                                  c.action.startsWith("vendor-payment.")
-                                ? executePayable(tx, ctx, c)
-                                : execute(tx, ctx, c),
+                              : c.action.startsWith("purchase-order.")
+                                ? executePurchaseOrder(tx, ctx, c)
+                                : c.action.startsWith("bill.") ||
+                                    c.action.startsWith("vendor-payment.")
+                                  ? executePayable(tx, ctx, c)
+                                  : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

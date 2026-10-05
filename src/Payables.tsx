@@ -264,14 +264,28 @@ export function Payables({
           title={b.reference}
           subtitle={`${b.vendor_name} · ${b.entity_name}`}
         />
+        {b.purchase_order_id && b.status === "Draft" && (
+          <p>
+            This bill retains its purchase-order quantities. To correct them,
+            void this draft and convert the order again; the reserved quantities
+            will be released.
+          </p>
+        )}
         <div className="toolbar">
+          {b.purchase_order_id && (
+            <a href={`#purchase-orders/${b.purchase_order_id}`}>
+              View purchase order
+            </a>
+          )}
           <Badge>{status(b)}</Badge>
           <div className="row-actions">
             {b.status === "Draft" ? (
               <>
-                <button onClick={() => setEditor({ kind: "edit", bill: b })}>
-                  Edit draft
-                </button>
+                {!b.purchase_order_id && (
+                  <button onClick={() => setEditor({ kind: "edit", bill: b })}>
+                    Edit draft
+                  </button>
+                )}
                 <button
                   className="primary"
                   disabled={busy}

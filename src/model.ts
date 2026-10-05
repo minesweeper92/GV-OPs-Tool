@@ -240,7 +240,7 @@ export interface Data {
   numberSeries: {
     id: string | null;
     entity_id: string;
-    kind: "quote" | "invoice";
+    kind: "quote" | "invoice" | "purchase-order";
     name: string;
     prefix: string;
     padding: number;
@@ -273,6 +273,7 @@ export interface Data {
   recognitions: import("../shared/projects").Recognition[];
   bankAccounts: import("../shared/banking").BankAccount[];
   bills: Bill[];
+  purchaseOrders: import("../shared/purchase-orders").PurchaseOrder[];
   vendorPayments: VendorPayment[];
   entities: Entity[];
   companies: Company[];
@@ -303,6 +304,7 @@ export interface Data {
   events: Event[];
 }
 export interface Bill {
+  purchase_order_id: string | null;
   id: string;
   entity_id: string;
   vendor_id: string;

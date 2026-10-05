@@ -102,6 +102,11 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     id = uuid();
   if (c.action === "bill.create" || c.action === "bill.edit") {
     const old = c.action === "bill.edit" ? await get(tx, "bills", c.id) : null;
+    if (old?.purchase_order_id)
+      throw new Problem(
+        409,
+        "Purchase-order bill quantities are fixed. Void the draft and convert again to change them.",
+      );
     if (old && (old.status !== "Draft" || old.version !== c.version))
       throw new Problem(
         409,
@@ -209,7 +214,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       );
     } else
       await tx.query(
-        "INSERT INTO bills(id,tenant_id,entity_id,vendor_id,vendor_name,entity_name,deal_id,reference,bill_date,due_date,currency,fx_micros,lines,tax_treatment,net_minor,tax_minor,total_minor,base_minor,notes,last_activity_on,created_by,request_key,request_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$9,$20,$21,$22)",
+        "INSERT INTO bills(id,tenant_id,entity_id,vendor_id,vendor_name,entity_name,deal_id,reference,bill_date,due_date,currency,fx_micros,lines,tax_treatment,net_minor,tax_minor,total_minor,base_minor,notes,last_activity_on,created_by,request_key,request_payload,purchase_order_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$9,$20,$21,$22,$23)",
         [
           id,
           t,
@@ -218,6 +223,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
           ctx.userId,
           c.request_key,
           JSON.stringify(c),
+          c.purchase_order_id || null,
         ],
       );
     await audit(tx, ctx, old?.id || id, c.action, {

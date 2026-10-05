@@ -39,6 +39,9 @@ const Editor = lazy(() =>
 );
 import { Organizations, Team, Onboarding } from "./Access";
 import { Payables } from "./Payables";
+const PurchaseOrders = lazy(() =>
+  import("./PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })),
+);
 import { FinancialReports } from "./FinancialReports";
 const PartyStatements = lazy(() =>
   import("./PartyStatements").then((m) => ({ default: m.PartyStatements })),
@@ -121,6 +124,7 @@ const groups = [
     label: "Purchases",
     items: [
       ["vendors", "Vendors", Building2],
+      ["purchase-orders", "Purchase orders", FileText],
       ["bills", "Bills", FileText],
       ["vendor-payments", "Payments made", Wallet],
       ["payables", "Payable balances", BookOpen],
@@ -500,6 +504,18 @@ export default function App() {
         <ErrorBox
           error={dataQuery.error?.message || "Unable to load records."}
         />
+      );
+    if (view === "purchase-orders")
+      return canFinance ? (
+        <PurchaseOrders
+          key={`${id || ""}/${entity}`}
+          data={data}
+          me={me!}
+          entity={entity}
+          id={id}
+        />
+      ) : (
+        denied()
       );
     if (
       ["vendors", "bills", "bill", "vendor-payments", "payables"].includes(view)

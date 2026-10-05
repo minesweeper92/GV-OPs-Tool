@@ -6,7 +6,7 @@ export async function allocateNumber(
   tx: SQL,
   tenantId: string,
   entityId: string,
-  kind: "quote" | "invoice",
+  kind: "quote" | "invoice" | "purchase-order",
   seriesId?: string | null,
 ) {
   // The entity row serializes lazy default-series creation and allocations.
@@ -15,10 +15,17 @@ export async function allocateNumber(
   ).rows[0];
   if (!entity || entity.tenant_id !== tenantId)
     throw new Problem(404, "Legal entity unavailable.");
-  const prefix = kind === "quote" ? "QT-" : `${entity.code}-INV-`;
+  const prefix =
+    kind === "quote"
+      ? "QT-"
+      : `${entity.code}-${kind === "purchase-order" ? "PO" : "INV"}-`;
   const padding = kind === "quote" ? 6 : 5;
   const legacyNext =
-    kind === "quote" ? entity.next_quote_number : entity.next_invoice;
+    kind === "quote"
+      ? entity.next_quote_number
+      : kind === "purchase-order"
+        ? entity.next_purchase_order
+        : entity.next_invoice;
   await tx.query(
     `INSERT INTO number_series(id,tenant_id,entity_id,kind,name,prefix,padding,next_number,is_default)
      VALUES($1,$2,$3,$4,'Standard',$5,$6,$7,true)
@@ -40,7 +47,12 @@ export async function allocateNumber(
       "Choose a valid number series for this legal entity.",
     );
   if (row.is_default) {
-    const counter = kind === "quote" ? "next_quote_number" : "next_invoice";
+    const counter =
+      kind === "quote"
+        ? "next_quote_number"
+        : kind === "purchase-order"
+          ? "next_purchase_order"
+          : "next_invoice";
     await tx.query(`UPDATE entities SET ${counter}=$2 WHERE id=$1`, [
       entityId,
       String(BigInt(row.allocated) + 1n),
@@ -63,14 +75,22 @@ export async function createNumberSeries(
     await tx.query("SELECT id,code FROM entities WHERE id=$1", [c.entity_id])
   ).rows[0];
   if (!entity) throw new Problem(404, "Legal entity unavailable.");
-  const standardPrefix = c.kind === "quote" ? "QT-" : `${entity.code}-INV-`;
+  const standardPrefix =
+    c.kind === "quote"
+      ? "QT-"
+      : `${entity.code}-${c.kind === "purchase-order" ? "PO" : "INV"}-`;
   if (c.prefix === standardPrefix)
     throw new Problem(
       409,
       "That prefix belongs to the standard series. Select Standard instead.",
     );
   const candidate = `${c.prefix}${String(c.next_number).padStart(c.padding, "0")}`;
-  const table = c.kind === "quote" ? "quotes" : "invoices";
+  const table =
+    c.kind === "quote"
+      ? "quotes"
+      : c.kind === "purchase-order"
+        ? "purchase_orders"
+        : "invoices";
   const collision = (
     await tx.query(`SELECT id FROM ${table} WHERE entity_id=$1 AND number=$2`, [
       c.entity_id,
