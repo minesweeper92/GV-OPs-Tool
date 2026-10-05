@@ -70,8 +70,6 @@ export async function journalScheduleSnapshot(tx: SQL, ctx: Context) {
   };
 }
 async function generate(tx: SQL, ctx: Context, profile: Row, now: Date) {
-  if (profile.status !== "Active")
-    throw new Problem(409, "Resume this schedule before generating entries.");
   const membership = (
     await tx.query(
       "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2 AND active",
@@ -83,6 +81,10 @@ async function generate(tx: SQL, ctx: Context, profile: Row, now: Date) {
       403,
       "Active finance access is required to generate journal drafts.",
     );
+  // A worker may have completed the schedule after the UI loaded its Active state.
+  if (profile.status === "Completed") return { id: profile.id, generated: 0 };
+  if (profile.status !== "Active")
+    throw new Problem(409, "Resume this schedule before generating entries.");
   const today = localToday(profile.timezone, now);
   let next = Number(profile.next_index),
     count = 0,

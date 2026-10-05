@@ -459,6 +459,45 @@ export async function verifyJournalSchedules(t: TestContext, db: Database) {
       );
     },
   );
+  await t.test(
+    "manual generation after worker completion is a no-op, not a paused warning",
+    async () => {
+      const made = await owner({
+        ...create,
+        name: "Completed retry",
+        occurrences: 1,
+        request_key: uuid(),
+      });
+      await runJournalSchedulesDue(db, today);
+      const before = await owner();
+      const schedule = before.journalSchedules.find(
+        (p: { id: string }) => p.id === made.id,
+      );
+      assert.equal(schedule.status, "Completed");
+      const occurrences = before.journalOccurrences.filter(
+        (o: { schedule_id: string }) => o.schedule_id === made.id,
+      );
+      assert.equal(occurrences.length, 1);
+      const retry = await owner({
+        action: "journal-schedule.run",
+        id: made.id,
+      });
+      assert.equal(retry.generated, 0);
+      await seller({ action: "journal-schedule.run", id: made.id }, 403);
+      const after = await owner();
+      assert.equal(
+        after.journalSchedules.find((p: { id: string }) => p.id === made.id)
+          .version,
+        schedule.version,
+      );
+      assert.deepEqual(
+        after.journalOccurrences.filter(
+          (o: { schedule_id: string }) => o.schedule_id === made.id,
+        ),
+        occurrences,
+      );
+    },
+  );
   await t.test("revoked creator cannot generate drafts", async () => {
     const made = await owner({
       ...create,
