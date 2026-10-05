@@ -26,6 +26,12 @@ const labels: Record<string, string> = {
   "bill-void": "Bill void",
   "vendor-payment": "Payment made (including withholding)",
   "vendor-payment-reversal": "Payment reversed",
+  "vendor-credit": "Vendor credit",
+  "vendor-credit-reversal": "Vendor credit reversed",
+  "vendor-credit-application": "Vendor credit applied",
+  "vendor-credit-application-reversal": "Vendor application reversed",
+  "vendor-refund": "Refund received",
+  "vendor-refund-reversal": "Vendor refund reversed",
 };
 function exportStatement(r: PartyStatement) {
   const rows: string[][] = [
@@ -261,20 +267,20 @@ export function PartyStatements({
                     </span>
                     <strong>{money(g.outstanding, g.currency)}</strong>
                   </p>
-                  {kind === "customer" ? (
-                    <p>
-                      <span>Available credits</span>
-                      <strong>{money(g.availableCredit, g.currency)}</strong>
-                    </p>
-                  ) : null}
-                </div>
-                {kind === "customer" ? (
-                  <p className="muted">
-                    Net balance is unpaid invoices less available credits.
-                    Credits are not automatically applied. A negative balance is
-                    credit in the customer's favour.
+                  <p>
+                    <span>Available credits</span>
+                    <strong>{money(g.availableCredit, g.currency)}</strong>
                   </p>
-                ) : null}
+                </div>
+                <p className="muted">
+                  Net balance is unpaid{" "}
+                  {kind === "customer" ? "invoices" : "bills"} less available
+                  credits. Credits are not automatically applied. A negative
+                  balance is
+                  {kind === "customer"
+                    ? "credit in the customer's favour."
+                    : "credit owed to you by the vendor."}
+                </p>
                 {mode === "transactions" ? (
                   <Table
                     headers={[

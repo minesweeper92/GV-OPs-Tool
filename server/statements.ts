@@ -36,7 +36,13 @@ const vendorEffects = `
  UNION ALL SELECT 'vendor-payment',p.id,b.vendor_id,b.currency,coalesce(nullif(p.reference,''),b.reference),-(p.amount_minor+p.wht_minor),0,'bill',b.id
  FROM vendor_payments p JOIN bills b ON b.id=p.bill_id
  UNION ALL SELECT 'vendor-payment-reversal',r.id,b.vendor_id,b.currency,b.reference,p.amount_minor+p.wht_minor,0,'bill',b.id
- FROM vendor_payment_reversals r JOIN vendor_payments p ON p.id=r.payment_id JOIN bills b ON b.id=p.bill_id`;
+ FROM vendor_payment_reversals r JOIN vendor_payments p ON p.id=r.payment_id JOIN bills b ON b.id=p.bill_id
+ UNION ALL SELECT 'vendor-credit',v.id,b.vendor_id,b.currency,v.number,-v.total_minor,v.total_minor,'vendor-credits',v.id FROM vendor_credits v JOIN bills b ON b.id=v.bill_id
+ UNION ALL SELECT 'vendor-credit-reversal',r.id,b.vendor_id,b.currency,v.number,v.total_minor,-v.total_minor,'vendor-credits',v.id FROM vendor_credit_reversals r JOIN vendor_credits v ON v.id=r.credit_id JOIN bills b ON b.id=v.bill_id
+ UNION ALL SELECT 'vendor-credit-application',a.id,b.vendor_id,b.currency,v.number,0,-a.amount_minor,'bill',b.id FROM vendor_credit_applications a JOIN vendor_credits v ON v.id=a.credit_id JOIN bills b ON b.id=a.bill_id
+ UNION ALL SELECT 'vendor-credit-application-reversal',r.id,b.vendor_id,b.currency,v.number,0,a.amount_minor,'bill',b.id FROM vendor_application_reversals r JOIN vendor_credit_applications a ON a.id=r.application_id JOIN vendor_credits v ON v.id=a.credit_id JOIN bills b ON b.id=a.bill_id
+ UNION ALL SELECT 'vendor-refund',f.id,b.vendor_id,b.currency,f.reference,f.amount_minor,-f.amount_minor,'vendor-credits',v.id FROM vendor_refunds f JOIN vendor_credits v ON v.id=f.credit_id JOIN bills b ON b.id=v.bill_id
+ UNION ALL SELECT 'vendor-refund-reversal',r.id,b.vendor_id,b.currency,v.number,-f.amount_minor,f.amount_minor,'vendor-credits',v.id FROM vendor_refund_reversals r JOIN vendor_refunds f ON f.id=r.refund_id JOIN vendor_credits v ON v.id=f.credit_id JOIN bills b ON b.id=v.bill_id`;
 
 export async function partyStatement(
   tx: SQL,
@@ -71,7 +77,7 @@ export async function partyStatement(
     FROM effects ef JOIN journals j ON j.source_type=ef.type AND j.source_id=ef.id
     JOIN entities e ON e.id=j.entity_id
     LEFT JOIN (SELECT journal_id,sum(debit_minor-credit_minor) AS delta FROM journal_lines
-      WHERE account_code ${customer ? "IN ('1100','2400')" : "='2000'"} GROUP BY journal_id) l ON l.journal_id=j.id
+      WHERE account_code ${customer ? "IN ('1100','2400')" : "IN ('2000','1350')"} GROUP BY journal_id) l ON l.journal_id=j.id
     WHERE ef.party_id=$1 AND j.entity_id=ANY($2::uuid[]) AND j.posted_on<=$3
     ORDER BY j.posted_on,j.created_at,j.id`,
       [filter.companyId, ids, filter.to],

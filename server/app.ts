@@ -20,6 +20,7 @@ import { statementFilter } from "../shared/statements.ts";
 import { bankAccounts, bankDetail, executeBank } from "./banking.ts";
 import { projectSnapshot, executeProject } from "./projects.ts";
 import { creditSnapshot, executeCredit } from "./credits.ts";
+import { vendorCreditSnapshot, executeVendorCredit } from "./vendor-credits.ts";
 import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 import { crmSnapshot, executeCrm } from "./crm.ts";
 import { executeProfile } from "./profiles.ts";
@@ -431,6 +432,7 @@ export function createApp(
         bankAccounts: await bankAccounts(tx, ctx),
         ...(await projectSnapshot(tx, ctx)),
         ...(await creditSnapshot(tx, ctx)),
+        ...(await vendorCreditSnapshot(tx, ctx)),
         ...(await recurringSnapshot(tx, ctx)),
         ...(await journalScheduleSnapshot(tx, ctx)),
         ...(await crmSnapshot(tx, ctx)),
@@ -577,19 +579,22 @@ export function createApp(
                         ? executeRecurring(tx, ctx, c)
                         : c.action.startsWith("credit.")
                           ? executeCredit(tx, ctx, c)
-                          : c.action.startsWith("project.") ||
-                              ["invoice.cancel", "invoice.recognise"].includes(
-                                c.action,
-                              )
-                            ? executeProject(tx, ctx, c)
-                            : c.action.startsWith("bank.")
-                              ? executeBank(tx, ctx, c)
-                              : c.action.startsWith("purchase-order.")
-                                ? executePurchaseOrder(tx, ctx, c)
-                                : c.action.startsWith("bill.") ||
-                                    c.action.startsWith("vendor-payment.")
-                                  ? executePayable(tx, ctx, c)
-                                  : execute(tx, ctx, c),
+                          : c.action.startsWith("vendor-credit.")
+                            ? executeVendorCredit(tx, ctx, c)
+                            : c.action.startsWith("project.") ||
+                                [
+                                  "invoice.cancel",
+                                  "invoice.recognise",
+                                ].includes(c.action)
+                              ? executeProject(tx, ctx, c)
+                              : c.action.startsWith("bank.")
+                                ? executeBank(tx, ctx, c)
+                                : c.action.startsWith("purchase-order.")
+                                  ? executePurchaseOrder(tx, ctx, c)
+                                  : c.action.startsWith("bill.") ||
+                                      c.action.startsWith("vendor-payment.")
+                                    ? executePayable(tx, ctx, c)
+                                    : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

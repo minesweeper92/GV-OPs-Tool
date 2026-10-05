@@ -61,8 +61,10 @@ const accounts = [
   ["1400", "Prepayments"],
   ["1500", "Equipment"],
 ] as const;
-const balance = (b: Bill) => BigInt(b.total_minor) - BigInt(b.paid_minor);
+const balance = (b: Bill) =>
+  BigInt(b.total_minor) - BigInt(b.paid_minor) - BigInt(b.credited_minor);
 function status(b: Bill) {
+  if (b.status === "Paid" && BigInt(b.credited_minor) > 0n) return "Settled";
   return b.status === "Open"
     ? b.due_date < today()
       ? "Overdue"
@@ -139,13 +141,21 @@ export function Payables({
     data.entities.find((e) => e.id === id)?.code || "";
   const open = bills.filter((b) => b.status === "Open");
   const totalOpen = open.reduce(
-      (n, b) => n + BigInt(b.base_minor) - BigInt(b.paid_base_minor),
+      (n, b) =>
+        n +
+        BigInt(b.base_minor) -
+        BigInt(b.paid_base_minor) -
+        BigInt(b.credited_base_minor),
       0n,
     ),
     overdue = open
       .filter((b) => b.due_date < today())
       .reduce(
-        (n, b) => n + BigInt(b.base_minor) - BigInt(b.paid_base_minor),
+        (n, b) =>
+          n +
+          BigInt(b.base_minor) -
+          BigInt(b.paid_base_minor) -
+          BigInt(b.credited_base_minor),
         0n,
       );
   function billTable(rows: Bill[]) {
@@ -264,6 +274,23 @@ export function Payables({
           title={b.reference}
           subtitle={`${b.vendor_name} · ${b.entity_name}`}
         />
+        {data.vendorCredits
+          .filter(
+            (v) =>
+              v.bill_id === b.id ||
+              data.vendorCreditApplications.some(
+                (a) => a.bill_id === b.id && a.credit_id === v.id,
+              ),
+          )
+          .map((v) => (
+            <p key={v.id}>
+              Vendor credit: <a href={`#vendor-credits/${v.id}`}>{v.number}</a>{" "}
+              ·{" "}
+              {v.reversal_date
+                ? "Reversed"
+                : `${money(v.available, v.currency)} available`}
+            </p>
+          ))}
         {b.purchase_order_id && b.status === "Draft" && (
           <p>
             This bill retains its purchase-order quantities. To correct them,
@@ -279,6 +306,9 @@ export function Payables({
           )}
           <Badge>{status(b)}</Badge>
           <div className="row-actions">
+            {["Open", "Paid"].includes(b.status) && (
+              <a href={`#vendor-credits/${b.id}`}>Record vendor credit</a>
+            )}
             {b.status === "Draft" ? (
               <>
                 {!b.purchase_order_id && (
@@ -320,6 +350,10 @@ export function Payables({
             {b.status !== "Voided" &&
             b.status !== "Paid" &&
             BigInt(b.paid_minor) === 0n &&
+            BigInt(b.credited_minor) === 0n &&
+            !data.vendorCredits.some(
+              (v) => v.bill_id === b.id && !v.reversal_date,
+            ) &&
             (b.status !== "Open" || me.user.role === "admin") ? (
               <button onClick={() => setEditor({ kind: "void", bill: b })}>
                 Void bill
@@ -336,6 +370,10 @@ export function Payables({
             <div>
               <span>Settled (cash + withholding)</span>
               <strong>{money(b.paid_minor, b.currency)}</strong>
+            </div>
+            <div>
+              <span>Credits applied</span>
+              <strong>{money(b.credited_minor, b.currency)}</strong>
             </div>
             <div>
               <span>Outstanding</span>
@@ -474,7 +512,10 @@ export function Payables({
                   String(
                     list.reduce(
                       (n, b) =>
-                        n + BigInt(b.base_minor) - BigInt(b.paid_base_minor),
+                        n +
+                        BigInt(b.base_minor) -
+                        BigInt(b.paid_base_minor) -
+                        BigInt(b.credited_base_minor),
                       0n,
                     ),
                   ),

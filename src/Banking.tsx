@@ -16,13 +16,21 @@ import {
   type BankDetail,
 } from "../shared/banking";
 
-export function BankSelect({ data, entity }: { data: Data; entity: string }) {
+export function BankSelect({
+  data,
+  entity,
+  defaultValue = "",
+}: {
+  data: Data;
+  entity: string;
+  defaultValue?: string;
+}) {
   return (
     <Field
       label="Bank account"
       hint="PKR ledger. Foreign payments use the recorded FX rate. Unassigned cash cannot be reconciled to a named bank."
     >
-      <select name="bank_account_id" key={entity} defaultValue="">
+      <select name="bank_account_id" key={entity} defaultValue={defaultValue}>
         <option value="">Unassigned bank and cash (1000)</option>
         {(data.bankAccounts || [])
           .filter((b) => b.entity_id === entity)

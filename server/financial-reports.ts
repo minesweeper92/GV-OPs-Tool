@@ -51,7 +51,9 @@ export async function ageing(
     UNION ALL
     SELECT p.bill_id,j.id,-(p.amount_minor+p.wht_minor) FROM vendor_payments p JOIN journals j ON j.source_id=p.id AND j.source_type='vendor-payment'
     UNION ALL
-    SELECT p.bill_id,j.id,p.amount_minor+p.wht_minor FROM vendor_payments p JOIN vendor_payment_reversals r ON r.payment_id=p.id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'`;
+    SELECT p.bill_id,j.id,p.amount_minor+p.wht_minor FROM vendor_payments p JOIN vendor_payment_reversals r ON r.payment_id=p.id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'
+    UNION ALL SELECT a.bill_id,j.id,-a.amount_minor FROM vendor_credit_applications a JOIN journals j ON j.source_id=a.id AND j.source_type='vendor-credit-application'
+    UNION ALL SELECT a.bill_id,j.id,a.amount_minor FROM vendor_application_reversals r JOIN vendor_credit_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-credit-application-reversal'`;
   const documents =
     kind === "ar"
       ? `SELECT i.id,i.entity_id,i.company_id AS party_id,i.customer_name AS party,i.number,i.issue_date AS date,i.due_date,i.currency FROM invoices i`

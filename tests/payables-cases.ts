@@ -5,6 +5,7 @@ import type { Database } from "../server/db.ts";
 import { inTenant } from "../server/db.ts";
 import { seedAccounts } from "../server/domain.ts";
 import { createApp } from "../server/app.ts";
+import { partyStatement } from "../server/statements.ts";
 
 export async function verifyPayables(t: TestContext, db: Database) {
   const tenant = uuid(),
@@ -337,7 +338,305 @@ export async function verifyPayables(t: TestContext, db: Database) {
     await advance(result.id, "approve");
     return result.id;
   }
+  await t.test(
+    "vendor credits apply, refund and reverse with exact FX, historical statements and payable ageing",
+    async () => {
+      const source = await posted({ currency: "USD", fx: "280" }),
+        target = await posted({ currency: "USD", fx: "300" });
+      const issue = {
+        action: "vendor-credit.create",
+        bill_id: source,
+        date: "2026-09-21",
+        reference: `VC-${uuid()}`,
+        reason: "Vendor price correction",
+        lines: [{ index: 0, amount: "500" }],
+        request_key: uuid(),
+      };
+      await rep.command(issue, 403);
+      const credit = await accountant.command(issue);
+      assert.equal((await rep.get()).vendorCredits.length, 0);
+      await accountant.command(
+        {
+          ...issue,
+          request_key: uuid(),
+          reference: `Too much-${uuid()}`,
+          lines: [{ index: 0, amount: "1001" }],
+        },
+        409,
+      );
+      await accountant.command({ ...issue, request_key: uuid() }, 409);
+      const wrongCurrency = await posted();
+      await accountant.command(
+        {
+          action: "vendor-credit.apply",
+          credit_id: credit.id,
+          bill_id: wrongCurrency,
+          date: "2026-09-21",
+          amount: "1",
+          request_key: uuid(),
+        },
+        409,
+      );
+      const wrongVendor = await accountant.command({
+        action: "company.create",
+        name: `Other credit vendor ${uuid()}`,
+        vendor: true,
+        customer: false,
+        service_entity_id: null,
+      });
+      const wrongVendorBill = await posted({
+        vendor_id: wrongVendor.id,
+        currency: "USD",
+        fx: "300",
+      });
+      await accountant.command(
+        {
+          action: "vendor-credit.apply",
+          credit_id: credit.id,
+          bill_id: wrongVendorBill,
+          date: "2026-09-21",
+          amount: "1",
+          request_key: uuid(),
+        },
+        409,
+      );
+      assert.equal((await accountant.command(issue)).id, credit.id);
+      await accountant.command({ ...issue, reason: "Changed retry" }, 409);
+      const snapshot = async () =>
+        (await owner.get()).vendorCredits.find((v: any) => v.id === credit.id);
+      assert.equal((await snapshot()).total_minor, "59000");
+      assert.equal((await snapshot()).base_minor, "16520000");
+      await inTenant(db, other, async (tx) =>
+        assert.equal(
+          (await tx.query("SELECT * FROM vendor_credits")).rows.length,
+          0,
+        ),
+      );
+      await assert.rejects(
+        inTenant(db, tenant, (tx) =>
+          tx.query("UPDATE vendor_credits SET reason='mutate' WHERE id=$1", [
+            credit.id,
+          ]),
+        ),
+      );
+      await owner.command(
+        {
+          action: "bill.void",
+          id: source,
+          version: (await bill(source)).version,
+          date: "2026-09-21",
+          reason: "Wrong bill",
+        },
+        409,
+      );
+      const apply = {
+        action: "vendor-credit.apply",
+        credit_id: credit.id,
+        bill_id: target,
+        date: "2026-09-21",
+        amount: "300",
+        request_key: uuid(),
+      };
+      const allocation = await accountant.command(apply);
+      assert.equal((await accountant.command(apply)).id, allocation.id);
+      assert.equal((await bill(target)).credited_minor, "30000");
+      const journal = (
+        await db.query(
+          "SELECT l.* FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_type='vendor-credit-application' AND j.source_id=$1",
+          [allocation.id],
+        )
+      ).rows;
+      assert.equal(
+        journal.find((l) => l.account_code === "4100")!.credit_minor,
+        "600000",
+      );
+      const refund = {
+        action: "vendor-credit.refund",
+        credit_id: credit.id,
+        date: "2026-09-21",
+        amount: "290",
+        fx: "320",
+        bank_account_id: null,
+        reference: `Refund-${uuid()}`,
+        request_key: uuid(),
+      };
+      const cash = await accountant.command(refund);
+      assert.equal((await accountant.command(refund)).id, cash.id);
+      assert.equal((await snapshot()).available, "0");
+      await accountant.command(
+        { ...refund, amount: "0.01", request_key: uuid() },
+        409,
+      );
+      await accountant.command(
+        {
+          action: "vendor-credit.reverse",
+          id: credit.id,
+          date: "2026-09-21",
+          reason: "Correction",
+        },
+        409,
+      );
+      const report = await inTenant(db, tenant, (tx) =>
+        partyStatement(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          {
+            kind: "vendor",
+            companyId: vendor.id,
+            entityId: entity,
+            from: "2026-09-20",
+            to: "2026-09-21",
+          },
+        ),
+      );
+      const group = report.groups.find((g) => g.currency === "USD")!;
+      assert.equal(group.availableCredit, "0");
+      assert.equal(group.closing, "206000");
+      assert.equal(group.closingBase, "59440000");
+      assert.ok(group.entries.some((e) => e.type === "vendor-refund"));
+      assert.equal(
+        group.documents.find((d) => d.id === target)!.outstanding,
+        "88000",
+      );
+      const reverseCash = {
+        action: "vendor-credit.reverse-refund",
+        id: cash.id,
+        date: "2026-09-22",
+        reason: "Returned deposit",
+      };
+      const reversed = await accountant.command(reverseCash);
+      assert.equal((await accountant.command(reverseCash)).id, reversed.id);
+      await accountant.command(
+        { ...reverseCash, reason: "Different retry" },
+        409,
+      );
+      await accountant.command({
+        action: "vendor-credit.unapply",
+        id: allocation.id,
+        date: "2026-09-22",
+        reason: "Wrong allocation",
+      });
+      assert.equal((await bill(target)).credited_minor, "0");
+      assert.equal((await snapshot()).available, "59000");
+      await accountant.command({
+        action: "vendor-credit.reverse",
+        id: credit.id,
+        date: "2026-09-22",
+        reason: "Correction",
+      });
+      assert.equal((await snapshot()).available, "0");
+      const restored = await inTenant(db, tenant, (tx) =>
+        partyStatement(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          {
+            kind: "vendor",
+            companyId: vendor.id,
+            entityId: entity,
+            from: "2026-09-20",
+            to: "2026-09-22",
+          },
+        ),
+      );
+      assert.equal(
+        restored.groups
+          .find((g) => g.currency === "USD")!
+          .documents.find((d) => d.id === target)!.outstanding,
+        "118000",
+      );
+      await advance(source, "void", {
+        date: "2026-09-22",
+        reason: "Wrong bill",
+      });
+    },
+  );
+  await t.test(
+    "vendor credits settle bills without cash and preserve rounding across expense and recoverable tax",
+    async () => {
+      for (const tax_treatment of ["expense", "recoverable"]) {
+        const source = await posted({
+          tax_treatment,
+          fx: "0.017321",
+          currency: "USD",
+          lines: [
+            {
+              description: "Tiny fee",
+              quantity: "1",
+              price: "7.31",
+              tax: "18",
+              account_code: "5000",
+            },
+            {
+              description: "Cost",
+              quantity: "1",
+              price: "8.23",
+              tax: "16",
+              account_code: "5200",
+            },
+          ],
+        });
+        const first = await accountant.command({
+          action: "vendor-credit.create",
+          bill_id: source,
+          date: "2026-09-21",
+          reference: `Partial-${uuid()}`,
+          reason: "Partial return",
+          lines: [{ index: 0, amount: "3.01" }],
+          request_key: uuid(),
+        });
+        const last = await accountant.command({
+          action: "vendor-credit.create",
+          bill_id: source,
+          date: "2026-09-21",
+          reference: `Rest-${uuid()}`,
+          reason: "Remaining return",
+          lines: [
+            { index: 0, amount: "4.30" },
+            { index: 1, amount: "8.23" },
+          ],
+          request_key: uuid(),
+        });
+        const credits = (await owner.get()).vendorCredits.filter((v: any) =>
+          [first.id, last.id].includes(v.id),
+        );
+        assert.equal(
+          credits.reduce((n: bigint, v: any) => n + BigInt(v.base_minor), 0n),
+          BigInt((await bill(source)).base_minor),
+        );
+        for (const v of credits)
+          await accountant.command({
+            action: "vendor-credit.apply",
+            credit_id: v.id,
+            bill_id: source,
+            date: "2026-09-21",
+            amount: `${BigInt(v.total_minor) / 100n}.${String(BigInt(v.total_minor) % 100n).padStart(2, "0")}`,
+            request_key: uuid(),
+          });
+        assert.equal((await bill(source)).status, "Paid");
+        assert.equal((await bill(source)).paid_minor, "0");
+        assert.equal(
+          (await bill(source)).credited_minor,
+          (await bill(source)).total_minor,
+        );
+        await accountant.command(
+          {
+            action: "vendor-payment.create",
+            bill_id: source,
+            date: "2026-09-21",
+            amount: "1",
+            wht: "0",
+            fee: "0",
+            fx: "1",
+            reference: "Extra",
+            request_key: uuid(),
+          },
+          409,
+        );
+      }
+    },
+  );
   async function ledger(source: string, id: string) {
+    // Assertions below use immutable journal lines, not presentation totals.
     return (
       await db.query(
         "SELECT l.* FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.tenant_id=$1 AND j.source_type=$2 AND j.source_id=$3",

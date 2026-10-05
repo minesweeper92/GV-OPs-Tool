@@ -42,6 +42,9 @@ import { Payables } from "./Payables";
 const PurchaseOrders = lazy(() =>
   import("./PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })),
 );
+const VendorCredits = lazy(() =>
+  import("./VendorCredits").then((m) => ({ default: m.VendorCredits })),
+);
 import { FinancialReports } from "./FinancialReports";
 const PartyStatements = lazy(() =>
   import("./PartyStatements").then((m) => ({ default: m.PartyStatements })),
@@ -125,6 +128,7 @@ const groups = [
     items: [
       ["vendors", "Vendors", Building2],
       ["purchase-orders", "Purchase orders", FileText],
+      ["vendor-credits", "Vendor credits & refunds", Receipt],
       ["bills", "Bills", FileText],
       ["vendor-payments", "Payments made", Wallet],
       ["payables", "Payable balances", BookOpen],
@@ -504,6 +508,18 @@ export default function App() {
         <ErrorBox
           error={dataQuery.error?.message || "Unable to load records."}
         />
+      );
+    if (view === "vendor-credits")
+      return canFinance ? (
+        <VendorCredits
+          key={`${id || ""}/${entity}`}
+          data={data}
+          me={me!}
+          entity={entity}
+          id={id}
+        />
+      ) : (
+        denied()
       );
     if (view === "purchase-orders")
       return canFinance ? (
@@ -892,7 +908,9 @@ export default function App() {
                           </div>
                           <strong>
                             {money(
-                              BigInt(b.total_minor) - BigInt(b.paid_minor),
+                              BigInt(b.total_minor) -
+                                BigInt(b.paid_minor) -
+                                BigInt(b.credited_minor),
                               b.currency,
                             )}
                           </strong>

@@ -297,10 +297,20 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         [b.id, ctx.userId],
       );
     } else if (c.action === "bill.void") {
-      if (b.status === "Voided" || BigInt(b.paid_minor) !== 0n)
+      if (
+        b.status === "Voided" ||
+        BigInt(b.paid_minor) !== 0n ||
+        BigInt(b.credited_minor) !== 0n ||
+        (
+          await tx.query(
+            "SELECT id FROM vendor_credits v WHERE bill_id=$1 AND NOT EXISTS(SELECT 1 FROM vendor_credit_reversals r WHERE r.credit_id=v.id)",
+            [b.id],
+          )
+        ).rows.length
+      )
         throw new Problem(
           409,
-          "Reverse active payments before voiding this bill.",
+          "Reverse active payments, credit applications and source vendor credits before voiding this bill.",
         );
       if (b.status === "Open") {
         if (ctx.role !== "admin")
@@ -355,8 +365,12 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       fee = minor(c.fee),
       fx = scaled(c.fx, 6),
       settled = amount + wht,
-      remaining = BigInt(b.total_minor) - BigInt(b.paid_minor),
-      remainingBase = BigInt(b.base_minor) - BigInt(b.paid_base_minor);
+      remaining =
+        BigInt(b.total_minor) - BigInt(b.paid_minor) - BigInt(b.credited_minor),
+      remainingBase =
+        BigInt(b.base_minor) -
+        BigInt(b.paid_base_minor) -
+        BigInt(b.credited_base_minor);
     if (
       amount <= 0n ||
       settled > remaining ||

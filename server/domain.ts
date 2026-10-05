@@ -36,6 +36,7 @@ export const chart = [
   ["1100", "Accounts receivable", "Asset"],
   ["1200", "Withholding tax receivable", "Asset"],
   ["1300", "Input tax receivable", "Asset"],
+  ["1350", "Vendor credits receivable", "Asset"],
   ["1400", "Prepayments", "Asset"],
   ["1500", "Equipment", "Asset"],
   ["2000", "Accounts payable", "Liability"],

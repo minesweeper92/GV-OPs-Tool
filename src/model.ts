@@ -275,6 +275,9 @@ export interface Data {
   bills: Bill[];
   purchaseOrders: import("../shared/purchase-orders").PurchaseOrder[];
   vendorPayments: VendorPayment[];
+  vendorCredits: import("../shared/vendor-credits").VendorCredit[];
+  vendorCreditApplications: import("../shared/vendor-credits").VendorCreditUse[];
+  vendorRefunds: import("../shared/vendor-credits").VendorCreditUse[];
   entities: Entity[];
   companies: Company[];
   contacts: Contact[];
@@ -304,6 +307,8 @@ export interface Data {
   events: Event[];
 }
 export interface Bill {
+  credited_minor: string;
+  credited_base_minor: string;
   purchase_order_id: string | null;
   id: string;
   entity_id: string;
