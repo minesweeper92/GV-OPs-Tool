@@ -291,6 +291,30 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   await page
     .getByLabel("Purchase tax treatment", { exact: true })
     .selectOption("recoverable");
+  await page
+    .getByLabel("Notes", { exact: true })
+    .fill("Bill recovery QA notes");
+  const projectId = await page
+    .getByLabel("Project (optional)", { exact: true })
+    .inputValue();
+  await page.getByRole("button", { name: "Keep draft & close" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "New bill", exact: true }).click();
+  await expect(
+    page.getByLabel("Vendor bill number", { exact: true }),
+  ).toHaveValue("STUDIO-BILL-101");
+  await expect(page.getByLabel("Notes", { exact: true })).toHaveValue(
+    "Bill recovery QA notes",
+  );
+  await expect(page.getByLabel("Account 1", { exact: true })).toHaveValue(
+    "5200",
+  );
+  await expect(
+    page.getByLabel("Purchase tax treatment", { exact: true }),
+  ).toHaveValue("recoverable");
+  await expect(
+    page.getByLabel("Project (optional)", { exact: true }),
+  ).toHaveValue(projectId);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page
     .getByRole("button", { name: "Save bill draft", exact: true })
@@ -300,6 +324,13 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   ).toBeVisible();
   const billUrl = page.url();
   await expect(page.getByText("Not posted", { exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      Object.keys(sessionStorage).filter((key) =>
+        key.startsWith("gv-bill-draft-v1:"),
+      ),
+    ),
+  ).toEqual([]);
   await page
     .getByRole("button", { name: "Submit for approval", exact: true })
     .click();
@@ -653,6 +684,27 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
   await expect(
     page.getByRole("heading", { name: "Convert quote to invoice" }),
   ).toBeVisible();
+  let lostInvoiceResponse = false;
+  await page.route("**/api/commands", async (route) => {
+    if (
+      !lostInvoiceResponse &&
+      route.request().postDataJSON().action === "invoice.create"
+    ) {
+      lostInvoiceResponse = true;
+      const response = await route.fetch();
+      expect(response.ok(), await response.text()).toBeTruthy();
+      await route.abort("failed");
+    } else await route.continue();
+  });
+  await page.getByRole("button", { name: "Save as draft" }).click();
+  await expect(
+    page.locator(".invoice-composer").getByRole("alert"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Keep draft & close" }).click();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume invoice draft", exact: true })
+    .click();
   await page.getByRole("button", { name: "Save as draft" }).click();
   await expect(page.locator(".page-heading h1")).toHaveText(/INV-\d+/);
   const invoiceNumber = await page.locator(".page-heading h1").innerText();

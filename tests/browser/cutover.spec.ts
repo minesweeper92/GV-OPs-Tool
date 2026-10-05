@@ -70,7 +70,7 @@ test("opening balances require review, reconcile and post once in the UI", async
     },
   });
   expect(bank.ok()).toBe(true);
-  await page.goto("/#opening-balances");
+  await page.goto("/?view=opening-balances");
   await page.getByLabel("Legal entity view").selectOption(entityId);
   await expect(
     page.getByRole("heading", { name: `Cutover ${code} · opening balances` }),

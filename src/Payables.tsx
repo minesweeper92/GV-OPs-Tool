@@ -25,6 +25,34 @@ import {
   type Line,
 } from "./model";
 import { totals } from "../shared/money";
+import { z } from "zod";
+import {
+  clearBrowserDraft,
+  draftLines,
+  readBrowserDraft,
+  writeBrowserDraft,
+} from "./browserDraft";
+
+const billDraft = z.object({
+  savedAt: z.number(),
+  selectedEntity: z.string(),
+  vendor: z.string(),
+  project: z.string(),
+  currency: z.string(),
+  fx: z.string(),
+  taxTreatment: z.enum(["expense", "recoverable"]),
+  lines: z
+    .array(draftLines.element.extend({ account_code: z.string() }))
+    .max(500),
+  requestKey: z.uuid(),
+  fields: z.object({
+    reference: z.string(),
+    bill_date: z.string(),
+    due_date: z.string(),
+    notes: z.string(),
+    acknowledge_duplicate: z.boolean(),
+  }),
+});
 
 const accounts = [
   ["5000", "Operating expenses"],
@@ -538,10 +566,11 @@ export function Payables({
       {content}
       {editor ? (
         <PayableEditor
-          key={`${editor.kind}-${editor.bill?.id || ""}`}
+          key={`${me.organization.id}:${me.user.id}:${editor.kind}-${editor.bill?.id || ""}:${editor.bill?.version || ""}`}
           editor={editor}
           data={data}
           entity={entity}
+          draftScope={`${me.organization.id}:${me.user.id}`}
           close={() => setEditor(null)}
           save={save}
         />
@@ -554,49 +583,104 @@ function PayableEditor({
   editor,
   data,
   entity,
+  draftScope,
   close,
   save,
 }: {
   editor: Editor;
   data: Data;
   entity: string;
+  draftScope: string;
   close: () => void;
   save: (c: Record<string, unknown>) => Promise<{ id: string }>;
 }) {
   const b = editor.bill,
     kind = editor.kind,
     isDraft = kind === "create" || kind === "edit";
+  const draftKey = `gv-bill-draft-v1:${draftScope}:${kind}:${b?.id || "new"}:${b?.version || ""}`;
+  const [restored] = useState(() =>
+    isDraft ? readBrowserDraft(draftKey, billDraft) : null,
+  );
+  const [draftStored, setDraftStored] = useState(!!restored);
+  const [fields, setFields] = useState(
+    restored?.fields ?? {
+      reference: b?.reference || "",
+      bill_date: b?.bill_date || today(),
+      due_date: b?.due_date || today(),
+      notes: b?.notes || "",
+      acknowledge_duplicate: false,
+    },
+  );
   const [selectedEntity, setEntity] = useState(
-      b?.entity_id || (entity === "all" ? "" : entity),
+      b?.entity_id ||
+        restored?.selectedEntity ||
+        (entity === "all" ? "" : entity),
     ),
-    [vendor, setVendor] = useState(b?.vendor_id || ""),
-    [project, setProject] = useState(b?.deal_id || ""),
-    [currency, setCurrency] = useState(b?.currency || "PKR"),
-    [fx, setFx] = useState(b ? rate(b.fx_micros) : "1");
+    [vendor, setVendor] = useState(restored?.vendor ?? b?.vendor_id ?? ""),
+    [project, setProject] = useState(restored?.project ?? b?.deal_id ?? ""),
+    [currency, setCurrency] = useState(
+      restored?.currency ?? b?.currency ?? "PKR",
+    ),
+    [fx, setFx] = useState(restored?.fx ?? (b ? rate(b.fx_micros) : "1"));
   const [lines, setLines] = useState<(Line & { account_code: string })[]>(
-    b?.lines.map(({ description, quantity, price, tax, account_code }) => ({
-      description,
-      quantity,
-      price,
-      tax,
-      account_code,
-    })) || [
-      {
-        description: "",
-        quantity: "1",
-        price: "",
-        tax: "0",
-        account_code: "5000",
-      },
-    ],
+    restored?.lines ??
+      (b?.lines.map(({ description, quantity, price, tax, account_code }) => ({
+        description,
+        quantity,
+        price,
+        tax,
+        account_code,
+      })) || [
+        {
+          description: "",
+          quantity: "1",
+          price: "",
+          tax: "0",
+          account_code: "5000",
+        },
+      ]),
   );
   const [taxTreatment, setTaxTreatment] = useState(
-      b?.tax_treatment || "expense",
+      restored?.taxTreatment ?? b?.tax_treatment ?? "expense",
     ),
-    [dirty, setDirty] = useState(false),
+    [dirty, setDirty] = useState(!!restored),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [key] = useState(() => crypto.randomUUID());
+    [key] = useState(() => restored?.requestKey ?? crypto.randomUUID());
+  useEffect(() => {
+    if (!isDraft || !dirty) return;
+    setDraftStored(
+      writeBrowserDraft(draftKey, {
+        selectedEntity,
+        vendor,
+        project,
+        currency,
+        fx,
+        taxTreatment,
+        lines,
+        requestKey: key,
+        fields,
+      }),
+    );
+  }, [
+    isDraft,
+    dirty,
+    draftKey,
+    selectedEntity,
+    vendor,
+    project,
+    currency,
+    fx,
+    taxTreatment,
+    lines,
+    key,
+    fields,
+  ]);
+  const discardAndClose = () => {
+    if (busy) return;
+    if (isDraft) clearBrowserDraft(draftKey);
+    close();
+  };
   let sum = "";
   try {
     sum = totals(lines).total;
@@ -625,11 +709,14 @@ function PayableEditor({
     type = "text",
     hint?: string,
   ) {
+    const recovered = fields[name as keyof typeof fields];
     return (
       <Field label={label} hint={hint}>
         <input
           name={name}
-          defaultValue={value}
+          defaultValue={
+            isDraft && typeof recovered === "string" ? recovered : value
+          }
           type={type}
           required
           maxLength={200}
@@ -645,10 +732,23 @@ function PayableEditor({
     );
   }
   return (
-    <Drawer title={title} close={close} dirty={dirty}>
+    <Drawer title={title} close={discardAndClose} dirty={dirty}>
       <form
         className="editor"
-        onChange={() => setDirty(true)}
+        onChange={(event) => {
+          setDirty(true);
+          if (isDraft) {
+            const values = new FormData(event.currentTarget);
+            setFields({
+              reference: String(values.get("reference") || ""),
+              bill_date: String(values.get("bill_date") || ""),
+              due_date: String(values.get("due_date") || ""),
+              notes: String(values.get("notes") || ""),
+              acknowledge_duplicate:
+                values.get("acknowledge_duplicate") === "on",
+            });
+          }
+        }}
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -703,6 +803,7 @@ function PayableEditor({
                 reason: f.reason,
               };
             const result = await save(c);
+            if (isDraft) clearBrowserDraft(draftKey);
             close();
             if (kind === "create") location.hash = `bill/${result.id}`;
           } catch (e) {
@@ -713,6 +814,20 @@ function PayableEditor({
         }}
       >
         <div className="editor-body">
+          {isDraft && dirty && (
+            <div className="quote-draft-notice" role="status">
+              <span>
+                {draftStored
+                  ? "Bill draft saved in this tab for 24 hours. Saving a bill still requires review before posting."
+                  : "Draft recovery is unavailable. Save your bill before leaving."}
+              </span>
+              {draftStored && (
+                <button type="button" disabled={busy} onClick={close}>
+                  Keep draft & close
+                </button>
+              )}
+            </div>
+          )}
           {error ? (
             <div ref={errorRef} tabIndex={-1}>
               <ErrorBox error={error} />
@@ -916,13 +1031,17 @@ function PayableEditor({
                 <textarea
                   name="notes"
                   maxLength={4000}
-                  defaultValue={b?.notes || ""}
+                  defaultValue={fields.notes}
                 />
               </Field>
               <label className="checkbox">
-                <input type="checkbox" name="acknowledge_duplicate" /> I checked
-                matching vendor/date/amount records and confirm this is a
-                separate bill.
+                <input
+                  type="checkbox"
+                  name="acknowledge_duplicate"
+                  defaultChecked={fields.acknowledge_duplicate}
+                />{" "}
+                I checked matching vendor/date/amount records and confirm this
+                is a separate bill.
               </label>
               <p className="muted">
                 Saving creates a draft only. An administrator must approve it
@@ -996,7 +1115,8 @@ function PayableEditor({
             type="button"
             disabled={busy}
             onClick={() => {
-              if (!dirty || confirm("Discard your unsaved changes?")) close();
+              if (!dirty || confirm("Discard your unsaved changes?"))
+                discardAndClose();
             }}
           >
             Cancel
