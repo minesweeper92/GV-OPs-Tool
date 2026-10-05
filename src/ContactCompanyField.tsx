@@ -1,4 +1,10 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { z } from "zod";
+import {
+  readBrowserDraft,
+  writeBrowserDraft,
+  clearBrowserDraft,
+} from "./browserDraft";
 import { Plus, Building2, ArrowLeft, Check } from "lucide-react";
 import type { Company } from "./model";
 import { Field, ErrorBox } from "./components";
@@ -10,7 +16,17 @@ type Props = {
   onBusyChange: (busy: boolean) => void;
   onChange: () => void;
   onSelectionChange?: (companyId: string) => void;
+  initialCompanyId?: string;
+  required?: boolean;
+  vendor?: boolean;
+  draftKey?: string;
 };
+const inlineDraft = z.object({
+  savedAt: z.number(),
+  name: z.string(),
+  domain: z.string(),
+  retry: z.object({ key: z.uuid(), payload: z.string() }).nullable(),
+});
 const normalized = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 export function ContactCompanyField({
@@ -20,18 +36,33 @@ export function ContactCompanyField({
   onBusyChange,
   onChange,
   onSelectionChange,
+  initialCompanyId = "",
+  required = false,
+  vendor = false,
+  draftKey,
 }: Props) {
+  const [restored] = useState(() =>
+    draftKey ? readBrowserDraft(draftKey, inlineDraft) : null,
+  );
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  const [selected, setSelected] = useState(""),
-    [name, setName] = useState(""),
-    [domain, setDomain] = useState("");
+  const [selected, setSelected] = useState(initialCompanyId),
+    [name, setName] = useState(restored?.name || ""),
+    [domain, setDomain] = useState(restored?.domain || "");
   const [notice, setNotice] = useState("");
   const [created, setCreated] = useState<{ id: string; name: string } | null>(
     null,
   );
-  const retry = useRef<{ key: string; payload: string } | null>(null);
+  const retry = useRef<{ key: string; payload: string } | null>(
+    restored?.retry || null,
+  );
+  useEffect(() => {
+    if (!draftKey) return;
+    if (name || domain)
+      writeBrowserDraft(draftKey, { name, domain, retry: retry.current });
+    else clearBrowserDraft(draftKey);
+  }, [draftKey, name, domain, busy]);
   const nameInput = useRef<HTMLInputElement>(null),
     picker = useRef<HTMLSelectElement>(null),
     trigger = useRef<HTMLButtonElement>(null);
@@ -58,6 +89,10 @@ export function ContactCompanyField({
     onOpenChange(value);
   };
   function finish(id: string, message: string) {
+    setName("");
+    setDomain("");
+    retry.current = null;
+    if (draftKey) clearBrowserDraft(draftKey);
     setSelected(id);
     onSelectionChange?.(id);
     setNotice(message);
@@ -88,7 +123,7 @@ export function ContactCompanyField({
       name: name.trim(),
       domain: domain.trim(),
       customer: false,
-      vendor: false,
+      vendor,
       service_entity_id: null,
     };
     const fingerprint = JSON.stringify(payload);
@@ -117,10 +152,11 @@ export function ContactCompanyField({
   return (
     <section className="contact-company-field">
       <div className="company-picker-row">
-        <Field label="Company">
+        <Field label={vendor ? "Vendor" : "Company"}>
           <select
             ref={picker}
             name="company_id"
+            required={required}
             value={selected}
             onChange={(e) => {
               setSelected(e.target.value);
@@ -129,7 +165,9 @@ export function ContactCompanyField({
               onChange();
             }}
           >
-            <option value="">No company yet</option>
+            <option value="">
+              {vendor ? "Choose vendor" : "No company yet"}
+            </option>
             {options.map((c) => (
               <option value={c.id} key={c.id}>
                 {c.name}
@@ -155,7 +193,7 @@ export function ContactCompanyField({
           }}
         >
           <Plus size={16} />
-          Add company
+          {vendor ? "Add vendor" : "Add company"}
         </button>
       </div>
       {notice ? (
@@ -190,13 +228,13 @@ export function ContactCompanyField({
         >
           <div className="inline-company-title">
             <Building2 size={19} />
-            <h3 id={titleId}>Add a company</h3>
+            <h3 id={titleId}>{vendor ? "Add a vendor" : "Add a company"}</h3>
           </div>
           <p className="muted">
-            Your contact details stay here. Create the company, then pick up
-            where you left off.
+            Your form details stay here. Create the company, then pick up where
+            you left off.
           </p>
-          <Field label="New company name">
+          <Field label={vendor ? "New vendor name" : "New company name"}>
             <input
               ref={nameInput}
               autoFocus
@@ -264,7 +302,7 @@ export function ContactCompanyField({
               }}
             >
               <ArrowLeft size={15} />
-              Back to contact
+              {vendor ? "Back to bill" : "Back to contact"}
             </button>
             <button
               type="button"
@@ -272,12 +310,16 @@ export function ContactCompanyField({
               disabled={busy || exact}
               onClick={() => void add()}
             >
-              {busy ? "Creating company…" : "Create & select company"}
+              {busy
+                ? "Creating company…"
+                : vendor
+                  ? "Create & select vendor"
+                  : "Create & select company"}
             </button>
           </div>
           <p className="small muted">
-            Creating saves the company independently. Your contact is saved only
-            when you save the contact form.
+            Creating saves the company independently. Your form is saved only
+            when you save it.
           </p>
         </section>
       ) : null}

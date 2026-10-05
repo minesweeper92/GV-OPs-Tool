@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { ContactCompanyField } from "./ContactCompanyField";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Heading,
@@ -602,6 +603,8 @@ function PayableEditor({
     isDraft ? readBrowserDraft(draftKey, billDraft) : null,
   );
   const [draftStored, setDraftStored] = useState(!!restored);
+  const [addingVendor, setAddingVendor] = useState(false);
+  const [vendorBusy, setVendorBusy] = useState(false);
   const [fields, setFields] = useState(
     restored?.fields ?? {
       reference: b?.reference || "",
@@ -677,8 +680,9 @@ function PayableEditor({
     fields,
   ]);
   const discardAndClose = () => {
-    if (busy) return;
+    if (busy || vendorBusy) return;
     if (isDraft) clearBrowserDraft(draftKey);
+    if (isDraft) clearBrowserDraft(`${draftKey}:vendor`);
     close();
   };
   let sum = "";
@@ -751,6 +755,7 @@ function PayableEditor({
         }}
         onSubmit={async (e) => {
           e.preventDefault();
+          if (busy || addingVendor || vendorBusy) return;
           setBusy(true);
           setError("");
           const f = Object.fromEntries(new FormData(e.currentTarget));
@@ -804,6 +809,7 @@ function PayableEditor({
               };
             const result = await save(c);
             if (isDraft) clearBrowserDraft(draftKey);
+            if (isDraft) clearBrowserDraft(`${draftKey}:vendor`);
             close();
             if (kind === "create") location.hash = `bill/${result.id}`;
           } catch (e) {
@@ -822,7 +828,11 @@ function PayableEditor({
                   : "Draft recovery is unavailable. Save your bill before leaving."}
               </span>
               {draftStored && (
-                <button type="button" disabled={busy} onClick={close}>
+                <button
+                  type="button"
+                  disabled={busy || vendorBusy}
+                  onClick={close}
+                >
                   Keep draft & close
                 </button>
               )}
@@ -860,25 +870,18 @@ function PayableEditor({
                   ))}
                 </select>
               </Field>
-              <Field label="Vendor">
-                <select
-                  required
-                  value={vendor}
-                  onChange={(e) => setVendor(e.target.value)}
-                >
-                  <option value="">Choose vendor</option>
-                  {data.companies
-                    .filter((c) => c.vendor)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              {!data.companies.some((c) => c.vendor) ? (
-                <p>Create a vendor in Purchases → Vendors first.</p>
-              ) : null}
+              <ContactCompanyField
+                draftKey={`${draftKey}:vendor`}
+                companies={data.companies.filter((c) => c.vendor)}
+                create={save}
+                vendor
+                required
+                initialCompanyId={vendor}
+                onSelectionChange={setVendor}
+                onOpenChange={setAddingVendor}
+                onBusyChange={setVendorBusy}
+                onChange={() => setDirty(true)}
+              />
               {field("Vendor bill number", "reference", b?.reference)}
               <div className="form-row">
                 {field(
@@ -1121,7 +1124,10 @@ function PayableEditor({
           >
             Cancel
           </button>
-          <button className="primary" disabled={busy}>
+          <button
+            className="primary"
+            disabled={busy || vendorBusy || addingVendor}
+          >
             {busy
               ? "Saving…"
               : isDraft

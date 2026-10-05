@@ -1,4 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { z } from "zod";
+import {
+  readBrowserDraft,
+  writeBrowserDraft,
+  clearBrowserDraft,
+} from "./browserDraft";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { type Data, type Me, day, today } from "./model";
 import {
@@ -34,6 +40,16 @@ export type CrmOpen = (
   id?: string,
 ) => void;
 type Props = { data: Data; me: Me; open: CrmOpen };
+const crmDraft = z.object({
+  savedAt: z.number(),
+  fields: z.record(z.string(), z.union([z.string(), z.boolean()])),
+  profile: z.record(z.string(), z.unknown()),
+  emails: z.array(z.object({ label: z.string(), value: z.string() })).max(10),
+  phones: z.array(z.object({ label: z.string(), value: z.string() })).max(10),
+  selectedCompany: z.string(),
+  contactCompanyId: z.string(),
+  leadStatus: z.string(),
+});
 const localDate = (s: string) => {
   const d = new Date(s);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
@@ -522,31 +538,107 @@ export function CrmEditor({
   const profileMode = ["contact", "company", "lead", "deal"].includes(
     state.mode,
   );
-  const [profile, setProfile] = useState<ProfileValue>(() =>
-    state.mode === "contact"
-      ? contactProfile.parse(contact?.profile || {})
+  const version =
+    (state.mode === "contact"
+      ? contact
       : state.mode === "company"
-        ? companyProfile.parse(company?.profile || {})
-        : commercialProfile.parse(
-            (state.mode === "deal" ? deal?.profile : lead?.profile) || {},
-          ),
+        ? company
+        : state.mode === "lead"
+          ? lead
+          : deal
+    )?.version || 0;
+  const [draftKey] = useState(
+    () =>
+      `gv-crm-draft-v1:${me.organization.id}:${me.user.id}:${state.mode}:${state.record_id || "new"}:${state.id || ""}:${version}`,
+  );
+  const [restored] = useState(() =>
+    profileMode ? readBrowserDraft(draftKey, crmDraft) : null,
+  );
+  const formRef = useRef<HTMLFormElement>(null);
+  const [fields, setFields] = useState(restored?.fields || {});
+  const [addingContact, setAddingContact] = useState(false);
+  const [createdContact, setCreatedContact] = useState<{
+    id: string;
+    name: string;
+    company: string;
+  } | null>(null);
+  const [profile, setProfile] = useState<ProfileValue>(() =>
+    restored
+      ? (restored.profile as ProfileValue)
+      : state.mode === "contact"
+        ? contactProfile.parse(contact?.profile || {})
+        : state.mode === "company"
+          ? companyProfile.parse(company?.profile || {})
+          : commercialProfile.parse(
+              (state.mode === "deal" ? deal?.profile : lead?.profile) || {},
+            ),
   );
   const [selectedCompany, setSelectedCompany] = useState(
-    lead?.company_id ||
-      (state.mode === "lead" && state.id
-        ? data.affiliations.find(
-            (a) => a.contact_id === state.id && !a.ended_on,
-          )?.company_id || ""
-        : ""),
+    restored?.selectedCompany ??
+      (lead?.company_id ||
+        (state.mode === "lead" && state.id
+          ? data.affiliations.find(
+              (a) => a.contact_id === state.id && !a.ended_on,
+            )?.company_id || ""
+          : "")),
   );
-  const [dirty, setDirty] = useState(false),
+  const [dirty, setDirty] = useState(Boolean(restored)),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [type, setType] = useState(state.record_type || "contact"),
     [record, setRecord] = useState(state.record_id || ""),
-    [leadStatus, setLeadStatus] = useState(lead?.status || "New");
-  const [emails, setEmails] = useState(contact?.additional_emails || []),
-    [phones, setPhones] = useState(contact?.additional_phones || []);
+    [leadStatus, setLeadStatus] = useState(
+      restored?.leadStatus || lead?.status || "New",
+    );
+  const [emails, setEmails] = useState(
+      restored?.emails || contact?.additional_emails || [],
+    ),
+    [phones, setPhones] = useState(
+      restored?.phones || contact?.additional_phones || [],
+    );
+  useEffect(() => {
+    if (restored) setContactCompanyId(restored.contactCompanyId);
+    // Restore native uncontrolled controls once; React owns the controlled fields above.
+    if (!restored || !formRef.current) return;
+    for (const control of Array.from(formRef.current.elements)) {
+      if (
+        !(
+          control instanceof HTMLInputElement ||
+          control instanceof HTMLSelectElement ||
+          control instanceof HTMLTextAreaElement
+        ) ||
+        control.name === "company_id"
+      )
+        continue;
+      const value = restored.fields[control.name];
+      if (control instanceof HTMLInputElement && control.type === "checkbox") {
+        if (typeof value === "boolean") control.checked = value;
+      } else if (typeof value === "string") control.value = value;
+    }
+  }, [restored]);
+  useEffect(() => {
+    if (profileMode && dirty)
+      writeBrowserDraft(draftKey, {
+        fields,
+        profile,
+        emails,
+        phones,
+        selectedCompany,
+        contactCompanyId,
+        leadStatus,
+      });
+  }, [
+    profileMode,
+    dirty,
+    draftKey,
+    fields,
+    profile,
+    emails,
+    phones,
+    selectedCompany,
+    contactCompanyId,
+    leadStatus,
+  ]);
   const title =
     state.mode === "activity"
       ? "Log activity"
@@ -569,7 +661,9 @@ export function CrmEditor({
     <Field label={label}>
       <input
         name={name}
-        defaultValue={value}
+        defaultValue={
+          typeof fields[name] === "string" ? (fields[name] as string) : value
+        }
         type={kind}
         required={required}
         maxLength={kind === "text" ? 200 : undefined}
@@ -607,7 +701,7 @@ export function CrmEditor({
   );
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (addingCompany || companyBusy || busy) return;
+    if (addingCompany || addingContact || companyBusy || busy) return;
     setBusy(true);
     setError("");
     const f = new FormData(e.currentTarget),
@@ -717,6 +811,8 @@ export function CrmEditor({
         c.owner_id = v("owner_id");
       }
       await save(c);
+      clearBrowserDraft(draftKey);
+      clearBrowserDraft(`${draftKey}:company`);
       if (
         state.mode === "contact" &&
         isNew &&
@@ -744,15 +840,53 @@ export function CrmEditor({
             : undefined
       }
       close={() => {
-        if (!busy && !companyBusy) close();
+        if (!busy && !companyBusy) {
+          clearBrowserDraft(draftKey);
+          clearBrowserDraft(`${draftKey}:company`);
+          close();
+        }
       }}
     >
       <form
+        ref={formRef}
         className="editor-body billing-editor"
         onSubmit={submit}
-        onChange={() => setDirty(true)}
+        onChange={(e) => {
+          setDirty(true);
+          const next: Record<string, string | boolean> = {};
+          for (const control of Array.from(e.currentTarget.elements)) {
+            if (
+              !(
+                control instanceof HTMLInputElement ||
+                control instanceof HTMLSelectElement ||
+                control instanceof HTMLTextAreaElement
+              ) ||
+              !control.name
+            )
+              continue;
+            next[control.name] =
+              control instanceof HTMLInputElement && control.type === "checkbox"
+                ? control.checked
+                : control.value;
+          }
+          setFields(next);
+        }}
       >
         <fieldset disabled={busy}>
+          {profileMode ? (
+            <div className="quote-draft-notice" role="status">
+              {restored
+                ? "Recovered your unfinished form. "
+                : "Unfinished details are kept in this tab for 24 hours. "}
+              <button
+                type="button"
+                disabled={busy || companyBusy}
+                onClick={() => close()}
+              >
+                Keep draft & close
+              </button>
+            </div>
+          ) : null}
           {error ? <ErrorBox error={error} /> : null}
           {state.mode === "contact" && contact ? (
             <>
@@ -771,6 +905,8 @@ export function CrmEditor({
               {isNew ? (
                 <>
                   <ContactCompanyField
+                    draftKey={`${draftKey}:company`}
+                    initialCompanyId={restored?.contactCompanyId}
                     companies={data.companies}
                     create={createCompany}
                     onOpenChange={setAddingCompany}
@@ -1089,37 +1225,44 @@ export function CrmEditor({
             <>
               {isNew ? (
                 <>
-                  <Field label="Company">
-                    <select
-                      name="company_id"
-                      required
-                      value={selectedCompany}
-                      onChange={(e) => setSelectedCompany(e.target.value)}
-                    >
-                      <option value="">Choose company</option>
-                      {data.companies.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                  <ContactCompanyField
+                    draftKey={`${draftKey}:company`}
+                    companies={data.companies}
+                    create={createCompany}
+                    initialCompanyId={selectedCompany}
+                    required
+                    onOpenChange={setAddingCompany}
+                    onBusyChange={setCompanyBusy}
+                    onChange={() => setDirty(true)}
+                    onSelectionChange={(id) => {
+                      setSelectedCompany(id);
+                      setFields((old) => ({ ...old, contact_id: "" }));
+                    }}
+                  />
                   <Field label="Contact">
                     <select
                       name="contact_id"
                       required
                       key={selectedCompany}
-                      defaultValue={
-                        state.mode === "lead" &&
-                        state.id &&
-                        data.affiliations.some(
-                          (a) =>
-                            a.contact_id === state.id &&
-                            a.company_id === selectedCompany &&
-                            !a.ended_on,
-                        )
-                          ? state.id
-                          : ""
+                      value={
+                        typeof fields.contact_id === "string"
+                          ? fields.contact_id
+                          : state.mode === "lead" &&
+                              state.id &&
+                              data.affiliations.some(
+                                (a) =>
+                                  a.contact_id === state.id &&
+                                  a.company_id === selectedCompany &&
+                                  !a.ended_on,
+                              )
+                            ? state.id
+                            : ""
+                      }
+                      onChange={(e) =>
+                        setFields((old) => ({
+                          ...old,
+                          contact_id: e.target.value,
+                        }))
                       }
                     >
                       <option value="">Choose associated contact</option>
@@ -1137,8 +1280,104 @@ export function CrmEditor({
                             {c.first_name} {c.last_name}
                           </option>
                         ))}
+                      {createdContact &&
+                      createdContact.company === selectedCompany &&
+                      !data.contacts.some((c) => c.id === createdContact.id) ? (
+                        <option value={createdContact.id}>
+                          {createdContact.name}
+                        </option>
+                      ) : null}
                     </select>
                   </Field>
+                  <button
+                    type="button"
+                    disabled={!selectedCompany || companyBusy}
+                    onClick={() => setAddingContact(!addingContact)}
+                  >
+                    Add contact here
+                  </button>
+                  {addingContact ? (
+                    <section className="inline-company-panel">
+                      <h3>Add contact for this company</h3>
+                      <p className="muted">
+                        Your lead stays here. The contact is saved separately
+                        when you create it.
+                      </p>
+                      {input("inline_first_name", "New contact first name")}
+                      {input("inline_last_name", "New contact last name")}
+                      {input(
+                        "inline_email",
+                        "New contact email",
+                        "",
+                        false,
+                        "email",
+                      )}
+                      <button
+                        type="button"
+                        disabled={companyBusy}
+                        onClick={() => setAddingContact(false)}
+                      >
+                        Back to lead
+                      </button>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={companyBusy}
+                        onClick={async () => {
+                          const form = formRef.current;
+                          if (!form) return;
+                          const f = new FormData(form);
+                          const first = String(
+                            f.get("inline_first_name") || "",
+                          ).trim();
+                          const last = String(
+                            f.get("inline_last_name") || "",
+                          ).trim();
+                          const email = String(
+                            f.get("inline_email") || "",
+                          ).trim();
+                          if (!first) {
+                            setError("Enter the contact's first name.");
+                            return;
+                          }
+                          const emailInput = form.elements.namedItem(
+                            "inline_email",
+                          ) as HTMLInputElement;
+                          if (!emailInput.reportValidity()) return;
+                          setCompanyBusy(true);
+                          setError("");
+                          try {
+                            const result = await createCompany({
+                              action: "contact.create",
+                              first_name: first,
+                              last_name: last,
+                              email,
+                              company_id: selectedCompany,
+                              role: "Contact",
+                            });
+                            setCreatedContact({
+                              id: result.id,
+                              name: `${first} ${last}`.trim(),
+                              company: selectedCompany,
+                            });
+                            setFields((old) => ({
+                              ...old,
+                              contact_id: result.id,
+                            }));
+                            setAddingContact(false);
+                            setDirty(true);
+                            // Remount the dependent picker with the newly created selection.
+                          } catch (e) {
+                            setError((e as Error).message);
+                          } finally {
+                            setCompanyBusy(false);
+                          }
+                        }}
+                      >
+                        Create & select contact
+                      </button>
+                    </section>
+                  ) : null}
                   <Field label="Legal entity">
                     <select name="entity_id" required>
                       <option value="">Choose explicitly</option>
@@ -1383,7 +1622,7 @@ export function CrmEditor({
           <button
             type="submit"
             className="primary"
-            disabled={addingCompany || companyBusy}
+            disabled={addingCompany || addingContact || companyBusy}
           >
             {busy
               ? "Saving…"
