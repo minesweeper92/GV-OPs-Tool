@@ -34,6 +34,7 @@ import {
 } from "./model";
 import { Heading, Badge, Table, Empty, ErrorBox } from "./components";
 import { Brand } from "./Brand";
+import { hasCapability } from "../shared/permissions";
 const Editor = lazy(() =>
   import("./Editor").then((m) => ({ default: m.Editor })),
 );
@@ -340,9 +341,10 @@ export default function App() {
     retry: 1,
   });
   const data = dataQuery.data;
-  const canFinance = !!me && ["admin", "finance"].includes(me.user.role),
-    canCRM = !!me && ["admin", "sales"].includes(me.user.role);
-  const canMaintainContacts = canCRM || canFinance;
+  const canFinance = !!me && hasCapability(me.user.role, "books.view"),
+    canCRM = !!me && hasCapability(me.user.role, "crm.sales");
+  const canMaintainContacts =
+    !!me && hasCapability(me.user.role, "contacts.manage");
   const reportQuery = useQuery({
     queryKey: ["report", me?.organization.id, entity, from, to],
     queryFn: () =>

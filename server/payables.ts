@@ -4,9 +4,10 @@ import type { SQL, Row } from "./db.ts";
 import { Problem, post, audit, type Context } from "./domain.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 function requireFinance(ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.post"))
     throw new Problem(
       403,
       "A finance role is required for purchases and payables.",
@@ -78,7 +79,7 @@ async function reverseJournal(
   );
 }
 export async function payableSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.view"))
     return { bills: [], vendorPayments: [], vendorPaymentBatches: [] };
   const bills = (
     await tx.query(
@@ -488,7 +489,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         [b.id],
       );
     } else if (c.action === "bill.return") {
-      if (ctx.role !== "admin")
+      if (!hasCapability(ctx.role, "bills.approve"))
         throw new Problem(403, "An administrator must review the bill.");
       if (b.status !== "Pending approval")
         throw new Problem(409, "Only a submitted bill can be returned.");
@@ -497,7 +498,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         [b.id],
       );
     } else if (c.action === "bill.approve") {
-      if (ctx.role !== "admin")
+      if (!hasCapability(ctx.role, "bills.approve"))
         throw new Problem(
           403,
           "An administrator must approve and post the bill.",

@@ -2,6 +2,11 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Heading, Field, Table, ErrorBox, Drawer } from "./components";
 import { request, day, type Me } from "./model";
+import {
+  capabilities,
+  hasCapability,
+  roles as policyRoles,
+} from "../shared/permissions";
 
 const roles = [
   ["sales", "Sales — own CRM and quotes"],
@@ -294,6 +299,33 @@ export function Team({ me }: { me: Me }) {
         title="Team & access"
         subtitle={`Manage access to ${me.organization.name}. Changes are recorded in the activity log.`}
       />
+      <details>
+        <summary>Built-in role permissions</summary>
+        <p>
+          Current action permissions are shared by the interface and server.
+          Sales ownership checks still apply. Viewer access is read-only CRM and
+          sales, not accounting. Custom roles and per-entity grants are not
+          available yet.
+        </p>
+        <Table
+          label="Built-in role permissions"
+          headers={[
+            "Action",
+            ...policyRoles.map((r) => r[0].toUpperCase() + r.slice(1)),
+          ]}
+        >
+          {capabilities.map((c) => (
+            <tr key={c.key}>
+              <td>{c.label}</td>
+              {policyRoles.map((r) => (
+                <td key={r}>
+                  {hasCapability(r, c.key) ? "Allowed" : "Not allowed"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </Table>
+      </details>
       {action.error || q.error ? (
         <ErrorBox error={action.error || q.error!.message} />
       ) : null}

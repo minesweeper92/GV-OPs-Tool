@@ -794,6 +794,15 @@ test("team invitation, cancellation and member access are usable and audited", a
   await expect(
     page.getByRole("heading", { name: "Team & access", exact: true }),
   ).toBeVisible();
+  await page.getByText("Built-in role permissions", { exact: true }).click();
+  const permissions = page.getByRole("region", {
+    name: "Built-in role permissions",
+  });
+  await expect(
+    permissions
+      .getByRole("row")
+      .filter({ hasText: "Approve and post vendor bills" }),
+  ).toContainText("AllowedNot allowedNot allowedNot allowed");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({
     path: "test-results/new-workspace-team.png",

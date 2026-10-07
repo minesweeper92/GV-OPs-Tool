@@ -6,6 +6,7 @@ import { cashAccount } from "./bank-account.ts";
 import { createProjectInvoice } from "./projects.ts";
 import { detailsSnapshot } from "./documents.ts";
 import { allocateNumber, createNumberSeries } from "./numbering.ts";
+import { hasCapability } from "../shared/permissions.ts";
 export type Context = {
   tenantId: string;
   userId: string;
@@ -24,11 +25,11 @@ const reject = (status: number, message: string): never => {
   throw new Problem(status, message);
 };
 const crm = (ctx: Context) => {
-  if (!["admin", "sales"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "crm.sales"))
     reject(403, "Your role cannot change CRM records.");
 };
 const finance = (ctx: Context) => {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.post"))
     reject(403, "Your role cannot post or view the books.");
 };
 export const chart = [

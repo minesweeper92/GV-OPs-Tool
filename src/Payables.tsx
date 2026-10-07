@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
+import { hasCapability } from "../shared/permissions";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Heading,
@@ -342,7 +343,8 @@ export function Payables({
                 </button>
               </>
             ) : null}
-            {b.status === "Pending approval" && me.user.role === "admin" ? (
+            {b.status === "Pending approval" &&
+            hasCapability(me.user.role, "bills.approve") ? (
               <>
                 <button onClick={() => setEditor({ kind: "return", bill: b })}>
                   Return to draft
