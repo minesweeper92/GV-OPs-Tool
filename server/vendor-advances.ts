@@ -8,6 +8,7 @@ import {
   prepaymentCostAdjustment,
 } from "../shared/prepayment.ts";
 import { cashAccount } from "./bank-account.ts";
+import { hasCapability } from "../shared/permissions.ts";
 const day = (v: unknown) => String(v).slice(0, 10);
 async function get(tx: SQL, table: string, id: string, lock = false) {
   const row = (
@@ -130,7 +131,7 @@ async function changeBill(
   );
 }
 export async function executeVendorAdvance(tx: SQL, ctx: Context, c: Row) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.post"))
     throw new Problem(403, "Finance access is required for vendor advances.");
   const id = uuid();
   if (c.action === "vendor-advance.create") {
@@ -549,7 +550,7 @@ export async function executeVendorAdvance(tx: SQL, ctx: Context, c: Row) {
   return { id };
 }
 export async function vendorAdvanceSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.view"))
     return {
       vendorAdvances: [],
       vendorAdvanceApplications: [],
