@@ -23,6 +23,10 @@ import { creditSnapshot, executeCredit } from "./credits.ts";
 import { vendorCreditSnapshot, executeVendorCredit } from "./vendor-credits.ts";
 import { recurringSnapshot, executeRecurring } from "./recurring.ts";
 import {
+  vendorAdvanceSnapshot,
+  executeVendorAdvance,
+} from "./vendor-advances.ts";
+import {
   billScheduleSnapshot,
   executeBillSchedule,
 } from "./recurring-bills.ts";
@@ -438,6 +442,7 @@ export function createApp(
         ...(await creditSnapshot(tx, ctx)),
         ...(await vendorCreditSnapshot(tx, ctx)),
         ...(await recurringSnapshot(tx, ctx)),
+        ...(await vendorAdvanceSnapshot(tx, ctx)),
         ...(await billScheduleSnapshot(tx, ctx)),
         ...(await journalScheduleSnapshot(tx, ctx)),
         ...(await crmSnapshot(tx, ctx)),
@@ -588,20 +593,22 @@ export function createApp(
                             ? executeCredit(tx, ctx, c)
                             : c.action.startsWith("vendor-credit.")
                               ? executeVendorCredit(tx, ctx, c)
-                              : c.action.startsWith("project.") ||
-                                  [
-                                    "invoice.cancel",
-                                    "invoice.recognise",
-                                  ].includes(c.action)
-                                ? executeProject(tx, ctx, c)
-                                : c.action.startsWith("bank.")
-                                  ? executeBank(tx, ctx, c)
-                                  : c.action.startsWith("purchase-order.")
-                                    ? executePurchaseOrder(tx, ctx, c)
-                                    : c.action.startsWith("bill.") ||
-                                        c.action.startsWith("vendor-payment.")
-                                      ? executePayable(tx, ctx, c)
-                                      : execute(tx, ctx, c),
+                              : c.action.startsWith("vendor-advance.")
+                                ? executeVendorAdvance(tx, ctx, c)
+                                : c.action.startsWith("project.") ||
+                                    [
+                                      "invoice.cancel",
+                                      "invoice.recognise",
+                                    ].includes(c.action)
+                                  ? executeProject(tx, ctx, c)
+                                  : c.action.startsWith("bank.")
+                                    ? executeBank(tx, ctx, c)
+                                    : c.action.startsWith("purchase-order.")
+                                      ? executePurchaseOrder(tx, ctx, c)
+                                      : c.action.startsWith("bill.") ||
+                                          c.action.startsWith("vendor-payment.")
+                                        ? executePayable(tx, ctx, c)
+                                        : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

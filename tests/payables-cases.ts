@@ -435,6 +435,402 @@ export async function verifyPayables(t: TestContext, db: Database) {
     },
   );
   await t.test(
+    "vendor advances retain historical prepayment costs, settle bills once and reverse exactly",
+    async () => {
+      const vendor = await accountant.command({
+        action: "company.create",
+        name: `Advance vendor ${uuid()}`,
+        vendor: true,
+        customer: false,
+        domain: "",
+        industry: "",
+        tax_id: "",
+        address: "",
+        service_entity_id: null,
+      });
+      const create = {
+        action: "vendor-advance.create",
+        entity_id: entity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        currency: "USD",
+        date: "2038-01-01",
+        amount: "100",
+        wht: "0",
+        fee: "1",
+        fx: "280",
+        bank_account_id: null,
+        purpose: "operating",
+        reference: `ADV-${uuid()}`,
+        notes: "Purchase prepayment, not a security deposit",
+        request_key: uuid(),
+      };
+      await rep.command(create, 403);
+      const a = await accountant.command(create);
+      assert.equal((await accountant.command(create)).id, a.id);
+      await assert.rejects(
+        inTenant(db, tenant, (tx) =>
+          tx.query(
+            "UPDATE vendor_advances SET reference='Silent change' WHERE id=$1",
+            [a.id],
+          ),
+        ),
+        /immutable/i,
+      );
+      await inTenant(db, other, async (tx) => {
+        assert.equal(
+          (await tx.query("SELECT id FROM vendor_advances WHERE id=$1", [a.id]))
+            .rows.length,
+          0,
+        );
+      });
+      await accountant.command({ ...create, amount: "101" }, 409);
+      await accountant.command(
+        { ...create, request_key: uuid(), currency: "PKR", fx: "280" },
+        400,
+      );
+      const bill = await accountant.command({
+        action: "bill.create",
+        entity_id: entity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        reference: `ADV-BILL-${uuid()}`,
+        bill_date: "2038-01-02",
+        due_date: "2038-02-02",
+        currency: "USD",
+        fx: "300",
+        lines: [
+          {
+            description: "Service purchase",
+            quantity: "1",
+            price: "100",
+            tax: "0",
+            account_code: "5000",
+          },
+        ],
+        tax_treatment: "expense",
+        notes: "",
+        request_key: uuid(),
+      });
+      let b = (await accountant.get()).bills.find((b: any) => b.id === bill.id);
+      await accountant.command(
+        {
+          action: "vendor-advance.apply",
+          id: a.id,
+          bill_id: bill.id,
+          date: "2038-01-02",
+          amount: "40",
+          request_key: uuid(),
+        },
+        400,
+      );
+      await accountant.command({
+        action: "bill.submit",
+        id: b.id,
+        version: b.version,
+      });
+      b = (await accountant.get()).bills.find((b: any) => b.id === bill.id);
+      await owner.command({
+        action: "bill.approve",
+        id: b.id,
+        version: b.version,
+      });
+      const apply = {
+        action: "vendor-advance.apply",
+        id: a.id,
+        bill_id: bill.id,
+        date: "2038-01-03",
+        amount: "40",
+        request_key: uuid(),
+      };
+      const application = await accountant.command(apply);
+      assert.equal((await accountant.command(apply)).id, application.id);
+      await accountant.command({ ...apply, amount: "41" }, 409);
+      const journal = (
+        await db.query(
+          "SELECT l.account_code,l.debit_minor,l.credit_minor FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_type='vendor-advance-application' AND j.source_id=$1",
+          [application.id],
+        )
+      ).rows;
+      assert.equal(
+        journal.find((l) => l.account_code === "2000")!.debit_minor,
+        "1200000",
+      );
+      assert.equal(
+        journal.find((l) => l.account_code === "1400")!.credit_minor,
+        "1120000",
+      );
+      assert.equal(
+        journal.find((l) => l.account_code === "5000")!.credit_minor,
+        "80000",
+      );
+      assert.ok(
+        !journal.some((l) => ["4100", "5100", "1000"].includes(l.account_code)),
+      );
+      await accountant.command(
+        {
+          action: "vendor-credit.create",
+          bill_id: bill.id,
+          date: "2038-01-03",
+          reference: "Credit",
+          reason: "Return",
+          lines: [{ index: 0, amount: "10" }],
+          request_key: uuid(),
+        },
+        409,
+      );
+      await inTenant(db, tenant, async (tx) => {
+        const ctx = {
+          tenantId: tenant,
+          userId: finance,
+          role: "finance" as const,
+        };
+        const statement = await partyStatement(tx, ctx, {
+          kind: "vendor",
+          companyId: vendor.id,
+          entityId: entity,
+          from: "2038-01-01",
+          to: "2038-01-03",
+        });
+        const group = statement.groups.find((g) => g.currency === "USD")!;
+        assert.equal(group.availableAdvance, "6000");
+        assert.equal(group.closing, "0");
+        assert.equal(group.closingBase, "120000");
+        const historical = await ageing(
+          tx,
+          [entity],
+          "2038-01-02",
+          "ap",
+          3000000n,
+          vendor.id,
+        );
+        assert.equal(
+          historical.documents.find((d) => d.id === bill.id)?.outstanding,
+          "10000",
+        );
+        const current = await ageing(
+          tx,
+          [entity],
+          "2038-01-03",
+          "ap",
+          1800000n,
+          vendor.id,
+        );
+        assert.equal(current.difference, "0");
+      });
+      const final = await accountant.command({
+        ...apply,
+        date: "2038-01-04",
+        amount: "60",
+        request_key: uuid(),
+      });
+      b = (await accountant.get()).bills.find((b: any) => b.id === bill.id);
+      assert.equal(b.status, "Paid");
+      assert.equal(b.paid_base_minor, "3000000");
+      await accountant.command(
+        {
+          action: "vendor-advance.reverse",
+          id: a.id,
+          date: "2038-01-05",
+          reason: "Correction",
+        },
+        409,
+      );
+      await accountant.command(
+        {
+          action: "vendor-advance.refund",
+          id: a.id,
+          date: "2038-01-05",
+          amount: "1",
+          fee: "0",
+          fx: "290",
+          bank_account_id: null,
+          reference: "Too much",
+          request_key: uuid(),
+        },
+        400,
+      );
+      const reverse = {
+        action: "vendor-advance.reverse-application",
+        id: final.id,
+        date: "2038-01-05",
+        reason: "Correction",
+      };
+      const reversed = await accountant.command(reverse);
+      assert.equal((await accountant.command(reverse)).id, reversed.id);
+      await accountant.command({ ...reverse, reason: "Changed" }, 409);
+      await accountant.command({
+        action: "vendor-advance.reverse-application",
+        id: application.id,
+        date: "2038-01-06",
+        reason: "Correction",
+      });
+      const refund = {
+        action: "vendor-advance.refund",
+        id: a.id,
+        date: "2038-01-07",
+        amount: "100",
+        fee: "2",
+        fx: "290",
+        bank_account_id: null,
+        reference: "Refund received",
+        request_key: uuid(),
+      };
+      const f = await accountant.command(refund);
+      assert.equal((await accountant.command(refund)).id, f.id);
+      const refundJournal = (
+        await db.query(
+          "SELECT l.account_code,l.debit_minor,l.credit_minor FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_type='vendor-advance-refund' AND j.source_id=$1",
+          [f.id],
+        )
+      ).rows;
+      assert.equal(
+        refundJournal.find((l) => l.account_code === "1000")!.debit_minor,
+        "2842000",
+      );
+      assert.equal(
+        refundJournal.find((l) => l.account_code === "4100")!.credit_minor,
+        "100000",
+      );
+      await accountant.command({
+        action: "vendor-advance.reverse-refund",
+        id: f.id,
+        date: "2038-01-08",
+        reason: "Bank correction",
+      });
+      await accountant.command({
+        action: "vendor-advance.reverse",
+        id: a.id,
+        date: "2038-01-09",
+        reason: "Bank correction",
+      });
+      await db.query("UPDATE entities SET lock_date='2038-01-09' WHERE id=$1", [
+        entity,
+      ]);
+      assert.equal((await accountant.command(create)).id, a.id);
+      await accountant.command({ ...create, request_key: uuid() }, 409);
+      await db.query("UPDATE entities SET lock_date=NULL WHERE id=$1", [
+        entity,
+      ]);
+      assert.equal((await rep.get()).vendorAdvances.length, 0);
+      const balance = (
+        await db.query(
+          "SELECT sum(l.debit_minor-l.credit_minor)::text AS n FROM journal_lines l JOIN journals j ON j.id=l.journal_id WHERE j.source_type LIKE 'vendor-advance%' AND j.entity_id=$1 GROUP BY l.account_code",
+          [entity],
+        )
+      ).rows;
+      assert.ok(balance.every((l) => l.n === "0"));
+    },
+  );
+  await t.test(
+    "capital vendor advances classify actual cash and withholding without accruing an expense",
+    async () => {
+      const bank = await owner.command({
+        action: "bank.create",
+        entity_id: secondEntity,
+        name: "Advance bank",
+        reference: "VA-TEST",
+        opening_on: "2039-01-01",
+        opening: "1000",
+        offset_code: "3000",
+        request_key: uuid(),
+      });
+      const c = {
+        action: "vendor-advance.create",
+        entity_id: secondEntity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        currency: "PKR",
+        date: "2039-01-02",
+        amount: "90",
+        wht: "10",
+        fee: "1",
+        fx: "1",
+        bank_account_id: bank.id,
+        purpose: "investing",
+        reference: `Equipment deposit ${uuid()}`,
+        notes: "",
+        request_key: uuid(),
+      };
+      const a = await accountant.command(c);
+      await inTenant(db, tenant, async (tx) => {
+        const report = await financialReports(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          { entityId: secondEntity, from: "2039-01-02", to: "2039-01-02" },
+        );
+        assert.equal(report.cash.investing, "-9000");
+        assert.equal(report.cash.operating, "-100");
+        assert.equal(report.cash.difference, "0");
+        assert.deepEqual(report.cash.unsupported, []);
+      });
+      const b = await accountant.command({
+        action: "bill.create",
+        entity_id: secondEntity,
+        vendor_id: vendor.id,
+        deal_id: null,
+        reference: `Equipment bill ${uuid()}`,
+        bill_date: "2039-01-03",
+        due_date: "2039-01-03",
+        currency: "PKR",
+        fx: "1",
+        lines: [
+          {
+            description: "Equipment",
+            quantity: "1",
+            price: "100",
+            tax: "0",
+            account_code: "1500",
+          },
+        ],
+        tax_treatment: "expense",
+        notes: "",
+        request_key: uuid(),
+      });
+      await accountant.command({ action: "bill.submit", id: b.id, version: 1 });
+      await owner.command({ action: "bill.approve", id: b.id, version: 2 });
+      await accountant.command({
+        action: "vendor-advance.apply",
+        id: a.id,
+        bill_id: b.id,
+        date: "2039-01-04",
+        amount: "100",
+        request_key: uuid(),
+      });
+      const profile = (await accountant.get()).vendorAdvances.find(
+        (v: any) => v.id === a.id,
+      );
+      assert.equal(profile.applied_minor, "10000");
+      assert.equal(profile.applied_base_minor, "10000");
+      await inTenant(db, tenant, async (tx) => {
+        const report = await financialReports(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          { entityId: secondEntity, from: "2039-01-02", to: "2039-01-04" },
+        );
+        assert.equal(report.cash.investing, "-9000");
+        assert.equal(report.cash.operating, "-100");
+        assert.equal(report.cash.difference, "0");
+        assert.equal(report.balanceDifference, "0");
+        const statement = await partyStatement(
+          tx,
+          { tenantId: tenant, userId: admin, role: "admin" },
+          {
+            kind: "vendor",
+            companyId: vendor.id,
+            entityId: secondEntity,
+            from: "2039-01-01",
+            to: "2039-01-04",
+          },
+        );
+        assert.equal(
+          statement.groups.find((g) => g.currency === "PKR")!.availableAdvance,
+          "0",
+        );
+      });
+    },
+  );
+  await t.test(
     "purchase orders reserve partial bills, retry safely and never post directly",
     async () => {
       const command = {

@@ -128,6 +128,18 @@ export async function executeVendorCredit(tx: SQL, ctx: Context, c: Row) {
   if (c.action === "vendor-credit.create") {
     const prior = await retry(tx, "vendor_credits", c);
     if (prior) return { id: prior.id };
+    if (
+      (
+        await tx.query(
+          "SELECT a.id FROM vendor_advance_applications a WHERE a.bill_id=$1 AND NOT EXISTS(SELECT 1 FROM vendor_advance_application_reversals r WHERE r.application_id=a.id)",
+          [b.id],
+        )
+      ).rows.length
+    )
+      throw new Problem(
+        409,
+        "Reverse this bill's advance applications before recording a vendor credit, so historical prepayment costs remain correct.",
+      );
     if (!["Open", "Paid"].includes(b.status) || b.opening_batch_id)
       throw new Problem(
         409,

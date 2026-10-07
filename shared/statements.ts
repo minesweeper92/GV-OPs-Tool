@@ -17,7 +17,12 @@ export interface StatementEntry {
   balance: string;
   baseBalance: string;
   link_type:
-    "invoice" | "bill" | "credit" | "vendor-credits" | "vendor-payments";
+    | "invoice"
+    | "bill"
+    | "credit"
+    | "vendor-credits"
+    | "vendor-payments"
+    | "vendor-advances";
   link_id: string;
 }
 export interface StatementGroup {
@@ -33,6 +38,7 @@ export interface StatementGroup {
   decreases: string;
   outstanding: string;
   availableCredit: string;
+  availableAdvance: string;
   entries: StatementEntry[];
   documents: AgedDocument[];
 }

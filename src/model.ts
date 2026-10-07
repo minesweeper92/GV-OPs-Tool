@@ -267,6 +267,9 @@ export interface Data {
   recurringOccurrences: import("../shared/recurring").RecurringOccurrence[];
   billSchedules: import("../shared/recurring-bills").BillSchedule[];
   billScheduleOccurrences: import("../shared/recurring-bills").BillScheduleOccurrence[];
+  vendorAdvances: import("../shared/vendor-advances").VendorAdvance[];
+  vendorAdvanceApplications: import("../shared/vendor-advances").VendorAdvanceApplication[];
+  vendorAdvanceRefunds: import("../shared/vendor-advances").VendorAdvanceRefund[];
   credits: import("../shared/billing").CreditNote[];
   creditApplications: import("../shared/billing").CreditApplication[];
   customerRefunds: import("../shared/billing").CustomerRefund[];

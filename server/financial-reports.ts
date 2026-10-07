@@ -1,6 +1,6 @@
 import type { SQL, Row } from "./db.ts";
 import { Problem, type Context } from "./domain.ts";
-import { round } from "../shared/money.ts";
+import { round, baseAmount } from "../shared/money.ts";
 import {
   ageBucket,
   type ReportFilter,
@@ -53,7 +53,9 @@ export async function ageing(
     UNION ALL
     SELECT p.bill_id,j.id,p.amount_minor+p.wht_minor FROM vendor_payments p JOIN vendor_payment_reversals r ON r.payment_id=p.id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'
     UNION ALL SELECT a.bill_id,j.id,-a.amount_minor FROM vendor_credit_applications a JOIN journals j ON j.source_id=a.id AND j.source_type='vendor-credit-application'
-    UNION ALL SELECT a.bill_id,j.id,a.amount_minor FROM vendor_application_reversals r JOIN vendor_credit_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-credit-application-reversal'`;
+    UNION ALL SELECT a.bill_id,j.id,a.amount_minor FROM vendor_application_reversals r JOIN vendor_credit_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-credit-application-reversal'
+    UNION ALL SELECT a.bill_id,j.id,-a.amount_minor FROM vendor_advance_applications a JOIN journals j ON j.source_id=a.id AND j.source_type='vendor-advance-application'
+    UNION ALL SELECT a.bill_id,j.id,a.amount_minor FROM vendor_advance_application_reversals r JOIN vendor_advance_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-advance-application-reversal'`;
   const documents =
     kind === "ar"
       ? `SELECT i.id,i.entity_id,i.company_id AS party_id,i.customer_name AS party,i.number,i.issue_date AS date,i.due_date,i.currency FROM invoices i`
@@ -192,6 +194,22 @@ export async function financialReports(
     allocationMap.set(a.id, -equipmentCash);
     if (a.reversal_id) allocationMap.set(a.reversal_id, equipmentCash);
   }
+  const advanceFlows = (
+    await tx.query(
+      `
+    SELECT v.id,v.purpose,v.amount_minor AS amount,v.fx_micros,r.id AS reversal_id,-1 AS sign FROM vendor_advances v LEFT JOIN vendor_advance_reversals r ON r.advance_id=v.id WHERE v.entity_id=ANY($1::uuid[])
+    UNION ALL SELECT f.id,v.purpose,f.amount_minor,f.fx_micros,r.id,1 FROM vendor_advance_refunds f JOIN vendor_advances v ON v.id=f.advance_id LEFT JOIN vendor_advance_refund_reversals r ON r.refund_id=f.id WHERE v.entity_id=ANY($1::uuid[])`,
+      [ids],
+    )
+  ).rows;
+  for (const a of advanceFlows) {
+    const capitalCash =
+      a.purpose === "investing"
+        ? baseAmount(BigInt(a.amount), BigInt(a.fx_micros)) * BigInt(a.sign)
+        : 0n;
+    allocationMap.set(a.id, capitalCash);
+    if (a.reversal_id) allocationMap.set(a.reversal_id, -capitalCash);
+  }
   for (const j of cashJournals) {
     if (BigInt(j.cash) === 0n) continue; // Transfers between cash accounts are not cash flows.
     if (
@@ -200,6 +218,10 @@ export async function financialReports(
         "vendor-payment-reversal",
         "vendor-payment-batch",
         "vendor-payment-batch-reversal",
+        "vendor-advance",
+        "vendor-advance-reversal",
+        "vendor-advance-refund",
+        "vendor-advance-refund-reversal",
       ].includes(j.source_type)
     ) {
       if (!allocationMap.has(j.source_id)) unsupported.add(j.source_type);

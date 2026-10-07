@@ -34,6 +34,12 @@ const labels: Record<string, string> = {
   "vendor-credit-application-reversal": "Vendor application reversed",
   "vendor-refund": "Refund received",
   "vendor-refund-reversal": "Vendor refund reversed",
+  "vendor-advance": "Vendor advance paid",
+  "vendor-advance-reversal": "Vendor advance reversed",
+  "vendor-advance-application": "Advance applied to bill",
+  "vendor-advance-application-reversal": "Advance application reversed",
+  "vendor-advance-refund": "Advance refund received",
+  "vendor-advance-refund-reversal": "Advance refund reversed",
 };
 function exportStatement(r: PartyStatement) {
   const rows: string[][] = [
@@ -106,6 +112,17 @@ function exportStatement(r: PartyStatement) {
       "",
       decimal(g.availableCredit),
     ]);
+    if (r.filter.kind === "vendor")
+      rows.push([
+        g.entity_code,
+        g.currency,
+        r.filter.to,
+        "Available advances",
+        "",
+        "",
+        "",
+        decimal(g.availableAdvance || "0"),
+      ]);
   }
   const cell = (v: string) =>
     `"${(/^[\s]*[=+@-]/.test(v) ? "'" + v : v).replaceAll('"', '""')}"`;
@@ -273,11 +290,20 @@ export function PartyStatements({
                     <span>Available credits</span>
                     <strong>{money(g.availableCredit, g.currency)}</strong>
                   </p>
+                  {kind === "vendor" ? (
+                    <p>
+                      <span>Available advances</span>
+                      <strong>
+                        {money(g.availableAdvance || "0", g.currency)}
+                      </strong>
+                    </p>
+                  ) : null}
                 </div>
                 <p className="muted">
                   Net balance is unpaid{" "}
                   {kind === "customer" ? "invoices" : "bills"} less available
-                  credits. Credits are not automatically applied. A negative
+                  credits{kind === "vendor" ? " and available advances" : ""}.
+                  Credits and advances are not automatically applied. A negative
                   balance is
                   {kind === "customer"
                     ? "credit in the customer's favour."

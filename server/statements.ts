@@ -46,6 +46,14 @@ const vendorEffects = `
  UNION ALL SELECT 'vendor-refund',f.id,b.vendor_id,b.currency,f.reference,f.amount_minor,-f.amount_minor,'vendor-credits',v.id FROM vendor_refunds f JOIN vendor_credits v ON v.id=f.credit_id JOIN bills b ON b.id=v.bill_id
  UNION ALL SELECT 'vendor-refund-reversal',r.id,b.vendor_id,b.currency,v.number,-f.amount_minor,f.amount_minor,'vendor-credits',v.id FROM vendor_refund_reversals r JOIN vendor_refunds f ON f.id=r.refund_id JOIN vendor_credits v ON v.id=f.credit_id JOIN bills b ON b.id=v.bill_id`;
 
+const vendorAdvanceEffects = `
+ SELECT 'vendor-advance',v.id,v.vendor_id,v.currency,v.reference,-v.total_minor,0::bigint,'vendor-advances',v.id,v.total_minor,-v.base_minor FROM vendor_advances v
+ UNION ALL SELECT 'vendor-advance-reversal',r.id,v.vendor_id,v.currency,v.reference,v.total_minor,0,'vendor-advances',v.id,-v.total_minor,v.base_minor FROM vendor_advance_reversals r JOIN vendor_advances v ON v.id=r.advance_id
+ UNION ALL SELECT 'vendor-advance-application',a.id,v.vendor_id,v.currency,v.reference,0,0,'vendor-advances',v.id,-a.amount_minor,a.carrying_minor-a.bill_carrying_minor FROM vendor_advance_applications a JOIN vendor_advances v ON v.id=a.advance_id
+ UNION ALL SELECT 'vendor-advance-application-reversal',r.id,v.vendor_id,v.currency,v.reference,0,0,'vendor-advances',v.id,a.amount_minor,a.bill_carrying_minor-a.carrying_minor FROM vendor_advance_application_reversals r JOIN vendor_advance_applications a ON a.id=r.application_id JOIN vendor_advances v ON v.id=a.advance_id
+ UNION ALL SELECT 'vendor-advance-refund',f.id,v.vendor_id,v.currency,f.reference,f.amount_minor,0,'vendor-advances',v.id,-f.amount_minor,f.carrying_minor FROM vendor_advance_refunds f JOIN vendor_advances v ON v.id=f.advance_id
+ UNION ALL SELECT 'vendor-advance-refund-reversal',r.id,v.vendor_id,v.currency,f.reference,-f.amount_minor,0,'vendor-advances',v.id,f.amount_minor,-f.carrying_minor FROM vendor_advance_refund_reversals r JOIN vendor_advance_refunds f ON f.id=r.refund_id JOIN vendor_advances v ON v.id=f.advance_id`;
+
 export async function partyStatement(
   tx: SQL,
   ctx: Context,
@@ -72,10 +80,10 @@ export async function partyStatement(
   const customer = filter.kind === "customer";
   const rows = (
     await tx.query(
-      `WITH effects AS (${customer ? customerEffects : vendorEffects})
-    SELECT j.id,j.posted_on AS date,j.description,ef.type,ef.number,ef.amount::text,ef.credit_delta::text,
+      `WITH original_effects AS (${customer ? customerEffects : vendorEffects}), effects AS (SELECT original_effects.*,0::bigint AS advance_delta,NULL::bigint AS base_override FROM original_effects ${customer ? "" : `UNION ALL ${vendorAdvanceEffects}`})
+    SELECT j.id,j.posted_on AS date,j.description,ef.type,ef.number,ef.amount::text,ef.credit_delta::text,ef.advance_delta::text,
       ef.currency,ef.link_type,ef.link_id,j.entity_id,e.code AS entity_code,e.name AS entity_name,
-      (${customer ? "" : "-"}coalesce(l.delta,0))::text AS base
+      coalesce(ef.base_override,${customer ? "" : "-"}coalesce(l.delta,0))::text AS base
     FROM effects ef JOIN journals j ON j.source_type=ef.type AND j.source_id=ef.id
     JOIN entities e ON e.id=j.entity_id
     LEFT JOIN (SELECT journal_id,sum(debit_minor-credit_minor) AS delta FROM journal_lines
@@ -112,6 +120,7 @@ export async function partyStatement(
         decreases: "0",
         outstanding: "0",
         availableCredit: "0",
+        availableAdvance: "0",
         entries: [],
         documents: [],
       };
@@ -125,6 +134,9 @@ export async function partyStatement(
     g.closingBase = String(BigInt(g.closingBase) + BigInt(r.base));
     g.availableCredit = String(
       BigInt(g.availableCredit) + BigInt(r.credit_delta),
+    );
+    g.availableAdvance = String(
+      BigInt(g.availableAdvance) + BigInt(r.advance_delta),
     );
     if (r.date < filter.from) {
       g.opening = g.closing;

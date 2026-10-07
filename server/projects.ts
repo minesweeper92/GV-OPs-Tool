@@ -551,6 +551,12 @@ export async function projectSnapshot(tx: SQL, ctx: Context) {
  UNION ALL SELECT b.deal_id,j.id FROM vendor_payment_reversals r JOIN vendor_payments p ON p.id=r.payment_id JOIN bills b ON b.id=p.bill_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-reversal'
  UNION ALL SELECT b.deal_id,j.id FROM vendor_credits v JOIN bills b ON b.id=v.bill_id JOIN journals j ON j.source_id=v.id AND j.source_type='vendor-credit'
  UNION ALL SELECT b.deal_id,j.id FROM vendor_credit_reversals r JOIN vendor_credits v ON v.id=r.credit_id JOIN bills b ON b.id=v.bill_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-credit-reversal'
+ UNION ALL SELECT v.deal_id,j.id FROM vendor_advances v JOIN journals j ON j.source_id=v.id AND j.source_type='vendor-advance'
+ UNION ALL SELECT v.deal_id,j.id FROM vendor_advance_reversals r JOIN vendor_advances v ON v.id=r.advance_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-advance-reversal'
+ UNION ALL SELECT b.deal_id,j.id FROM vendor_advance_applications a JOIN bills b ON b.id=a.bill_id JOIN journals j ON j.source_id=a.id AND j.source_type='vendor-advance-application'
+ UNION ALL SELECT b.deal_id,j.id FROM vendor_advance_application_reversals r JOIN vendor_advance_applications a ON a.id=r.application_id JOIN bills b ON b.id=a.bill_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-advance-application-reversal'
+ UNION ALL SELECT v.deal_id,j.id FROM vendor_advance_refunds f JOIN vendor_advances v ON v.id=f.advance_id JOIN journals j ON j.source_id=f.id AND j.source_type='vendor-advance-refund'
+ UNION ALL SELECT v.deal_id,j.id FROM vendor_advance_refund_reversals r JOIN vendor_advance_refunds f ON f.id=r.refund_id JOIN vendor_advances v ON v.id=f.advance_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-advance-refund-reversal'
  ), amounts AS (
  SELECT s.deal_id,
  coalesce(sum(l.credit_minor-l.debit_minor) FILTER(WHERE l.account_code IN ('4000','4020')),0)::text AS revenue,
