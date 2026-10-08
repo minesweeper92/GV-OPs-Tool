@@ -44,10 +44,12 @@ type Preview = {
 export function MonthEndClose({
   entity,
   canClose,
+  canPost,
   onRun,
 }: {
   entity: Entity;
   canClose: boolean;
+  canPost: boolean;
   onRun: (command: Record<string, unknown>) => Promise<{ id: string }>;
 }) {
   const [month, setMonth] = useState(() =>
@@ -78,7 +80,8 @@ export function MonthEndClose({
       : preview?.status === "Soft closed"
         ? "Closed"
         : "Open";
-  const canAct = !legacyLocked && (action === "Soft closed" || canClose);
+  const canAct =
+    canPost && !legacyLocked && (action === "Soft closed" || canClose);
 
   async function transition(to: PeriodStatus) {
     if (!preview || busy) return;

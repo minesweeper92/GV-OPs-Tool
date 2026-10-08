@@ -110,3 +110,32 @@ test("two-stage approval never lets the first reviewer post or skip final admini
     false,
   );
 });
+
+test("bill review follows effective capabilities, not the base role alone", () => {
+  const bill = { created_by: "creator", base_minor: "100" };
+  const policy = {
+    bill_finance_limit_minor: "1000",
+    bill_separate_approver: false,
+  };
+  const narrowed = { role: "finance", capabilities: ["books.view"] };
+  const full = {
+    role: "finance",
+    capabilities: ["books.view", "books.post", "contacts.manage"],
+  };
+  assert.deepEqual(billReviewDecision(narrowed, "other", bill, policy), {
+    allowed: false,
+    reason:
+      "Permission to record financial transactions is required to review vendor bills.",
+  });
+  assert.equal(canReviewBill(full, "other", bill, policy), true);
+  // A profile cannot grant what its template lacks.
+  assert.equal(
+    canReviewBill(
+      { role: "sales", capabilities: ["books.post"] },
+      "other",
+      bill,
+      policy,
+    ),
+    false,
+  );
+});

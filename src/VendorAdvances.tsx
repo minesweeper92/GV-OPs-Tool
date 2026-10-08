@@ -9,6 +9,7 @@ import {
   writeBrowserDraft,
   clearBrowserDraft,
 } from "./browserDraft";
+import { hasCapability } from "../shared/permissions";
 
 const schema = z.object({
   savedAt: z.number(),
@@ -202,18 +203,19 @@ export default function VendorAdvances({
       </select>
     </Field>
   );
-  if (!["admin", "finance"].includes(me.user.role))
+  if (!hasCapability(me.user, "books.view"))
     return (
       <Empty title="Finance access required">
         Vendor advances are restricted to finance and administrators.
       </Empty>
     );
+  const canPost = hasCapability(me.user, "books.post");
   return (
     <>
       <Heading
         title="Vendor advances"
         subtitle="Record purchase prepayments, apply them to approved bills, and track unused balances. This records money already paid—it does not send a payment."
-        action="Record advance"
+        action={canPost ? "Record advance" : undefined}
         onAction={() => {
           setError("");
           setOpen(true);
@@ -266,7 +268,7 @@ export default function VendorAdvances({
                 : "Operating purchase"}
               {selected.notes ? ` · ${selected.notes}` : ""}
             </p>
-            {!selected.reversal_date && (
+            {canPost && !selected.reversal_date && (
               <div className="actions">
                 <button
                   disabled={busy || available <= 0n || !bills.length}
@@ -292,7 +294,7 @@ export default function VendorAdvances({
                 </button>
               </div>
             )}
-            {!selected.reversal_date && !bills.length && (
+            {canPost && !selected.reversal_date && !bills.length && (
               <p>
                 No matching open bill. Create and approve a bill for this
                 vendor, entity and currency before applying the advance.
@@ -327,7 +329,7 @@ export default function VendorAdvances({
                     : "Applied"}
                 </td>
                 <td>
-                  {!a.reversal_date && (
+                  {canPost && !a.reversal_date && (
                     <button
                       disabled={busy}
                       onClick={() => start("reverse-application", a.id)}
@@ -362,7 +364,7 @@ export default function VendorAdvances({
                     : "Recorded"}
                 </td>
                 <td>
-                  {!r.reversal_date && (
+                  {canPost && !r.reversal_date && (
                     <button
                       disabled={busy}
                       onClick={() => start("reverse-refund", r.id)}

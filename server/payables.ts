@@ -565,7 +565,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     if (["bill.approve", "bill.return", "bill.review"].includes(c.action)) {
       const policy = await get(tx, "entities", b.entity_id);
       const decision = billReviewDecision(
-        ctx.role,
+        ctx,
         ctx.userId,
         {
           created_by: b.created_by,

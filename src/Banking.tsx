@@ -15,6 +15,7 @@ import {
   signedMinor,
   type BankDetail,
 } from "../shared/banking";
+import { hasCapability } from "../shared/permissions";
 
 export function BankSelect({
   data,
@@ -358,7 +359,8 @@ export function Banking({
         ? selected.filter((x) => x !== id)
         : [...selected, id],
     );
-  const draft = d?.statement?.status === "Draft";
+  const canPost = hasCapability(me.user, "books.post"),
+    editable = canPost && d?.statement?.status === "Draft";
   return (
     <>
       {id ? <a href="#banking">← All bank accounts</a> : null}
@@ -369,7 +371,7 @@ export function Banking({
             ? `${d?.account.entity_code || ""} · PKR · Statement matching and reconciliation`
             : "Named bank ledgers, statement imports and reconciled balances."
         }
-        action={id ? undefined : "Add bank account"}
+        action={id || !canPost ? undefined : "Add bank account"}
         onAction={() => setModal("account")}
       />
       {error ? <ErrorBox error={error} /> : null}
@@ -433,14 +435,16 @@ export function Banking({
                     ))}
                   </select>
                 </Field>
-                <button
-                  disabled={
-                    busy || d.statements.some((s) => s.status === "Draft")
-                  }
-                  onClick={() => setModal("import")}
-                >
-                  Import statement
-                </button>
+                {canPost ? (
+                  <button
+                    disabled={
+                      busy || d.statements.some((s) => s.status === "Draft")
+                    }
+                    onClick={() => setModal("import")}
+                  >
+                    Import statement
+                  </button>
+                ) : null}
               </div>
               {!d.statement ? (
                 <Empty title="Start with a statement">
@@ -479,7 +483,7 @@ export function Banking({
                     movements. All statement rows must be matched; uncleared
                     ledger items may carry forward.
                   </p>
-                  {draft ? (
+                  {editable ? (
                     <div className="bank-match-toolbar">
                       <span>
                         Selected statement: {money(bankTotal)} · Ledger:{" "}
@@ -519,7 +523,7 @@ export function Banking({
                     {d.lines.map((l) => (
                       <tr key={l.id}>
                         <td>
-                          {draft && !bankMatch.has(l.id) ? (
+                          {editable && !bankMatch.has(l.id) ? (
                             <input
                               type="checkbox"
                               aria-label={`Statement row ${l.line_no}`}
@@ -555,7 +559,7 @@ export function Banking({
                     {d.books.map((l) => (
                       <tr key={l.id}>
                         <td>
-                          {draft && !bookMatch.has(l.id) ? (
+                          {editable && !bookMatch.has(l.id) ? (
                             <input
                               type="checkbox"
                               aria-label={`Ledger ${l.description}`}
@@ -587,7 +591,7 @@ export function Banking({
                         Group {i + 1}: {m.statement_line_ids.length} statement
                         rows ↔ {m.journal_line_ids.length} ledger rows
                       </span>
-                      {draft ? (
+                      {editable ? (
                         <button
                           disabled={busy}
                           onClick={() => {
@@ -607,7 +611,7 @@ export function Banking({
                       ) : null}
                     </div>
                   ))}
-                  {draft ? (
+                  {editable ? (
                     <div className="toolbar space-top">
                       <button
                         className="primary"

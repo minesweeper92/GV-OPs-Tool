@@ -13,6 +13,7 @@ import { Heading, Table, Field, ErrorBox, Badge } from "./components";
 import { request, today, money, rate, type Data, type Me } from "./model";
 import { totals, scaled } from "../shared/money";
 import type { PurchaseOrder } from "../shared/purchase-orders";
+import { hasCapability } from "../shared/permissions";
 
 const blankLine = () => ({
   description: "",
@@ -44,7 +45,8 @@ export function PurchaseOrders({
   entity: string;
   id?: string;
 }) {
-  const cache = useQueryClient();
+  const cache = useQueryClient(),
+    canPost = hasCapability(me.user, "books.post");
   const [editing, setEditing] = useState(false),
     [billing, setBilling] = useState(false),
     [busy, setBusy] = useState(false),
@@ -117,35 +119,37 @@ export function PurchaseOrders({
         <ErrorBox error={error} />
         <div className="toolbar">
           <Badge>{po.status}</Badge>
-          <div className="row-actions">
-            {po.status === "Draft" && (
-              <button onClick={() => setEditing(true)}>Edit draft</button>
-            )}
-            {["Draft", "Closed"].includes(po.status) && (
-              <button disabled={busy} onClick={() => void status("Issued")}>
-                {po.status === "Closed" ? "Reopen" : "Issue purchase order"}
-              </button>
-            )}
-            {po.status === "Issued" && (
-              <>
-                <button className="primary" onClick={() => setBilling(true)}>
-                  Convert to bill
-                </button>
-                <button disabled={busy} onClick={() => void status("Closed")}>
-                  Close remaining order
-                </button>
-              </>
-            )}
-            {["Draft", "Issued"].includes(po.status) &&
-              !po.allocations.some((a) => a.status !== "Voided") && (
-                <button
-                  disabled={busy}
-                  onClick={() => void status("Cancelled")}
-                >
-                  Cancel order
+          {canPost ? (
+            <div className="row-actions">
+              {po.status === "Draft" && (
+                <button onClick={() => setEditing(true)}>Edit draft</button>
+              )}
+              {["Draft", "Closed"].includes(po.status) && (
+                <button disabled={busy} onClick={() => void status("Issued")}>
+                  {po.status === "Closed" ? "Reopen" : "Issue purchase order"}
                 </button>
               )}
-          </div>
+              {po.status === "Issued" && (
+                <>
+                  <button className="primary" onClick={() => setBilling(true)}>
+                    Convert to bill
+                  </button>
+                  <button disabled={busy} onClick={() => void status("Closed")}>
+                    Close remaining order
+                  </button>
+                </>
+              )}
+              {["Draft", "Issued"].includes(po.status) &&
+                !po.allocations.some((a) => a.status !== "Voided") && (
+                  <button
+                    disabled={busy}
+                    onClick={() => void status("Cancelled")}
+                  >
+                    Cancel order
+                  </button>
+                )}
+            </div>
+          ) : null}
         </div>
         <p>
           Ordered {po.order_date}
@@ -211,7 +215,7 @@ export function PurchaseOrders({
       <Heading
         title="Purchase orders"
         subtitle="Order from vendors, then convert selected quantities into bills."
-        action="New purchase order"
+        action={canPost ? "New purchase order" : undefined}
         onAction={() => setEditing(true)}
       />
       <Field label="Search purchase orders">

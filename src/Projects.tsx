@@ -17,12 +17,21 @@ type Props = {
   initialQuote?: string;
   edit: (e: Editor) => void;
   run: (c: Record<string, unknown>) => Promise<void>;
+  canPost: boolean;
 };
-export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
+export function Projects({
+  data,
+  entity,
+  id,
+  initialQuote,
+  edit,
+  run,
+  canPost,
+}: Props) {
   const project = data.projects.find(
     (p) => p.id === id && (entity === "all" || p.entity_id === entity),
   );
-  const [form, setForm] = useState(initialQuote ? "create" : ""),
+  const [form, setForm] = useState(initialQuote && canPost ? "create" : ""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [dirty, setDirty] = useState(false),
@@ -137,7 +146,7 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
           <Heading
             title={project.name}
             subtitle={`${project.code} · ${project.customer_name} · ${data.entities.find((e) => e.id === project.entity_id)?.name}`}
-            action="Edit project"
+            action={canPost ? "Edit project" : undefined}
             onAction={() => open("edit")}
           />
           <div className="record-summary">
@@ -229,7 +238,7 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
           <section>
             <div className="section-title space-top">
               <h2>Billing milestones</h2>
-              {project.status === "Active" ? (
+              {canPost && project.status === "Active" ? (
                 <button onClick={() => open("milestone")}>Add milestone</button>
               ) : null}
             </div>
@@ -279,7 +288,7 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
                           <a href={`#invoice/${invoice.id}`}>
                             {invoice.number || "Open draft"}
                           </a>
-                        ) : m.status !== "Cancelled" ? (
+                        ) : canPost && m.status !== "Cancelled" ? (
                           <div className="row-actions">
                             {project.status === "Active" ? (
                               <button
@@ -310,7 +319,7 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
           <section>
             <div className="section-title space-top">
               <h2>Invoices</h2>
-              {project.status === "Active" && free > 0n ? (
+              {canPost && project.status === "Active" && free > 0n ? (
                 <button
                   onClick={() =>
                     edit({ kind: "invoice", id: project.quote_id })
@@ -394,7 +403,7 @@ export function Projects({ data, entity, id, initialQuote, edit, run }: Props) {
           <Heading
             title="Projects"
             subtitle="Accepted work, billing milestones and the costs behind your margin."
-            action="Start project"
+            action={canPost ? "Start project" : undefined}
             onAction={() => open("create")}
           />
           {data.projects.filter(

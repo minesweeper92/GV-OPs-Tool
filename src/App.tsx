@@ -629,6 +629,7 @@ export default function App() {
           id={view === "credit" ? id : undefined}
           initialInvoice={view === "credits" ? id : undefined}
           run={run}
+          canPost={canPostBooks}
         />
       ) : (
         denied()
@@ -642,6 +643,7 @@ export default function App() {
           id={view === "schedule" ? id : undefined}
           kind={view === "recurring-expenses" ? "expense" : "invoice"}
           run={run}
+          canPost={canPostBooks}
         />
       ) : (
         denied()
@@ -680,6 +682,7 @@ export default function App() {
           initialQuote={view === "projects" ? id : undefined}
           edit={edit}
           run={run}
+          canPost={canPostBooks}
         />
       ) : (
         denied()
@@ -1637,7 +1640,7 @@ export default function App() {
           <Heading
             title="Expenses"
             subtitle="Paid project costs and general company spending."
-            action="Record expense"
+            action={canPostBooks ? "Record expense" : undefined}
             onAction={() => edit({ kind: "expense" })}
           />
           {toolbar()}
@@ -1748,6 +1751,7 @@ export default function App() {
                       view === "journal-schedules" ? "schedules" : "manual"
                     }
                     onRun={runWithResult}
+                    canPost={canPostBooks}
                   />
                 ) : view === "accounts" ? (
                   <ChartOfAccounts
@@ -1785,6 +1789,7 @@ export default function App() {
               key={entity}
               entity={data.entities.find((e) => e.id === entity)!}
               canClose={me!.user.role === "admin"}
+              canPost={canPostBooks}
               onRun={runWithResult}
             />
           )}
@@ -1995,7 +2000,10 @@ export default function App() {
             )
             .map((g) => {
               const items = g.items
-                .filter(([key]) => key !== "team" || me.user.role === "admin")
+                .filter(
+                  ([key]) =>
+                    key !== "team" || hasCapability(me.user, "team.manage"),
+                )
                 .filter(
                   ([key]) =>
                     canFinance ||
@@ -2231,9 +2239,7 @@ export default function App() {
                 data={data}
                 draftScope={`${me.organization.id}:${me.user.id}`}
                 entityId={entity}
-                canManageNumbering={
-                  me.user.role === "admin" || me.user.role === "finance"
-                }
+                canManageNumbering={canPostBooks}
                 create={runWithResult}
                 close={() => setEditor(null)}
                 done={(quoteId) => {
@@ -2258,9 +2264,7 @@ export default function App() {
                   setEditor(null);
                   location.hash = `#invoice/${invoiceId}`;
                 }}
-                canManageNumbering={
-                  me.user.role === "admin" || me.user.role === "finance"
-                }
+                canManageNumbering={canPostBooks}
               />
             ) : (
               content()

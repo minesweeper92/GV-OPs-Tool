@@ -23,7 +23,14 @@ type Form = {
   id?: string;
   key: string;
 };
-export function Recurring({ data, entity, id, kind, run }: Props) {
+export function Recurring({
+  data,
+  entity,
+  id,
+  kind,
+  run,
+  canPost,
+}: Props & { canPost: boolean }) {
   const [form, setForm] = useState<Form | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -59,7 +66,7 @@ export function Recurring({ data, entity, id, kind, run }: Props) {
               : "Recurring expenses"
         }
         subtitle="Due cycles become drafts for review. Nothing is issued, charged, emailed or paid automatically."
-        action={!p ? "New schedule" : undefined}
+        action={!p && canPost ? "New schedule" : undefined}
         onAction={() => open("new")}
       />
       {error ? <ErrorBox error={error} /> : null}
@@ -99,7 +106,7 @@ export function Recurring({ data, entity, id, kind, run }: Props) {
               drafts never change when you edit future cycles.
             </p>
             <div className="actions">
-              {["Active", "Paused"].includes(p.status) ? (
+              {canPost && ["Active", "Paused"].includes(p.status) ? (
                 <>
                   <button onClick={() => open("edit", p.id)}>
                     Edit future cycles
@@ -149,7 +156,7 @@ export function Recurring({ data, entity, id, kind, run }: Props) {
                             ?.status
                         }
                       </a>
-                    ) : o.status === "Pending review" ? (
+                    ) : canPost && o.status === "Pending review" ? (
                       <div className="actions">
                         <button onClick={() => open("post", o.id)}>
                           Review & post expense

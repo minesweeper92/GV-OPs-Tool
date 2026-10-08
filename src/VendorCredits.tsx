@@ -20,6 +20,7 @@ import {
   clearBrowserDraft,
 } from "./browserDraft";
 import type { VendorCredit } from "../shared/vendor-credits";
+import { hasCapability } from "../shared/permissions";
 type Editor = {
   kind: "create" | "apply" | "refund";
   credit?: VendorCredit;
@@ -51,9 +52,10 @@ export function VendorCredits({
   id?: string;
 }) {
   const cache = useQueryClient(),
-    credit = data.vendorCredits.find((c) => c.id === id);
+    credit = data.vendorCredits.find((c) => c.id === id),
+    canPost = hasCapability(me.user, "books.post");
   const [editor, setEditor] = useState<Editor | null>(() =>
-    id && data.bills.some((b) => b.id === id)
+    canPost && id && data.bills.some((b) => b.id === id)
       ? { kind: "create", billId: id }
       : null,
   );
@@ -122,7 +124,7 @@ export function VendorCredits({
                   : "Used"}
             </Badge>
             <div className="row-actions">
-              {!credit.reversal_date && (
+              {canPost && !credit.reversal_date && (
                 <>
                   {BigInt(credit.available) > 0n && (
                     <>
@@ -179,7 +181,7 @@ export function VendorCredits({
                   <td>{money(a.amount_minor, credit.currency)}</td>
                   <td>{a.reversal_date ? "Reversed" : "Applied"}</td>
                   <td>
-                    {!a.reversal_date && (
+                    {canPost && !a.reversal_date && (
                       <button
                         disabled={busy}
                         onClick={() => void reverse("unapply", a.id)}
@@ -199,7 +201,7 @@ export function VendorCredits({
                   <td>{money(f.amount_minor, credit.currency)}</td>
                   <td>{f.reversal_date ? "Reversed" : "Recorded"}</td>
                   <td>
-                    {!f.reversal_date && (
+                    {canPost && !f.reversal_date && (
                       <button
                         disabled={busy}
                         onClick={() => void reverse("reverse-refund", f.id)}
@@ -217,7 +219,7 @@ export function VendorCredits({
           <Heading
             title="Vendor credits"
             subtitle="Record vendor credit notes, apply them to bills, or record refunds received."
-            action="New vendor credit"
+            action={canPost ? "New vendor credit" : undefined}
             onAction={() => setEditor({ kind: "create" })}
           />
           <Field label="Search vendor credits">
