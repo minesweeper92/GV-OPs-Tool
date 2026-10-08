@@ -1,0 +1,27 @@
+name: Feature increment
+description: Plan a testable slice of the agreed build
+title: "[Feature] "
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: User workflow and outcome
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and explicit exclusions
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria and regression checks
+      description: Include permissions, tenant/entity boundaries, money, retries and UX as relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: release
+    attributes:
+      label: Migration, release risks and approval needs

@@ -1,13 +1,22 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 
 test("bill adds a vendor inline and retains the bill details", async ({
   page,
 }) => {
+  // Reproduce a slower sign-in: navigation must not cancel session creation.
+  await page.route("**/api/demo-login", async (route) => {
+    await delay(250);
+    await route.continue();
+  });
   await page.goto("/");
   await page
     .getByRole("button", { name: "Owner Grid Velocity · sample" })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
   await page.goto("/?view=bills");
   await page.getByRole("button", { name: "New bill", exact: true }).click();
   await page

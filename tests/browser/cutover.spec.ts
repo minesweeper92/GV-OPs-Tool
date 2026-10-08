@@ -11,6 +11,9 @@ test("opening balances require review, reconcile and post once in the UI", async
   await page
     .getByRole("button", { name: "Owner Grid Velocity · sample" })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
   let me = await (await page.request.get("/api/me")).json();
   let headers = { "x-csrf-token": me.csrf, origin: "http://127.0.0.1:4322" };
   const code = `X${randomUUID().slice(0, 6).toUpperCase()}`;
