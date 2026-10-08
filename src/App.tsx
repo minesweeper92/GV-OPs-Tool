@@ -344,10 +344,10 @@ export default function App() {
     retry: 1,
   });
   const data = dataQuery.data;
-  const canFinance = !!me && hasCapability(me.user.role, "books.view"),
-    canCRM = !!me && hasCapability(me.user.role, "crm.sales");
-  const canMaintainContacts =
-    !!me && hasCapability(me.user.role, "contacts.manage");
+  const canFinance = !!me && hasCapability(me.user, "books.view"),
+    canPostBooks = !!me && hasCapability(me.user, "books.post"),
+    canCRM = !!me && hasCapability(me.user, "crm.sales");
+  const canMaintainContacts = !!me && hasCapability(me.user, "contacts.manage");
   const reportQuery = useQuery({
     queryKey: ["report", me?.organization.id, entity, from, to],
     queryFn: () =>
@@ -736,7 +736,7 @@ export default function App() {
                   <Plus size={16} />
                 </button>
               ) : null}
-              {view === "invoice" && canFinance ? (
+              {view === "invoice" && canPostBooks ? (
                 <button
                   aria-label="Quick add invoice from document list"
                   onClick={() => edit({ kind: "direct-invoice" })}
@@ -1523,7 +1523,7 @@ export default function App() {
           <Heading
             title="Invoices"
             subtitle="Drafts stay out of the ledger until they are issued."
-            action={canFinance ? "New invoice" : undefined}
+            action={canPostBooks ? "New invoice" : undefined}
             onAction={() => edit({ kind: "direct-invoice" })}
           />
           {toolbar()}
@@ -2100,7 +2100,7 @@ export default function App() {
                               <Plus size={16} />
                             </button>
                           ) : null}
-                          {key === "invoices" && canFinance ? (
+                          {key === "invoices" && canPostBooks ? (
                             <button
                               className="nav-quick-add"
                               aria-label="Quick add invoice from navigation"
@@ -2199,8 +2199,8 @@ export default function App() {
                       ["Company", "company", canMaintainContacts],
                       ["Lead", "lead", canCRM],
                       ["Quote", "quote", canCRM],
-                      ["Invoice", "direct-invoice", canFinance],
-                      ["Expense", "expense", canFinance],
+                      ["Invoice", "direct-invoice", canPostBooks],
+                      ["Expense", "expense", canPostBooks],
                     ] as const
                   )
                     .filter(([, , allowed]) => allowed)

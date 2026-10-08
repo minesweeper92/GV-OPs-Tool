@@ -2,6 +2,7 @@ import type { SQL, Row } from "./db.ts";
 import { execute, audit, Problem, type Context } from "./domain.ts";
 import { executeCrm } from "./crm.ts";
 import { commandSchema } from "../shared/commands.ts";
+import { requireCommandPermission } from "./permission-checks.ts";
 
 const tables: Record<string, string> = {
   contact: "contacts",
@@ -17,6 +18,7 @@ async function linked(tx: SQL, ctx: Context, table: string, id: string) {
   return r;
 }
 export async function executeProfile(tx: SQL, ctx: Context, c: Row) {
+  requireCommandPermission(ctx, c);
   if (ctx.role === "viewer")
     throw new Problem(403, "Read-only users cannot edit profiles.");
   const kind = c.action.split(".")[1],

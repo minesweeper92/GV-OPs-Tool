@@ -4,6 +4,7 @@ import { Problem, audit, type Context } from "./domain.ts";
 import { totals, scaled, baseAmount } from "../shared/money.ts";
 import { documentDetails, documentTotals } from "../shared/documents.ts";
 import { allocateNumber } from "./numbering.ts";
+import { requireCommandPermission } from "./permission-checks.ts";
 
 export function detailsSnapshot(company: Row, details?: Row) {
   const p = company.profile || {};
@@ -26,6 +27,7 @@ export function detailsSnapshot(company: Row, details?: Row) {
   return result;
 }
 export async function executeDocument(tx: SQL, ctx: Context, c: Row) {
+  requireCommandPermission(ctx, c);
   if (c.action.startsWith("document.item-")) {
     if (ctx.role === "viewer")
       throw new Problem(403, "Read-only users cannot manage saved items.");

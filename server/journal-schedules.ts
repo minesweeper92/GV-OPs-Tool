@@ -7,6 +7,8 @@ import {
 } from "./manual-journals.ts";
 import { occurrenceDate } from "../shared/recurring.ts";
 import type { Command } from "../shared/commands.ts";
+import { currentMemberContext } from "./permission-checks.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 type ScheduleCommand = Extract<
   Command,
@@ -44,7 +46,7 @@ async function one(
   return row;
 }
 export async function journalScheduleSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     return {
       journalSchedules: [],
       journalOccurrences: [],
@@ -152,7 +154,7 @@ export async function executeJournalSchedule(
   c: ScheduleCommand,
   now = new Date(),
 ) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(403, "Only finance staff can manage journal schedules.");
   if (c.action === "journal-schedule.create") {
     const entity = (

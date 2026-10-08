@@ -3,6 +3,7 @@ import type { SQL } from "./db.ts";
 import { audit, post, Problem, type Context } from "./domain.ts";
 import { minor } from "../shared/money.ts";
 import type { CutoverInput } from "../shared/cutover.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -14,7 +15,7 @@ const pkr = (value: bigint) => {
 type Check = { label: string; ok: boolean; detail: string };
 
 export async function cutoverHistory(tx: SQL, ctx: Context, entityId: string) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(403, "Finance access is required.");
   return (
     await tx.query(
@@ -30,7 +31,7 @@ export async function previewCutover(
   ctx: Context,
   input: CutoverInput,
 ) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(403, "Finance access is required.");
   const entity = (
     await tx.query("SELECT id,name,code,lock_date FROM entities WHERE id=$1", [

@@ -1,3 +1,4 @@
+import { hasCapability } from "../shared/permissions";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 import {
@@ -383,7 +384,7 @@ export function LeadRecord({
     );
   const deal = data.deals.find((d) => d.lead_id === id),
     closed = ["Converted", "Disqualified"].includes(l.status),
-    can = ["admin", "sales"].includes(me.user.role);
+    can = hasCapability(me.user, "crm.sales");
   async function convert() {
     setBusy(true);
     setError("");

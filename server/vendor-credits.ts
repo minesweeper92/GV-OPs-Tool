@@ -81,7 +81,7 @@ async function updateBill(
   );
 }
 export async function executeVendorCredit(tx: SQL, ctx: Context, c: Row) {
-  if (!hasCapability(ctx.role, "books.post"))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(
       403,
       "A finance role is required for vendor credits and refunds.",
@@ -514,7 +514,7 @@ export async function executeVendorCredit(tx: SQL, ctx: Context, c: Row) {
   return { id };
 }
 export async function vendorCreditSnapshot(tx: SQL, ctx: Context) {
-  if (!hasCapability(ctx.role, "books.view"))
+  if (!hasCapability(ctx, "books.view"))
     return {
       vendorCredits: [],
       vendorCreditApplications: [],

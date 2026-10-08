@@ -8,7 +8,7 @@ import { executePayable } from "./payables.ts";
 import { hasCapability } from "../shared/permissions.ts";
 
 const requireFinance = (ctx: Context) => {
-  if (!hasCapability(ctx.role, "books.post"))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(403, "A finance role is required for purchase orders.");
 };
 async function get(
@@ -27,7 +27,7 @@ async function get(
   return r;
 }
 export async function purchaseOrderSnapshot(tx: SQL, ctx: Context) {
-  if (!hasCapability(ctx.role, "books.view")) return { purchaseOrders: [] };
+  if (!hasCapability(ctx, "books.view")) return { purchaseOrders: [] };
   const orders = (
     await tx.query(
       "SELECT * FROM purchase_orders ORDER BY order_date DESC,created_at DESC",

@@ -131,7 +131,7 @@ async function changeBill(
   );
 }
 export async function executeVendorAdvance(tx: SQL, ctx: Context, c: Row) {
-  if (!hasCapability(ctx.role, "books.post"))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(403, "Finance access is required for vendor advances.");
   const id = uuid();
   if (c.action === "vendor-advance.create") {
@@ -550,7 +550,7 @@ export async function executeVendorAdvance(tx: SQL, ctx: Context, c: Row) {
   return { id };
 }
 export async function vendorAdvanceSnapshot(tx: SQL, ctx: Context) {
-  if (!hasCapability(ctx.role, "books.view"))
+  if (!hasCapability(ctx, "books.view"))
     return {
       vendorAdvances: [],
       vendorAdvanceApplications: [],

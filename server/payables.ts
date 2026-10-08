@@ -8,7 +8,7 @@ import { hasCapability } from "../shared/permissions.ts";
 import { billReviewDecision } from "../shared/bill-approval.ts";
 
 function requireFinance(ctx: Context) {
-  if (!hasCapability(ctx.role, "books.post"))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(
       403,
       "A finance role is required for purchases and payables.",
@@ -80,7 +80,7 @@ async function reverseJournal(
   );
 }
 export async function payableSnapshot(tx: SQL, ctx: Context) {
-  if (!hasCapability(ctx.role, "books.view"))
+  if (!hasCapability(ctx, "books.view"))
     return { bills: [], vendorPayments: [], vendorPaymentBatches: [] };
   const bills = (
     await tx.query(
@@ -111,7 +111,7 @@ export async function billApprovalHistory(
   billId: string,
   cursor?: string,
 ) {
-  if (!hasCapability(ctx.role, "books.view"))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(
       403,
       "Accounting access is required to view bill approvals.",
@@ -156,7 +156,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
   const t = ctx.tenantId,
     id = uuid();
   if (c.action === "bill.approval-policy") {
-    if (!hasCapability(ctx.role, "team.manage"))
+    if (!hasCapability(ctx, "team.manage"))
       throw new Problem(
         403,
         "Only an administrator can configure approval rules.",

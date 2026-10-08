@@ -1,3 +1,4 @@
+import { hasCapability } from "../shared/permissions";
 import { lazy, Suspense, useState } from "react";
 import {
   ArrowLeft,
@@ -66,8 +67,8 @@ export function ContactRecord({
   const owner =
     data.crmMembers.find((m) => m.id === contact.owner_id)?.name ||
     "Former team member";
-  const canEdit = me.user.role !== "viewer";
-  const canCreateLead = ["admin", "sales"].includes(me.user.role);
+  const canEdit = hasCapability(me.user, "contacts.manage");
+  const canCreateLead = hasCapability(me.user, "crm.sales");
   const quick = (kind: string) => crmEdit("activity", "contact", id, kind);
   return (
     <>

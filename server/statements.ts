@@ -6,6 +6,7 @@ import type {
   StatementFilter,
   StatementGroup,
 } from "../shared/statements.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 // Link each immutable posting to its party and transaction currency. Applications
 // move AR into credits payable, so they have zero net statement movement.
@@ -59,7 +60,7 @@ export async function partyStatement(
   ctx: Context,
   filter: StatementFilter,
 ): Promise<PartyStatement> {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(403, "A finance role is required for statements.");
   const company = (
     await tx.query("SELECT id,name,address,tax_id FROM companies WHERE id=$1", [

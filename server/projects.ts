@@ -5,8 +5,9 @@ import { Problem, audit, post, type Context } from "./domain.ts";
 import { minor, round, baseAmount } from "../shared/money.ts";
 import { invoiceCredits } from "./credits.ts";
 import { allocateNumber } from "./numbering.ts";
+import { hasCapability } from "../shared/permissions.ts";
 const finance = (ctx: Context) => {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(
       403,
       "A finance role is required for project billing and profitability.",
@@ -532,7 +533,7 @@ export async function executeProject(tx: SQL, ctx: Context, c: Row) {
 }
 
 export async function projectSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     return { projects: [], milestones: [], recognitions: [] };
   const projects = (
     await tx.query(`WITH sources AS (

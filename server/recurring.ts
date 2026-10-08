@@ -5,6 +5,8 @@ import { minor, scaled, totals, round, baseAmount } from "../shared/money.ts";
 import { occurrenceDate } from "../shared/recurring.ts";
 import { runJournalSchedulesDue } from "./journal-schedules.ts";
 import { runRecurringBillsDue } from "./recurring-bills.ts";
+import { currentMemberContext } from "./permission-checks.ts";
+import { hasCapability } from "../shared/permissions.ts";
 const day = (x: unknown) => String(x).slice(0, 10);
 const decimal = (x: bigint) =>
   `${x / 100n}.${String(x % 100n).padStart(2, "0")}`;
@@ -38,7 +40,7 @@ function validate(p: Row, currency: string) {
   baseAmount(BigInt(p.amount_minor), BigInt(p.fx_micros));
 }
 export async function recurringSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     return { recurringProfiles: [], recurringOccurrences: [] };
   return {
     recurringProfiles: (
@@ -54,6 +56,12 @@ export async function recurringSnapshot(tx: SQL, ctx: Context) {
   };
 }
 async function runProfile(tx: SQL, ctx: Context, p: Row, now: Date) {
+  ctx = await currentMemberContext(tx, ctx);
+  if (!hasCapability(ctx, "books.post"))
+    throw new Problem(
+      403,
+      "Active finance access is required to generate drafts.",
+    );
   const membership = (
     await tx.query(
       "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2 AND active",
@@ -181,7 +189,7 @@ export async function executeRecurring(
   c: Row,
   now = new Date(),
 ) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(403, "A finance role is required for recurring billing.");
   let id = c.id || uuid();
   if (c.action === "recurring.invoice" || c.action === "recurring.expense") {

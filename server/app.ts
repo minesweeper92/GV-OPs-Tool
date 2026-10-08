@@ -6,6 +6,8 @@ import { z } from "zod";
 import { inTenant, type Database } from "./db.ts";
 import { audit, execute, snapshot, reports, Problem } from "./domain.ts";
 import { commandSchema } from "../shared/commands.ts";
+import { capabilities, hasCapability } from "../shared/permissions.ts";
+import { requireCommandPermission } from "./permission-checks.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
 import {
@@ -208,7 +210,14 @@ export function createApp(
   app.get("/api/me", async (req) => {
     const s = sessions.get(req)!;
     return {
-      user: { id: s.userId, name: s.name, email: s.email, role: s.role || "" },
+      user: {
+        id: s.userId,
+        name: s.name,
+        email: s.email,
+        role: s.role || "",
+        capabilities: s.capabilities,
+        roleName: s.roleName,
+      },
       organization: { id: s.tenantId || "", name: s.organization || "" },
       csrf: s.csrf,
       mode: access.mode,
@@ -220,6 +229,8 @@ export function createApp(
       .strictObject({ quoteId: z.uuid(), contactId: z.uuid() })
       .parse(req.body);
     const ctx = access.context(sessions.get(req)!);
+    if (!hasCapability(ctx, "crm.sales"))
+      throw new Problem(403, "Sales permission is required to share quotes.");
     return inTenant(db, ctx.tenantId, (tx) =>
       issueQuoteLink(tx, ctx, input.quoteId, input.contactId, origin),
     );
@@ -291,7 +302,7 @@ export function createApp(
         })
         .parse(req.body);
       const ctx = access.context(sessions.get(req)!);
-      if (!["admin", "finance", "sales"].includes(ctx.role))
+      if (!hasCapability(ctx, "books.post") && !hasCapability(ctx, "crm.sales"))
         throw new Problem(403, "Your role cannot add document attachments.");
       const document = await inTenant(db, ctx.tenantId, async (tx) => {
         const sql =
@@ -397,11 +408,31 @@ export function createApp(
   const role = z.enum(["admin", "finance", "sales", "viewer"]);
   const idBody = z.object({ id: z.uuid() }).strict();
   app.get("/api/team", async (req) => access.team(sessions.get(req)!));
+  app.post("/api/team/role", async (req) =>
+    access.saveProfile(
+      sessions.get(req)!,
+      z
+        .strictObject({
+          id: z.uuid().optional(),
+          name: z.string().trim().min(1).max(80),
+          baseRole: z.enum(["finance", "sales", "viewer"]),
+          capabilities: z
+            .array(z.enum(capabilities.map((c) => c.key)))
+            .max(capabilities.length),
+          version: z.number().int().positive().optional(),
+        })
+        .parse(req.body),
+    ),
+  );
   app.post("/api/team/invite", async (req) =>
     access.invite(
       sessions.get(req)!,
       z
-        .object({ email: z.email().max(254), role })
+        .object({
+          email: z.email().max(254),
+          role,
+          roleProfileId: z.uuid().nullable().optional(),
+        })
         .strict()
         .parse(req.body),
     ),
@@ -421,6 +452,7 @@ export function createApp(
           role,
           active: z.boolean(),
           version: z.number().int().positive(),
+          roleProfileId: z.uuid().nullable().optional(),
         })
         .strict()
         .parse(req.body),
@@ -580,6 +612,7 @@ export function createApp(
   app.post("/api/commands", async (req) => {
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
+    requireCommandPermission(ctx, c);
     return inTenant(db, ctx.tenantId, (tx) =>
       c.action.startsWith("document.")
         ? executeDocument(tx, ctx, c)

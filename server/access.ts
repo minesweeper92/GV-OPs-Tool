@@ -1,6 +1,12 @@
 import { createHash, randomBytes, randomUUID as uuid } from "node:crypto";
 import type { Database, SQL } from "./db.ts";
 import { Problem, audit, seedAccounts, type Context } from "./domain.ts";
+import {
+  grantedCapabilities,
+  hasCapability,
+  type Capability,
+  type BuiltInRole,
+} from "../shared/permissions.ts";
 export const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 export const token = () => randomBytes(32).toString("base64url");
@@ -14,6 +20,9 @@ export interface Session {
   email: string;
   organization: string | null;
   csrf: string;
+  capabilities?: Capability[];
+  roleProfileId?: string | null;
+  roleName?: string | null;
 }
 async function admin(tx: SQL, s: Session) {
   if (!s.tenantId)
@@ -43,14 +52,19 @@ export class Access {
       throw new Problem(401, "Sign in to continue.");
     const r = (
       await this.db.query(
-        `SELECT s.*,u.name,u.email,t.name AS organization,m.role,m.active FROM sessions s
+        `SELECT s.*,u.name,u.email,t.name AS organization,m.role,m.active,m.role_profile_id,p.name AS role_name,p.base_role,p.capabilities AS selected_capabilities FROM sessions s
    JOIN users u ON u.id=s.user_id LEFT JOIN tenants t ON t.id=s.tenant_id
    LEFT JOIN memberships m ON m.user_id=s.user_id AND m.tenant_id=s.tenant_id
+   LEFT JOIN role_profiles p ON p.id=m.role_profile_id AND p.tenant_id=m.tenant_id
    WHERE s.hash=$1 AND s.auth_kind=$2 AND s.expires_at>now()`,
         [hash(raw), this.mode],
       )
     ).rows[0];
-    if (!r || (r.tenant_id && !r.active))
+    if (
+      !r ||
+      (r.tenant_id &&
+        (!r.active || (r.role_profile_id && r.base_role !== r.role)))
+    )
       throw new Problem(
         401,
         "Your session ended or access changed. Sign in again.",
@@ -64,6 +78,12 @@ export class Access {
       email: r.email,
       organization: r.organization,
       csrf: r.csrf,
+      capabilities: grantedCapabilities({
+        role: r.role,
+        capabilities: r.role_profile_id ? r.selected_capabilities : undefined,
+      }),
+      roleProfileId: r.role_profile_id,
+      roleName: r.role_name,
     };
   }
   async issue(userId: string, tenantId: string | null, previousHash?: string) {
@@ -106,6 +126,7 @@ export class Access {
       userId: s.userId,
       role: s.role,
       name: s.name,
+      capabilities: s.capabilities,
     };
   }
   async organizations(s: Session) {
@@ -200,20 +221,29 @@ export class Access {
       const ctx = await admin(tx, s);
       const members = (
         await tx.query(
-          "SELECT u.id,u.name,u.email,m.role,m.active,m.version FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 ORDER BY u.name",
+          "SELECT u.id,u.name,u.email,m.role,m.active,m.version,m.role_profile_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 ORDER BY u.name",
           [ctx.tenantId],
         )
       ).rows;
       const invitations = (
         await tx.query(
-          "SELECT id,email,role,expires_at,accepted_by,revoked_at FROM invitations WHERE tenant_id=$1 ORDER BY created_at DESC",
+          "SELECT id,email,role,role_profile_id,expires_at,accepted_by,revoked_at FROM invitations WHERE tenant_id=$1 ORDER BY created_at DESC",
           [ctx.tenantId],
         )
       ).rows;
-      return { members, invitations };
+      const profiles = (
+        await tx.query(
+          "SELECT id,name,base_role,capabilities,version FROM role_profiles WHERE tenant_id=$1 ORDER BY name",
+          [ctx.tenantId],
+        )
+      ).rows;
+      return { members, invitations, profiles };
     });
   }
-  async invite(s: Session, b: { email: string; role: Context["role"] }) {
+  async invite(
+    s: Session,
+    b: { email: string; role: Context["role"]; roleProfileId?: string | null },
+  ) {
     return this.db.transaction(async (tx) => {
       const ctx = await admin(tx, s),
         email = b.email.toLowerCase();
@@ -234,13 +264,15 @@ export class Access {
         [ctx.tenantId, email],
       );
       const id = uuid();
+      await this.validateProfile(tx, ctx.tenantId, b.role, b.roleProfileId);
       await tx.query(
-        "INSERT INTO invitations(id,tenant_id,email,role,created_by,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '7 days')",
-        [id, ctx.tenantId, email, b.role, ctx.userId],
+        "INSERT INTO invitations(id,tenant_id,email,role,created_by,expires_at,role_profile_id) VALUES($1,$2,$3,$4,$5,now()+interval '7 days',$6)",
+        [id, ctx.tenantId, email, b.role, ctx.userId, b.roleProfileId || null],
       );
       await audit(tx, ctx, id, "team.invited", {
         email,
         role: b.role,
+        roleProfileId: b.roleProfileId || null,
         text: `${s.name} invited ${email} as ${b.role}.`,
       });
       return { id };
@@ -286,8 +318,8 @@ export class Access {
           "Membership already exists. Ask an administrator to change your access.",
         );
       await tx.query(
-        "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,$3)",
-        [invite.tenant_id, s.userId, invite.role],
+        "INSERT INTO memberships(tenant_id,user_id,role,role_profile_id) VALUES($1,$2,$3,$4)",
+        [invite.tenant_id, s.userId, invite.role, invite.role_profile_id],
       );
       await tx.query("UPDATE invitations SET accepted_by=$2 WHERE id=$1", [
         id,
@@ -310,13 +342,14 @@ export class Access {
       role: Context["role"];
       active: boolean;
       version: number;
+      roleProfileId?: string | null;
     },
   ) {
     return this.db.transaction(async (tx) => {
       const ctx = await admin(tx, s);
       const before = (
         await tx.query(
-          "SELECT role,active,version FROM memberships WHERE tenant_id=$1 AND user_id=$2 FOR UPDATE",
+          "SELECT role,active,version,role_profile_id FROM memberships WHERE tenant_id=$1 AND user_id=$2 FOR UPDATE",
           [ctx.tenantId, b.userId],
         )
       ).rows[0];
@@ -327,6 +360,12 @@ export class Access {
           409,
           "Access changed since you opened this page. Refresh and try again.",
         );
+      // Older clients must not silently remove a profile on an unrelated edit.
+      const profileId =
+        b.roleProfileId === undefined
+          ? before.role_profile_id
+          : b.roleProfileId;
+      await this.validateProfile(tx, ctx.tenantId, b.role, profileId);
       if (
         before.role === "admin" &&
         before.active &&
@@ -345,8 +384,8 @@ export class Access {
           );
       }
       await tx.query(
-        "UPDATE memberships SET role=$3,active=$4,version=version+1 WHERE tenant_id=$1 AND user_id=$2",
-        [ctx.tenantId, b.userId, b.role, b.active],
+        "UPDATE memberships SET role=$3,active=$4,version=version+1,role_profile_id=$5 WHERE tenant_id=$1 AND user_id=$2",
+        [ctx.tenantId, b.userId, b.role, b.active, profileId],
       );
       await tx.query("DELETE FROM sessions WHERE tenant_id=$1 AND user_id=$2", [
         ctx.tenantId,
@@ -357,10 +396,128 @@ export class Access {
       ).rows[0];
       await audit(tx, ctx, b.userId, "team.access-changed", {
         before,
-        after: { role: b.role, active: b.active },
+        after: { role: b.role, active: b.active, role_profile_id: profileId },
         text: `${s.name} changed ${person.name}: ${before.role} (${before.active ? "active" : "removed"}) → ${b.role} (${b.active ? "active" : "removed"}).`,
       });
       return { ok: true, self: b.userId === s.userId };
+    });
+  }
+  private async validateProfile(
+    tx: SQL,
+    tenantId: string,
+    role: string,
+    id?: string | null,
+  ) {
+    if (!id) return;
+    const profile = (
+      await tx.query(
+        "SELECT base_role FROM role_profiles WHERE tenant_id=$1 AND id=$2 FOR SHARE",
+        [tenantId, id],
+      )
+    ).rows[0];
+    if (!profile || profile.base_role !== role || role === "admin")
+      throw new Problem(
+        400,
+        "Choose a custom role from this organization with the matching template.",
+      );
+  }
+  async saveProfile(
+    s: Session,
+    b: {
+      id?: string;
+      name: string;
+      baseRole: Exclude<BuiltInRole, "admin">;
+      capabilities: Capability[];
+      version?: number;
+    },
+  ) {
+    return this.db.transaction(async (tx) => {
+      const ctx = await admin(tx, s);
+      const selected = [...new Set(b.capabilities)];
+      if (selected.some((cap) => !hasCapability(b.baseRole, cap)))
+        throw new Problem(
+          400,
+          "Custom permissions cannot exceed their role template.",
+        );
+      if (selected.includes("books.post") && !selected.includes("books.view"))
+        throw new Problem(
+          400,
+          "Recording transactions also requires viewing accounting.",
+        );
+      if (
+        selected.includes("crm.sales") &&
+        !selected.includes("contacts.manage")
+      )
+        throw new Problem(
+          400,
+          "Managing sales also requires maintaining contacts.",
+        );
+      const id = b.id || uuid();
+      const before = b.id
+        ? (
+            await tx.query(
+              "SELECT * FROM role_profiles WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+              [ctx.tenantId, id],
+            )
+          ).rows[0]
+        : null;
+      if (b.id && !before)
+        throw new Problem(404, "Custom role not found in this organization.");
+      if (before && before.version !== b.version)
+        throw new Problem(409, "This role changed. Refresh before saving.");
+      if (before && before.base_role !== b.baseRole)
+        throw new Problem(
+          400,
+          "The template cannot change after a role is created. Create another role instead.",
+        );
+      const duplicate = (
+        await tx.query(
+          "SELECT id FROM role_profiles WHERE tenant_id=$1 AND lower(name)=lower($2) AND id<>$3",
+          [ctx.tenantId, b.name.trim(), id],
+        )
+      ).rows.length;
+      if (duplicate)
+        throw new Problem(409, "A custom role with this name already exists.");
+      if (before) {
+        await tx.query(
+          "UPDATE role_profiles SET name=$3,capabilities=$4,version=version+1 WHERE tenant_id=$1 AND id=$2",
+          [ctx.tenantId, id, b.name.trim(), JSON.stringify(selected)],
+        );
+        await tx.query(
+          "UPDATE memberships SET version=version+1 WHERE tenant_id=$1 AND role_profile_id=$2",
+          [ctx.tenantId, id],
+        );
+        await tx.query(
+          "DELETE FROM sessions WHERE tenant_id=$1 AND user_id IN (SELECT user_id FROM memberships WHERE tenant_id=$1 AND role_profile_id=$2)",
+          [ctx.tenantId, id],
+        );
+      } else {
+        await tx.query(
+          "INSERT INTO role_profiles(id,tenant_id,name,base_role,capabilities) VALUES($1,$2,$3,$4,$5)",
+          [
+            id,
+            ctx.tenantId,
+            b.name.trim(),
+            b.baseRole,
+            JSON.stringify(selected),
+          ],
+        );
+      }
+      await audit(
+        tx,
+        ctx,
+        id,
+        before ? "team.role-updated" : "team.role-created",
+        {
+          before,
+          after: {
+            name: b.name.trim(),
+            baseRole: b.baseRole,
+            capabilities: selected,
+          },
+        },
+      );
+      return { id };
     });
   }
   async identity(
