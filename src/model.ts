@@ -1,4 +1,7 @@
 export interface Entity {
+  bill_finance_limit_minor: string | null;
+  bill_separate_approver: boolean;
+  bill_approval_version: number;
   id: string;
   name: string;
   code: string;
@@ -313,6 +316,7 @@ export interface Data {
   events: Event[];
 }
 export interface Bill {
+  created_by: string;
   credited_minor: string;
   credited_base_minor: string;
   purchase_order_id: string | null;

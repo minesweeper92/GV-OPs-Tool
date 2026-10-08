@@ -1078,6 +1078,95 @@ export async function verifyPayables(t: TestContext, db: Database) {
     return result.id;
   }
   await t.test(
+    "entity bill approval limits are audited, versioned and enforced before posting",
+    async () => {
+      const settings = {
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: 1,
+        finance_limit: "1180",
+        separate_approver: true,
+      };
+      await accountant.command(settings, 403);
+      await rep.command(settings, 403);
+      await owner.command(settings);
+      await owner.command(settings, 409);
+      const own = await owner.command(draft());
+      await advance(own.id, "submit");
+      await owner.command(
+        { action: "bill.approve", id: own.id, version: 2 },
+        403,
+      );
+      await accountant.command({
+        action: "bill.approve",
+        id: own.id,
+        version: 2,
+      });
+      assert.equal((await bill(own.id)).status, "Open");
+      const otherEntity = (await owner.get()).entities.find(
+        (e: any) => e.id === secondEntity,
+      );
+      assert.equal(otherEntity.bill_finance_limit_minor, null);
+      assert.equal(otherEntity.bill_separate_approver, false);
+      const made = await accountant.command(draft());
+      await advance(made.id, "submit");
+      await accountant.command(
+        { action: "bill.approve", id: made.id, version: 2 },
+        403,
+      );
+      assert.equal((await bill(made.id)).status, "Pending approval");
+      await advance(made.id, "approve");
+      const high = await accountant.command(
+        draft({
+          lines: [
+            {
+              description: "Large cost",
+              quantity: "1",
+              price: "2000",
+              tax: "0",
+              account_code: "5200",
+            },
+          ],
+        }),
+      );
+      await advance(high.id, "submit");
+      await accountant.command(
+        { action: "bill.approve", id: high.id, version: 2 },
+        403,
+      );
+      await owner.command({
+        ...settings,
+        version: 2,
+        separate_approver: false,
+      });
+      const within = await accountant.command(draft());
+      await advance(within.id, "submit");
+      await accountant.command({
+        action: "bill.approve",
+        id: within.id,
+        version: 2,
+      });
+      assert.equal((await bill(within.id)).status, "Open");
+      await owner.command({
+        ...settings,
+        version: 3,
+        finance_limit: null,
+        separate_approver: false,
+      });
+      await inTenant(db, tenant, async (tx) => {
+        assert.equal(
+          (
+            await tx.query(
+              "SELECT id FROM audit_events WHERE record_id=$1 AND action='bill.approval-policy'",
+              [entity],
+            )
+          ).rows.length,
+          3,
+        );
+      });
+    },
+  );
+  await t.test(
     "multi-bill payments post one bank entry, allocate exactly, retry and reverse atomically",
     async () => {
       const a = await posted({

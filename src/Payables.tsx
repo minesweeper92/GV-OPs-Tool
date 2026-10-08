@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { hasCapability } from "../shared/permissions";
+import { canReviewBill } from "../shared/bill-approval";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Heading,
@@ -106,6 +107,7 @@ export function Payables({
     [busy, setBusy] = useState(false),
     [filter, setFilter] = useState("all"),
     [search, setSearch] = useState("");
+  const [rulesOpen, setRulesOpen] = useState(false);
   const bills = (data.bills || []).filter(
       (b) => entity === "all" || b.entity_id === entity,
     ),
@@ -344,7 +346,12 @@ export function Payables({
               </>
             ) : null}
             {b.status === "Pending approval" &&
-            hasCapability(me.user.role, "bills.approve") ? (
+            canReviewBill(
+              me.user.role,
+              me.user.id,
+              b,
+              data.entities.find((e) => e.id === b.entity_id)!,
+            ) ? (
               <>
                 <button onClick={() => setEditor({ kind: "return", bill: b })}>
                   Return to draft
@@ -606,6 +613,9 @@ export function Payables({
           onAction={() => setEditor({ kind: "create" })}
         />
         <div className="toolbar">
+          {me.user.role === "admin" && (
+            <button onClick={() => setRulesOpen(true)}>Approval rules</button>
+          )}
           <Field label="Search bills">
             <input
               type="search"
@@ -651,6 +661,14 @@ export function Payables({
     <>
       {error ? <ErrorBox error={error} /> : null}
       {content}
+      {rulesOpen && (
+        <BillApprovalRules
+          data={data}
+          entity={entity}
+          close={() => setRulesOpen(false)}
+          save={save}
+        />
+      )}
       {editor ? (
         <PayableEditor
           key={`${me.organization.id}:${me.user.id}:${editor.kind}-${editor.bill?.id || ""}:${editor.bill?.version || ""}`}
@@ -663,6 +681,116 @@ export function Payables({
         />
       ) : null}
     </>
+  );
+}
+
+function BillApprovalRules({
+  data,
+  entity,
+  close,
+  save,
+}: {
+  data: Data;
+  entity: string;
+  close: () => void;
+  save: (c: Record<string, unknown>) => Promise<{ id: string }>;
+}) {
+  const [selected, setSelected] = useState(
+    entity === "all" ? data.entities[0]?.id || "" : entity,
+  );
+  const policy = data.entities.find((e) => e.id === selected);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  return (
+    <Drawer title="Bill approval rules" close={close} dirty={dirty}>
+      <p>
+        Rules apply to future review actions, including bills already pending.
+        All bills still require submission before posting.
+      </p>
+      <Field label="Legal entity">
+        <select
+          value={selected}
+          disabled={dirty || busy}
+          onChange={(e) => setSelected(e.target.value)}
+        >
+          {data.entities.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {policy && (
+        <form
+          key={selected}
+          onChange={() => setDirty(true)}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            setBusy(true);
+            setError("");
+            try {
+              await save({
+                action: "bill.approval-policy",
+                entity_id: selected,
+                version: policy.bill_approval_version,
+                finance_limit:
+                  f.get("finance") === "on" ? String(f.get("limit")) : null,
+                separate_approver: f.get("separate") === "on",
+              });
+              close();
+            } catch (err) {
+              setError((err as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <Field label="Finance approval">
+            <label>
+              <input
+                type="checkbox"
+                name="finance"
+                defaultChecked={policy.bill_finance_limit_minor !== null}
+              />{" "}
+              Allow finance to approve within the limit below
+            </label>
+          </Field>
+          <Field label="Finance approval limit (PKR)">
+            <input
+              name="limit"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={decimal(policy.bill_finance_limit_minor || "0")}
+            />
+          </Field>
+          <p>
+            The limit includes tax and uses the bill's recorded PKR exchange
+            rate. Above the limit, an administrator must review.
+          </p>
+          <Field label="Separate reviewer">
+            <label>
+              <input
+                type="checkbox"
+                name="separate"
+                defaultChecked={policy.bill_separate_approver}
+              />{" "}
+              Bill creators cannot approve their own bills
+            </label>
+          </Field>
+          <p>
+            Enable separate review only when another authorized person is
+            available. Administrators are also subject to this rule.
+          </p>
+          {error && <ErrorBox error={error} />}
+          <button className="primary" disabled={busy}>
+            {busy ? "Saving…" : "Save approval rules"}
+          </button>
+        </form>
+      )}
+    </Drawer>
   );
 }
 
