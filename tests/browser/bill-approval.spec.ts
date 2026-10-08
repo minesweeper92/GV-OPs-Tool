@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import AxeBuilder from "@axe-core/playwright";
 test("bill approval rules save by entity and survive refresh", async ({
   page,
 }) => {
@@ -139,6 +140,13 @@ test("review queues explain self-review restrictions and update when policy chan
   await expect(
     page.getByRole("button", { name: "Approve & post", exact: true }),
   ).toHaveCount(0);
+  await page.getByRole("link", { name: "← All bills", exact: true }).click();
+  await expect(page.getByLabel("Search bills", { exact: true })).toHaveValue(
+    reference,
+  );
+  await expect(
+    page.getByRole("button", { name: /^Waiting for another reviewer/ }),
+  ).toHaveAttribute("aria-pressed", "true");
   await command({
     action: "bill.approval-policy",
     entity_id: entity.id,
@@ -249,9 +257,38 @@ test("two-stage review passes from finance to a different administrator before p
     "Pending approval",
   );
   await login(owner.user.id);
-  page.on("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Approve & post", exact: true })
+    .click();
+  const postingDialog = page.getByRole("dialog", {
+    name: "Approve and post this bill?",
+    exact: true,
+  });
+  await expect(postingDialog).toContainText("PKR 100.00");
+  await expect(postingDialog).toContainText(entity.name);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: "test-results/bill-confirmation-mobile.png" });
+  await postingDialog.press("Escape");
+  await expect(postingDialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Approve & post", exact: true }),
+  ).toBeFocused();
+  snapshot = await (await page.request.get("/api/data")).json();
+  expect(snapshot.bills.find((b: any) => b.id === bill.id).status).toBe(
+    "Pending approval",
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page
+    .getByRole("button", { name: "Approve & post", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Confirm & post", exact: true })
     .click();
   await expect(
     page.getByRole("button", { name: "Record vendor payment", exact: true }),

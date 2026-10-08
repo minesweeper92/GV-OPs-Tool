@@ -1807,6 +1807,115 @@ details[open] summary {
 .bill-details dd {
   margin: 4px 0;
 }
+.confirmation-dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.confirmation-dialog::backdrop {
+  background: rgb(15 20 35 / 45%);
+}
+.confirmation-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 21px;
+}
+.confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.posting-summary {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.posting-summary dt {
+  color: var(--muted);
+}
+.posting-summary dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.action-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.action-notice button {
+  flex-shrink: 0;
+  padding: 2px 8px;
+}
+.record-action-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.bill-record-panel .payable-metrics {
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.bill-record-panel .payable-metrics strong {
+  font-size: 21px;
+}
+.bill-record-panel .bill-details {
+  margin: 16px 0;
+}
+.crm-save-bar {
+  position: sticky;
+  bottom: -28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 24px -28px -28px;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  z-index: 2;
+}
+.contact-workspace {
+  min-height: 0;
+}
+.contact-profile-card .contact-properties {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 1.2fr;
+  gap: 10px 12px;
+  margin: 16px 0;
+}
+.contact-profile-card .contact-properties dt,
+.contact-profile-card .contact-properties dd {
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .crm-save-bar {
+    bottom: -20px;
+    margin: 20px -20px -20px;
+    padding: 14px 20px;
+  }
+  .record-action-bar {
+    position: static;
+  }
+}
 .bill-line {
   border: 1px solid var(--border);
   border-radius: 8px;

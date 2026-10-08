@@ -137,7 +137,7 @@ export function ContactCompanyField({
       setCreated({ id: result.id, name: payload.name });
       finish(
         result.id,
-        `${payload.name} created and selected. Continue adding your contact.`,
+        `${payload.name} created and selected. Continue with your ${vendor ? "bill" : "form"}.`,
       );
       setName("");
       setDomain("");

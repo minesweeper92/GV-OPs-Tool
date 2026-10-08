@@ -311,6 +311,9 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [layout, setLayout] = useState<"board" | "table">("board");
   const createMenu = useRef<HTMLDetailsElement>(null);
+  const [billList, setBillList] = useState({ filter: "all", search: "" });
+  const listScroll = useRef({ contacts: 0, bills: 0 });
+  const previousView = useRef(view);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("gv-workspace-theme-v1") || "light",
   );
@@ -356,12 +359,37 @@ export default function App() {
       ["accounts", "journals", "journal-schedules", "reports"].includes(view),
   });
   useEffect(() => {
-    setSearch("");
+    if (
+      !["contacts", "contact"].includes(view) ||
+      !["contacts", "contact"].includes(previousView.current)
+    )
+      setSearch("");
+    previousView.current = view;
     setMenu(false);
     createMenu.current?.removeAttribute("open");
     setError("");
-    document.getElementById("main")?.focus();
-  }, [route]);
+    document.getElementById("main")?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() =>
+      window.scrollTo(
+        0,
+        view === "contacts"
+          ? listScroll.current.contacts
+          : view === "bills"
+            ? listScroll.current.bills
+            : 0,
+      ),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [route, view]);
+  useEffect(() => {
+    setSearch("");
+    setBillList({ filter: "all", search: "" });
+    listScroll.current = { contacts: 0, bills: 0 };
+    setContactView("All contacts");
+    setContactOwner("All owners");
+    setContactLifecycle("All stages");
+    setContactLeadStatus("All statuses");
+  }, [me?.organization.id, me?.user.id]);
   useEffect(() => {
     const closeCreate = (event: PointerEvent) => {
       if (
@@ -414,7 +442,18 @@ export default function App() {
         cache.invalidateQueries({ queryKey: ["banking"] }),
         cache.invalidateQueries({ queryKey: ["period-close"] }),
       ]);
-      setToast("Saved");
+      const action = String(command.action);
+      setToast(
+        action === "contact.create"
+          ? "Contact created"
+          : action === "crm.contact-edit"
+            ? "Contact updated"
+            : action === "crm.activity"
+              ? "Activity logged"
+              : action.startsWith("crm.task")
+                ? "Task saved"
+                : "Saved",
+      );
       return result;
     } catch (e) {
       setError((e as Error).message);
@@ -553,6 +592,11 @@ export default function App() {
           view={view}
           id={id}
           newVendor={() => edit({ kind: "company", id: "vendor" })}
+          list={billList}
+          setList={setBillList}
+          rememberPosition={() => {
+            listScroll.current.bills = window.scrollY;
+          }}
         />
       ) : (
         denied()
@@ -663,6 +707,7 @@ export default function App() {
     if (view === "contact")
       return (
         <ContactRecord
+          key={`${me!.organization.id}/${id}`}
           id={id}
           data={data}
           me={me!}
@@ -1157,7 +1202,12 @@ export default function App() {
             {contactRows.map((c) => (
               <tr key={c.id}>
                 <td>
-                  <a href={`#contact/${c.id}`}>
+                  <a
+                    href={`#contact/${c.id}`}
+                    onClick={() => {
+                      listScroll.current.contacts = window.scrollY;
+                    }}
+                  >
                     <span className="contact-list-name">
                       <span className="contact-mini-avatar" aria-hidden="true">
                         {(

@@ -151,6 +151,18 @@ test("contact workspace supports quick logging, status filters and create anothe
   await expect(page.getByText("Initial conversation")).toBeVisible();
   await page.getByRole("tab", { name: "Activities" }).click();
   await expect(page.getByText("Initial conversation")).toBeVisible();
+  await page.getByRole("tab", { name: "Activities" }).press("ArrowLeft");
+  await expect(page.getByRole("tab", { name: "Overview" })).toBeFocused();
+  await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByRole("link", { name: "All contacts", exact: true }).click();
+  await expect(page.getByLabel("Search this view")).toHaveValue(first);
+  await expect(
+    page.locator(".contact-index-filters select").nth(2),
+  ).toHaveValue("Connected");
+  await page.getByRole("link", { name: `${first} Example` }).click();
   await page.screenshot({
     path: "test-results/contact-workspace-desktop.png",
     fullPage: true,

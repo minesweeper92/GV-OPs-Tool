@@ -337,6 +337,9 @@ test("vendor bill approval, partial payments, balances and corrections reach the
   await page
     .getByRole("button", { name: "Approve & post", exact: true })
     .click();
+  await page
+    .getByRole("button", { name: "Confirm & post", exact: true })
+    .click();
   await expect(
     page.getByRole("button", { name: "Record vendor payment", exact: true }),
   ).toBeVisible();
