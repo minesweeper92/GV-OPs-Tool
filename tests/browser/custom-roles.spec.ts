@@ -5,10 +5,16 @@ test("an administrator narrows a teammate with a custom role", async ({
   page,
 }) => {
   page.on("dialog", (dialog) => dialog.accept());
+  // Unique per run so repeated runs against one server do not collide.
+  const roleName = `Books reviewer ${test.info().repeatEachIndex + 1}`;
   await page.goto("/");
   await page
     .getByRole("button", { name: "Owner Grid Velocity · sample" })
     .click();
+  // Wait for the session before navigating, or CI can race the sign-in.
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
   await page.goto("/?view=team");
   await expect(
     page.getByRole("heading", { name: "Team & access", exact: true }),
@@ -17,7 +23,7 @@ test("an administrator narrows a teammate with a custom role", async ({
   await page
     .getByRole("button", { name: "New custom role", exact: true })
     .click();
-  await page.getByLabel("Role name", { exact: true }).fill("Books reviewer");
+  await page.getByLabel("Role name", { exact: true }).fill(roleName);
   await page.getByLabel("Template", { exact: true }).selectOption("finance");
   const permissions = page.getByRole("group", { name: "Permissions" });
   await expect(permissions.getByRole("checkbox")).toHaveCount(3);
@@ -37,7 +43,7 @@ test("an administrator narrows a teammate with a custom role", async ({
   const role = page
     .getByRole("region", { name: "Custom roles" })
     .getByRole("row")
-    .filter({ hasText: "Books reviewer" });
+    .filter({ hasText: roleName });
   await expect(role).toContainText(
     "View accounting and banking, Maintain contacts and companies",
   );
@@ -48,12 +54,12 @@ test("an administrator narrows a teammate with a custom role", async ({
   await page
     .getByRole("dialog")
     .getByLabel("Custom role", { exact: true })
-    .selectOption({ label: "Books reviewer" });
+    .selectOption({ label: roleName });
   await page.getByRole("button", { name: "Save access", exact: true }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(
     page.getByRole("row").filter({ hasText: "Accountant" }).first(),
-  ).toContainText("Books reviewer (finance template)");
+  ).toContainText(`${roleName} (finance template)`);
   await page.screenshot({
     path: "test-results/custom-roles-team.png",
     fullPage: true,
@@ -63,6 +69,9 @@ test("an administrator narrows a teammate with a custom role", async ({
   await page
     .getByRole("button", { name: "Accountant Grid Velocity · sample" })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
   await page.goto("/?view=invoices");
   await expect(
     page.getByRole("heading", { name: "Invoices", exact: true }),
