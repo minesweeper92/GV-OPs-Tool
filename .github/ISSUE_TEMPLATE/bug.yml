@@ -1,0 +1,17 @@
+name: Bug report
+description: Reproducible issue without private data
+title: "[Bug] "
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result and actual result
+      description: Use fictional examples; do not attach credentials or private financial records.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit/version and environment
+    validations:
+      required: true

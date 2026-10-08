@@ -67,4 +67,6 @@ The client list snapshot is appropriate for this small increment, not yet pagina
 - `src`: independent client, shared UI primitives, record pages and editors
 - `tests`: actual API/database accounting assertions and browser workflows
 
-No paid service, remote repository or public deployment has been created.
+Source repository: https://github.com/minesweeper92/GV-OPs-Tool.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, issue, review and release workflow.
+No paid service or public application deployment has been created.
