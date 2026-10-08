@@ -91,6 +91,10 @@ test("an administrator limits a teammate to one legal entity", async ({
     ).toContainText("PVT");
 
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    // Sign-out reloads the page; navigating before it settles aborts on CI.
+    await expect(
+      page.getByRole("heading", { name: "Choose a sample role" }),
+    ).toBeVisible();
     await signIn(page, "Accountant");
     await page.goto("/?view=bills");
     await expect(
