@@ -137,7 +137,7 @@ export function Payables({
     ]);
     return result;
   }
-  async function action(b: Bill, kind: "submit" | "approve") {
+  async function action(b: Bill, kind: "submit" | "approve" | "review") {
     if (
       kind === "approve" &&
       !confirm(
@@ -371,9 +371,11 @@ export function Payables({
                 <button
                   className="primary"
                   disabled={busy}
-                  onClick={() => void action(b, "approve")}
+                  onClick={() => void action(b, review(b).action || "approve")}
                 >
-                  Approve & post
+                  {review(b).action === "review"
+                    ? "Complete first review"
+                    : "Approve & post"}
                 </button>
               </>
             ) : null}
@@ -784,6 +786,7 @@ function BillApprovalRules({
                 finance_limit:
                   f.get("finance") === "on" ? String(f.get("limit")) : null,
                 separate_approver: f.get("separate") === "on",
+                two_stage: f.get("two_stage") === "on",
               });
               close();
             } catch (err) {
@@ -826,6 +829,22 @@ function BillApprovalRules({
               Bill creators cannot approve their own bills
             </label>
           </Field>
+          <Field label="Two-stage approval">
+            <label>
+              <input
+                type="checkbox"
+                name="two_stage"
+                defaultChecked={policy.bill_two_stage}
+              />{" "}
+              Require first review then final administrator approval
+            </label>
+          </Field>
+          <p>
+            First review can be completed by finance or an administrator. A
+            different administrator must approve and post afterward, regardless
+            of the finance limit. Enable only when those reviewers are
+            available.
+          </p>
           <p>
             Enable separate review only when another authorized person is
             available. Administrators are also subject to this rule.

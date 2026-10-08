@@ -76,3 +76,37 @@ test("bill review denials explain missing rules, self-review and finance limits"
     false,
   );
 });
+
+test("two-stage approval never lets the first reviewer post or skip final administrator approval", () => {
+  const policy = {
+    bill_finance_limit_minor: "100000",
+    bill_separate_approver: false,
+    bill_two_stage: true,
+  };
+  const bill = {
+    created_by: "maker",
+    base_minor: "50000",
+    reviewed_by: null as string | null,
+  };
+  assert.equal(
+    billReviewDecision("finance", "first", bill, policy).action,
+    "review",
+  );
+  const reviewed = { ...bill, reviewed_by: "first" };
+  assert.equal(
+    billReviewDecision("admin", "first", reviewed, policy).allowed,
+    false,
+  );
+  assert.equal(
+    billReviewDecision("finance", "another", reviewed, policy).allowed,
+    false,
+  );
+  assert.equal(
+    billReviewDecision("admin", "final", reviewed, policy).action,
+    "approve",
+  );
+  assert.equal(
+    billReviewDecision("sales", "first", bill, policy).allowed,
+    false,
+  );
+});
