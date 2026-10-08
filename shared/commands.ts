@@ -36,6 +36,13 @@ const line = z
   })
   .strict();
 export const commandSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("bill.approval-policy"),
+    entity_id: id,
+    version: z.number().int().positive(),
+    finance_limit: money.nullable(),
+    separate_approver: z.boolean(),
+  }),
   ...bankCommands,
   ...projectCommands,
   ...billingCommands,

@@ -5,6 +5,7 @@ import { Problem, post, audit, type Context } from "./domain.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { hasCapability } from "../shared/permissions.ts";
+import { canReviewBill } from "../shared/bill-approval.ts";
 
 function requireFinance(ctx: Context) {
   if (!hasCapability(ctx.role, "books.post"))
@@ -106,6 +107,31 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
   requireFinance(ctx);
   const t = ctx.tenantId,
     id = uuid();
+  if (c.action === "bill.approval-policy") {
+    if (!hasCapability(ctx.role, "team.manage"))
+      throw new Problem(
+        403,
+        "Only an administrator can configure approval rules.",
+      );
+    const entity = await get(tx, "entities", c.entity_id);
+    if (entity.bill_approval_version !== c.version)
+      throw new Problem(409, "Approval rules changed. Refresh before saving.");
+    const limit =
+      c.finance_limit === null ? null : String(minor(c.finance_limit));
+    await tx.query(
+      "UPDATE entities SET bill_finance_limit_minor=$2,bill_separate_approver=$3,bill_approval_version=bill_approval_version+1 WHERE id=$1",
+      [entity.id, limit, c.separate_approver],
+    );
+    await audit(tx, ctx, entity.id, c.action, {
+      before: {
+        financeLimit: entity.bill_finance_limit_minor,
+        separateApprover: entity.bill_separate_approver,
+      },
+      after: { financeLimit: limit, separateApprover: c.separate_approver },
+      text: `Changed bill approval rules for ${entity.name}. Rules apply to subsequent review actions, including pending bills.`,
+    });
+    return { id: entity.id };
+  }
   if (
     c.action === "vendor-payment.batch-create" ||
     c.action === "vendor-payment.batch-reverse"
@@ -481,6 +507,24 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         409,
         "This bill changed. Refresh before taking this action.",
       );
+    if (c.action === "bill.approve" || c.action === "bill.return") {
+      const policy = await get(tx, "entities", b.entity_id);
+      if (
+        !canReviewBill(
+          ctx.role,
+          ctx.userId,
+          { created_by: b.created_by, base_minor: b.base_minor },
+          {
+            bill_finance_limit_minor: policy.bill_finance_limit_minor,
+            bill_separate_approver: policy.bill_separate_approver,
+          },
+        )
+      )
+        throw new Problem(
+          403,
+          "This bill requires another authorized approver under the entity's approval rules.",
+        );
+    }
     if (c.action === "bill.submit") {
       if (b.status !== "Draft")
         throw new Problem(409, "Only a draft can be submitted.");
@@ -489,8 +533,6 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         [b.id],
       );
     } else if (c.action === "bill.return") {
-      if (!hasCapability(ctx.role, "bills.approve"))
-        throw new Problem(403, "An administrator must review the bill.");
       if (b.status !== "Pending approval")
         throw new Problem(409, "Only a submitted bill can be returned.");
       await tx.query(
@@ -498,11 +540,6 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         [b.id],
       );
     } else if (c.action === "bill.approve") {
-      if (!hasCapability(ctx.role, "bills.approve"))
-        throw new Problem(
-          403,
-          "An administrator must approve and post the bill.",
-        );
       if (b.status !== "Pending approval")
         throw new Problem(409, "Submit the draft for approval first.");
       await openDate(tx, b, String(b.bill_date).slice(0, 10));
