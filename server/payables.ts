@@ -5,7 +5,11 @@ import { Problem, post, audit, type Context } from "./domain.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { hasCapability } from "../shared/permissions.ts";
-import { billReviewDecision } from "../shared/bill-approval.ts";
+import {
+  billReviewDecision,
+  tierProblem,
+  type ApprovalTier,
+} from "../shared/bill-approval.ts";
 
 function requireFinance(ctx: Context) {
   if (!hasCapability(ctx, "books.post"))
@@ -84,7 +88,8 @@ export async function payableSnapshot(tx: SQL, ctx: Context) {
     return { bills: [], vendorPayments: [], vendorPaymentBatches: [] };
   const bills = (
     await tx.query(
-      "SELECT * FROM bills ORDER BY bill_date DESC,created_at DESC",
+      // Approvers of the current submission, in step order.
+      "SELECT b.*,coalesce((SELECT jsonb_agg(a.approver_id ORDER BY a.step) FROM bill_approvals a WHERE a.bill_id=b.id AND a.round=b.approval_round),'[]'::jsonb) AS approvals FROM bills b ORDER BY b.bill_date DESC,b.created_at DESC",
     )
   ).rows;
   const vendorPayments = (
@@ -151,6 +156,12 @@ export async function billApprovalHistory(
     nextCursor: rows.length > 100 ? rows[99].id : null,
   };
 }
+async function recordApproval(tx: SQL, ctx: Context, b: Row, step: number) {
+  await tx.query(
+    "INSERT INTO bill_approvals(id,tenant_id,bill_id,round,step,approver_id) VALUES($1,$2,$3,$4,$5,$6)",
+    [uuid(), ctx.tenantId, b.id, b.approval_round, step, ctx.userId],
+  );
+}
 export async function executePayable(tx: SQL, ctx: Context, c: Row) {
   requireFinance(ctx);
   const t = ctx.tenantId,
@@ -167,20 +178,41 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     const limit =
       c.finance_limit === null ? null : String(minor(c.finance_limit));
     const twoStage = c.two_stage ?? entity.bill_two_stage;
+    const tiers: ApprovalTier[] | null =
+      c.tiers === undefined
+        ? entity.bill_approval_tiers
+        : c.tiers === null
+          ? null
+          : c.tiers.map(
+              (t: { from: string; steps: ApprovalTier["steps"] }) => ({
+                from_minor: String(minor(t.from)),
+                steps: t.steps,
+              }),
+            );
+    const problem = tiers && tierProblem(tiers);
+    if (problem) throw new Problem(400, problem);
     await tx.query(
-      "UPDATE entities SET bill_finance_limit_minor=$2,bill_separate_approver=$3,bill_two_stage=$4,bill_approval_version=bill_approval_version+1 WHERE id=$1",
-      [entity.id, limit, c.separate_approver, twoStage],
+      "UPDATE entities SET bill_finance_limit_minor=$2,bill_separate_approver=$3,bill_two_stage=$4,bill_approval_tiers=$5,bill_approval_version=bill_approval_version+1 WHERE id=$1",
+      [
+        entity.id,
+        limit,
+        c.separate_approver,
+        twoStage,
+        tiers ? JSON.stringify(tiers) : null,
+      ],
     );
     await audit(tx, ctx, entity.id, c.action, {
       before: {
         financeLimit: entity.bill_finance_limit_minor,
         separateApprover: entity.bill_separate_approver,
         twoStage: entity.bill_two_stage,
+        tiers: entity.bill_approval_tiers,
       },
       after: {
         financeLimit: limit,
         separateApprover: c.separate_approver,
         twoStage,
+        tiers,
       },
       text: `Changed bill approval rules for ${entity.name}. Rules apply to subsequent review actions, including pending bills.`,
     });
@@ -562,23 +594,33 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         409,
         "This bill changed. Refresh before taking this action.",
       );
+    let approvals: string[] = [],
+      stage: { step?: number; steps?: number } = {};
     if (["bill.approve", "bill.return", "bill.review"].includes(c.action)) {
       const policy = await get(tx, "entities", b.entity_id);
+      approvals = (
+        await tx.query(
+          "SELECT approver_id FROM bill_approvals WHERE bill_id=$1 AND round=$2 ORDER BY step",
+          [b.id, b.approval_round],
+        )
+      ).rows.map((r) => r.approver_id);
       const decision = billReviewDecision(
         ctx,
         ctx.userId,
         {
           created_by: b.created_by,
           base_minor: b.base_minor,
-          reviewed_by: b.reviewed_by,
+          approvals,
         },
         {
           bill_finance_limit_minor: policy.bill_finance_limit_minor,
           bill_separate_approver: policy.bill_separate_approver,
           bill_two_stage: policy.bill_two_stage,
+          bill_approval_tiers: policy.bill_approval_tiers,
         },
       );
       if (!decision.allowed) throw new Problem(403, decision.reason);
+      stage = { step: decision.step, steps: decision.steps };
       if (
         c.action !== "bill.return" &&
         c.action !== `bill.${decision.action || "approve"}`
@@ -592,14 +634,16 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       if (b.status !== "Draft")
         throw new Problem(409, "Only a draft can be submitted.");
       await tx.query(
-        "UPDATE bills SET status='Pending approval',version=version+1 WHERE id=$1",
+        "UPDATE bills SET status='Pending approval',approval_round=approval_round+1,version=version+1 WHERE id=$1",
         [b.id],
       );
     } else if (c.action === "bill.review") {
       if (b.status !== "Pending approval")
         throw new Problem(409, "Submit the draft before first review.");
+      await recordApproval(tx, ctx, b, approvals.length);
+      // reviewed_by keeps the first reviewer; later steps live in bill_approvals.
       await tx.query(
-        "UPDATE bills SET reviewed_by=$2,reviewed_at=now(),version=version+1 WHERE id=$1",
+        "UPDATE bills SET reviewed_by=coalesce(reviewed_by,$2),reviewed_at=coalesce(reviewed_at,now()),version=version+1 WHERE id=$1",
         [b.id, ctx.userId],
       );
     } else if (c.action === "bill.return") {
@@ -613,6 +657,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       if (b.status !== "Pending approval")
         throw new Problem(409, "Submit the draft for approval first.");
       await openDate(tx, b, String(b.bill_date).slice(0, 10));
+      await recordApproval(tx, ctx, b, approvals.length);
       const total = BigInt(b.total_minor),
         net = BigInt(b.net_minor),
         base = BigInt(b.base_minor),
@@ -684,6 +729,9 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     } else throw new Problem(400, "Unknown bill action.");
     await audit(tx, ctx, b.id, c.action, {
       actorName: ctx.name || null,
+      ...(c.action === "bill.review" || c.action === "bill.approve"
+        ? stage
+        : {}),
       text: `Bill ${b.reference}: ${c.action.split(".")[1]}${c.reason ? ` — ${c.reason}` : ""}.`,
     });
     return { id: b.id };

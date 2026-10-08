@@ -43,6 +43,21 @@ export const commandSchema = z.discriminatedUnion("action", [
     finance_limit: money.nullable(),
     separate_approver: z.boolean(),
     two_stage: z.boolean().optional(),
+    // Omitted keeps stored tiers; null returns to the finance-limit settings.
+    tiers: z
+      .array(
+        z.strictObject({
+          from: money,
+          steps: z
+            .array(z.strictObject({ role: z.enum(["finance", "admin"]) }))
+            .min(1)
+            .max(4),
+        }),
+      )
+      .min(1)
+      .max(5)
+      .nullable()
+      .optional(),
   }),
   ...bankCommands,
   ...projectCommands,
