@@ -91,6 +91,10 @@ test("a books.view-only finance profile sees records but no create or post actio
 
   try {
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    // Sign-out reloads the page; navigating before it settles aborts on CI.
+    await expect(
+      page.getByRole("heading", { name: "Choose a sample role" }),
+    ).toBeVisible();
     await signIn(page, "Accountant");
     const me = await (await page.request.get("/api/me")).json();
     expect(me.user.role).toBe("finance");
