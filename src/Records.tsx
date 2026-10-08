@@ -384,7 +384,7 @@ export function PersonRecord({
       <div className="record-layout">
         <aside className="properties" aria-label="Profile properties">
           <h2>Properties</h2>
-          {me.user.role !== "viewer" ? (
+          {hasCapability(me.user, "contacts.manage") ? (
             <button
               onClick={() => crmEdit(contact ? "contact" : "company", type, id)}
             >
@@ -1553,7 +1553,7 @@ export function DocumentRecord({
                 </small>
               </div>
             ))}
-            {["admin", "finance", "sales"].includes(me.user.role) ? (
+            {finance(me) || sales(me) ? (
               <label className="attachment-upload-field">
                 <span>{attachmentBusy ? "Uploading…" : "Add attachment"}</span>
                 <input

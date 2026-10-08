@@ -18,9 +18,16 @@ type Props = {
   run: (c: Record<string, unknown>) => Promise<void>;
 };
 type Form = { mode: string; target?: string; key: string };
-export function Credits({ data, entity, id, initialInvoice, run }: Props) {
+export function Credits({
+  data,
+  entity,
+  id,
+  initialInvoice,
+  run,
+  canPost,
+}: Props & { canPost: boolean }) {
   const [form, setForm] = useState<Form | null>(
-    initialInvoice
+    initialInvoice && canPost
       ? { mode: "create", target: initialInvoice, key: crypto.randomUUID() }
       : null,
   );
@@ -41,7 +48,7 @@ export function Credits({ data, entity, id, initialInvoice, run }: Props) {
       <Heading
         title={credit ? credit.number : "Credit notes"}
         subtitle="Adjust issued invoices without changing their history. Apply available credit or record money returned."
-        action={!credit ? "New credit note" : undefined}
+        action={!credit && canPost ? "New credit note" : undefined}
         onAction={() => open("create")}
       />
       {credit ? (
@@ -88,7 +95,7 @@ export function Credits({ data, entity, id, initialInvoice, run }: Props) {
                 : "Reduces earned revenue"}
               . Original invoice remains unchanged.
             </p>
-            {!credit.reversal_date ? (
+            {canPost && !credit.reversal_date ? (
               <div className="actions">
                 <button
                   disabled={BigInt(credit.available) <= 0n}
@@ -127,7 +134,7 @@ export function Credits({ data, entity, id, initialInvoice, run }: Props) {
                       : "Applied"}
                   </td>
                   <td>
-                    {!a.reversal_date ? (
+                    {canPost && !a.reversal_date ? (
                       <button onClick={() => open("credit.unapply", a.id)}>
                         Reverse application
                       </button>
@@ -151,7 +158,7 @@ export function Credits({ data, entity, id, initialInvoice, run }: Props) {
                       : "Recorded"}
                   </td>
                   <td>
-                    {!r.reversal_date ? (
+                    {canPost && !r.reversal_date ? (
                       <button
                         onClick={() => open("credit.reverse-refund", r.id)}
                       >

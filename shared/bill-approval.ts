@@ -1,3 +1,5 @@
+import { hasCapability, type PermissionSubject } from "./permissions.ts";
+
 export interface BillApprovalPolicy {
   bill_finance_limit_minor: string | null;
   bill_separate_approver: boolean;
@@ -6,16 +8,18 @@ export interface BillApprovalPolicy {
 // Limit is compared with the bill's stored base-currency amount, never its
 // foreign-currency face value. Null preserves administrator-only approval.
 export function canReviewBill(
-  role: string,
+  subject: PermissionSubject,
   userId: string,
   bill: { created_by: string; base_minor: string; reviewed_by?: string | null },
   policy: BillApprovalPolicy,
 ): boolean {
-  return billReviewDecision(role, userId, bill, policy).allowed;
+  return billReviewDecision(subject, userId, bill, policy).allowed;
 }
 
+// The subject's effective capabilities gate review; the built-in role still
+// decides limits and final approval, which custom profiles cannot change.
 export function billReviewDecision(
-  role: string,
+  subject: PermissionSubject,
   userId: string,
   bill: { created_by: string; base_minor: string; reviewed_by?: string | null },
   policy: BillApprovalPolicy | undefined,
@@ -26,11 +30,12 @@ export function billReviewDecision(
       reason:
         "Approval rules are unavailable. Refresh before reviewing this bill.",
     };
-  if (role !== "admin" && role !== "finance")
+  const role = typeof subject === "object" && subject ? subject.role : subject;
+  if (!hasCapability(subject, "books.post"))
     return {
       allowed: false,
       reason:
-        "A finance or administrator role is required to review vendor bills.",
+        "Permission to record financial transactions is required to review vendor bills.",
     };
   if (policy.bill_separate_approver && userId === bill.created_by)
     return {

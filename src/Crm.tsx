@@ -148,7 +148,7 @@ export function CrmPanel({
     <section className="space-top">
       <div className="section-title">
         <h2>Tasks & activity</h2>
-        {me.user.role !== "viewer" ? (
+        {hasCapability(me.user, "contacts.manage") ? (
           <div className="actions">
             <button onClick={() => open("task", type, id)}>Add task</button>
             <button onClick={() => open("activity", type, id)}>
@@ -195,7 +195,7 @@ export function CrmPanel({
                 <Badge>{t.status}</Badge>
               </td>
               <td>
-                {me.user.role !== "viewer" &&
+                {hasCapability(me.user, "contacts.manage") &&
                 (me.user.role === "admin" ||
                   t.assignee_id === me.user.id ||
                   t.created_by === me.user.id) ? (
@@ -278,7 +278,9 @@ export function Tasks({ data, me, open, entity }: Props & { entity: string }) {
       <Heading
         title="Tasks"
         subtitle="Your next actions, linked to the people and projects they belong to."
-        action={me.user.role !== "viewer" ? "New task" : undefined}
+        action={
+          hasCapability(me.user, "contacts.manage") ? "New task" : undefined
+        }
         onAction={() => open("task", "", "")}
       />
       <div className="crm-filters">
@@ -343,7 +345,7 @@ export function Tasks({ data, me, open, entity }: Props & { entity: string }) {
                 <Badge>{t.status}</Badge>
               </td>
               <td>
-                {me.user.role !== "viewer" &&
+                {hasCapability(me.user, "contacts.manage") &&
                 (me.user.role === "admin" ||
                   t.assignee_id === me.user.id ||
                   t.created_by === me.user.id) ? (

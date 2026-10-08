@@ -6,6 +6,7 @@ import { request, money, today, day, type Data, type Me } from "./model";
 import { totals } from "../shared/money";
 import { occurrenceDate } from "../shared/recurring";
 import type { BillSchedule } from "../shared/recurring-bills";
+import { hasCapability } from "../shared/permissions";
 import {
   readBrowserDraft,
   writeBrowserDraft,
@@ -164,18 +165,19 @@ export default function RecurringBills({
     setError("");
     setOpen(true);
   }
-  if (!["admin", "finance"].includes(me.user.role))
+  if (!hasCapability(me.user, "books.view"))
     return (
       <Empty title="Finance access required">
         Recurring bills are restricted to finance and administrators.
       </Empty>
     );
+  const canPost = hasCapability(me.user, "books.post");
   return (
     <>
       <Heading
         title="Recurring bills"
         subtitle="Schedule unpaid vendor bills. Each cycle creates a draft for review—not a payment or posted expense."
-        action="New recurring bill"
+        action={canPost ? "New recurring bill" : undefined}
         onAction={() => {
           setError("");
           setOpen(true);
@@ -205,7 +207,7 @@ export default function RecurringBills({
           {selected.last_error ? (
             <ErrorBox error={selected.last_error} />
           ) : null}
-          {!["Completed", "Stopped"].includes(selected.status) ? (
+          {canPost && !["Completed", "Stopped"].includes(selected.status) ? (
             <>
               <div className="actions">
                 <button disabled={busy} onClick={() => edit(selected)}>
@@ -350,11 +352,7 @@ export default function RecurringBills({
               <td>
                 {["Stopped", "Completed"].includes(p.status)
                   ? "—"
-                  : occurrenceDate(
-                      p.start_date,
-                      p.frequency,
-                      p.next_index,
-                    )}
+                  : occurrenceDate(p.start_date, p.frequency, p.next_index)}
                 {p.last_error ? (
                   <small className="error">Needs review: {p.last_error}</small>
                 ) : null}
@@ -437,7 +435,7 @@ export default function RecurringBills({
                 </p>
               )}
               {error ? <ErrorBox error={error} /> : null}
-            <div className="form-row">
+              <div className="form-row">
                 <Field label="Schedule name">
                   <input
                     required
@@ -642,10 +640,10 @@ export default function RecurringBills({
                           )
                         }
                       >
-                      <option value="5000">Operating expenses</option>
-                      <option value="5200">Project production costs</option>
-                      <option value="1400">Prepayments</option>
-                      <option value="1500">Equipment</option>
+                        <option value="5000">Operating expenses</option>
+                        <option value="5200">Project production costs</option>
+                        <option value="1400">Prepayments</option>
+                        <option value="1500">Equipment</option>
                       </select>
                     </td>
                     <td>

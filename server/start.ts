@@ -1,4 +1,5 @@
 import { createServer as createVite } from "vite";
+import { createServer as createNetServer } from "node:net";
 import { openDatabase, migrate, bindEnvironment } from "./db.ts";
 import { seed } from "./seed.ts";
 import { createApp } from "./app.ts";
@@ -13,8 +14,25 @@ await migrate(db);
 await bindEnvironment(db, "sample");
 await seed(db);
 const app = createApp(db, `http://127.0.0.1:${port}`);
+// Prefer port + 1 for live reload, but fall back to any free port so another
+// dev server (or a browser-test run) on a neighbouring port cannot collide.
+function freePort(preferred: number): Promise<number> {
+  return new Promise((resolve) => {
+    const probe = createNetServer();
+    probe.once("error", () =>
+      preferred ? void freePort(0).then(resolve) : resolve(0),
+    );
+    probe.listen(preferred, "127.0.0.1", () => {
+      const { port } = probe.address() as { port: number };
+      probe.close(() => resolve(port));
+    });
+  });
+}
 const vite = await createVite({
-  server: { middlewareMode: true, ws: { host: "127.0.0.1", port: port + 1 } },
+  server: {
+    middlewareMode: true,
+    ws: { host: "127.0.0.1", port: await freePort(port + 1) },
+  },
   appType: "spa",
 });
 app.setNotFoundHandler((req, res) => {

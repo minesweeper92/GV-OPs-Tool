@@ -124,9 +124,12 @@ export function Payables({
       (b) => entity === "all" || b.entity_id === entity,
     ),
     payments = data.vendorPayments || [];
+  const canPost = hasCapability(me.user, "books.post"),
+    canAddVendor = hasCapability(me.user, "contacts.manage"),
+    canManageRules = hasCapability(me.user, "team.manage");
   const review = (b: Bill) =>
     billReviewDecision(
-      me.user.role,
+      me.user,
       me.user.id,
       b,
       data.entities.find((e) => e.id === b.entity_id),
@@ -290,7 +293,7 @@ export function Payables({
                 >
                   Remittance advice
                 </button>
-                {!p.reversal_date ? (
+                {canPost && !p.reversal_date ? (
                   <button
                     onClick={() =>
                       setEditor({ kind: "reverse", bill: b, payment: p })
@@ -362,10 +365,10 @@ export function Payables({
           )}
           <Badge>{status(b)}</Badge>
           <div className="row-actions">
-            {["Open", "Paid"].includes(b.status) && (
+            {canPost && ["Open", "Paid"].includes(b.status) && (
               <a href={`#vendor-credits/${b.id}`}>Record vendor credit</a>
             )}
-            {b.status === "Draft" ? (
+            {canPost && b.status === "Draft" ? (
               <>
                 {!b.purchase_order_id && (
                   <button onClick={() => setEditor({ kind: "edit", bill: b })}>
@@ -406,7 +409,7 @@ export function Payables({
                 </button>
               </>
             ) : null}
-            {b.status === "Open" ? (
+            {canPost && b.status === "Open" ? (
               <button
                 className="primary"
                 onClick={() => setEditor({ kind: "pay", bill: b })}
@@ -414,7 +417,8 @@ export function Payables({
                 Record vendor payment
               </button>
             ) : null}
-            {b.status !== "Voided" &&
+            {canPost &&
+            b.status !== "Voided" &&
             b.status !== "Paid" &&
             BigInt(b.paid_minor) === 0n &&
             BigInt(b.credited_minor) === 0n &&
@@ -625,7 +629,7 @@ export function Payables({
         <Heading
           title="Vendors"
           subtitle="Shared companies marked as vendors. One vendor can supply several legal entities."
-          action="New vendor"
+          action={canAddVendor ? "New vendor" : undefined}
           onAction={newVendor}
         />
         <Table headers={["Vendor", "Tax reference", "Address", "Open bills"]}>
@@ -653,7 +657,7 @@ export function Payables({
         <Heading
           title="Bills"
           subtitle="Capture vendor invoices, review them, then post and track payments. Drafts do not affect your books."
-          action="New bill"
+          action={canPost ? "New bill" : undefined}
           onAction={() => setEditor({ kind: "create" })}
         />
         <div className="toolbar" aria-label="Bill review queues">
@@ -677,7 +681,7 @@ export function Payables({
           </button>
         </div>
         <div className="toolbar">
-          {me.user.role === "admin" && (
+          {canManageRules && (
             <button onClick={() => setRulesOpen(true)}>Approval rules</button>
           )}
           <Field label="Search bills">

@@ -15,6 +15,7 @@ import {
 } from "./model";
 import { minor } from "../shared/money";
 import { openRemittanceAdvice } from "./remittanceAdvice";
+import { hasCapability } from "../shared/permissions";
 import {
   readBrowserDraft,
   writeBrowserDraft,
@@ -58,6 +59,7 @@ export function VendorPaymentBatches({
   id?: string;
 }) {
   const cache = useQueryClient(),
+    canPost = hasCapability(me.user, "books.post"),
     [open, setOpen] = useState(false),
     [reverse, setReverse] = useState<VendorPaymentBatch | null>(null),
     [error, setError] = useState(""),
@@ -151,7 +153,7 @@ export function VendorPaymentBatches({
       <Heading
         title="Payments made"
         subtitle="One vendor payment, one bank entry. Allocate cash and withholding to approved bills; no bank transfer is initiated."
-        action="Record vendor payment"
+        action={canPost ? "Record vendor payment" : undefined}
         onAction={() => {
           setError("");
           setOpen(true);
@@ -197,7 +199,7 @@ export function VendorPaymentBatches({
                 </button>
                 {p.reversal_date ? (
                   `Reversed ${day(p.reversal_date)}`
-                ) : (
+                ) : !canPost ? null : (
                   <button
                     disabled={busy}
                     onClick={() => {

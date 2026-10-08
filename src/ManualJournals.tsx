@@ -38,12 +38,14 @@ export function ManualJournals({
   data,
   focus,
   onRun,
+  canPost,
 }: {
   entity: Entity;
   report: Report;
   data: Data;
   focus: "manual" | "schedules";
   onRun: (command: Record<string, unknown>) => Promise<{ id: string }>;
+  canPost: boolean;
 }) {
   const [creating, setCreating] = useState(false);
   const [scheduleMode, setScheduleMode] = useState(focus === "schedules");
@@ -246,7 +248,7 @@ export function ManualJournals({
   return (
     <div className="manual-journals">
       <div className="toolbar">
-        {focus === "manual" ? (
+        {canPost && focus === "manual" ? (
           <button
             className="primary"
             type="button"
@@ -260,7 +262,7 @@ export function ManualJournals({
             {creating ? "Close journal form" : "+ New manual journal"}
           </button>
         ) : null}
-        {focus === "schedules" ? (
+        {canPost && focus === "schedules" ? (
           <button
             type="button"
             onClick={() => {
@@ -555,21 +557,38 @@ export function ManualJournals({
                     <small className="warning">{p.last_error}</small>
                   ) : null}
                 </div>
-                <div className="actions">
-                  {p.status === "Active" ? (
-                    <>
-                      <button
-                        disabled={busy}
-                        type="button"
-                        onClick={() =>
-                          scheduleCommand({
-                            action: "journal-schedule.run",
-                            id: p.id,
-                          })
-                        }
-                      >
-                        Generate due drafts
-                      </button>
+                {canPost ? (
+                  <div className="actions">
+                    {p.status === "Active" ? (
+                      <>
+                        <button
+                          disabled={busy}
+                          type="button"
+                          onClick={() =>
+                            scheduleCommand({
+                              action: "journal-schedule.run",
+                              id: p.id,
+                            })
+                          }
+                        >
+                          Generate due drafts
+                        </button>
+                        <button
+                          disabled={busy}
+                          type="button"
+                          onClick={() =>
+                            scheduleCommand({
+                              action: "journal-schedule.status",
+                              id: p.id,
+                              version: p.version,
+                              status: "Paused",
+                            })
+                          }
+                        >
+                          Pause
+                        </button>
+                      </>
+                    ) : p.status === "Paused" ? (
                       <button
                         disabled={busy}
                         type="button"
@@ -578,46 +597,31 @@ export function ManualJournals({
                             action: "journal-schedule.status",
                             id: p.id,
                             version: p.version,
-                            status: "Paused",
+                            status: "Active",
                           })
                         }
                       >
-                        Pause
+                        Resume
                       </button>
-                    </>
-                  ) : p.status === "Paused" ? (
-                    <button
-                      disabled={busy}
-                      type="button"
-                      onClick={() =>
-                        scheduleCommand({
-                          action: "journal-schedule.status",
-                          id: p.id,
-                          version: p.version,
-                          status: "Active",
-                        })
-                      }
-                    >
-                      Resume
-                    </button>
-                  ) : null}
-                  {["Active", "Paused"].includes(p.status) ? (
-                    <button
-                      disabled={busy}
-                      type="button"
-                      onClick={() =>
-                        scheduleCommand({
-                          action: "journal-schedule.status",
-                          id: p.id,
-                          version: p.version,
-                          status: "Stopped",
-                        })
-                      }
-                    >
-                      Stop future drafts
-                    </button>
-                  ) : null}
-                </div>
+                    ) : null}
+                    {["Active", "Paused"].includes(p.status) ? (
+                      <button
+                        disabled={busy}
+                        type="button"
+                        onClick={() =>
+                          scheduleCommand({
+                            action: "journal-schedule.status",
+                            id: p.id,
+                            version: p.version,
+                            status: "Stopped",
+                          })
+                        }
+                      >
+                        Stop future drafts
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ))
           ) : (
@@ -656,7 +660,7 @@ export function ManualJournals({
                   </details>
                   {o.reason ? <small>{o.reason}</small> : null}
                 </div>
-                {o.status === "Pending review" ? (
+                {canPost && o.status === "Pending review" ? (
                   <div className="actions">
                     {reviewingOccurrenceId === o.id ? (
                       <>
@@ -758,7 +762,8 @@ export function ManualJournals({
                   </p>
                   <a href="#journals">Open journal entries</a>
                 </div>
-                {task.status === "Pending review" &&
+                {canPost &&
+                task.status === "Pending review" &&
                 task.due_date <= new Date().toISOString().slice(0, 10) ? (
                   <button
                     disabled={busy}
@@ -867,13 +872,17 @@ export function ManualJournals({
         <Ledger
           report={report}
           mode="journals"
-          onReverse={(id) => {
-            setReversing(id);
-            setReversalDate(today());
-            setReason("");
-            setReversalKey(crypto.randomUUID());
-            setError("");
-          }}
+          onReverse={
+            canPost
+              ? (id) => {
+                  setReversing(id);
+                  setReversalDate(today());
+                  setReason("");
+                  setReversalKey(crypto.randomUUID());
+                  setError("");
+                }
+              : undefined
+          }
         />
       ) : null}
     </div>

@@ -15,6 +15,7 @@ import {
 } from "./model";
 import { totals } from "../shared/money";
 import { documentDetails } from "../shared/documents";
+import { hasCapability } from "../shared/permissions";
 import { DocumentFields } from "./DocumentFields";
 const titles: Record<string, string> = {
   company: "New company",
@@ -668,8 +669,10 @@ export function Editor({
                   {data.catalogItems.map((item) => (
                     <p key={item.id}>
                       {item.name} · {item.currency} {item.line.price}{" "}
-                      {me.user.role === "admin" ||
-                      item.created_by === me.user.id ? (
+                      {(hasCapability(me.user, "crm.sales") ||
+                        hasCapability(me.user, "books.post")) &&
+                      (me.user.role === "admin" ||
+                        item.created_by === me.user.id) ? (
                         <button
                           type="button"
                           disabled={itemBusy}
