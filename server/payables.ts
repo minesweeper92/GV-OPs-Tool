@@ -5,7 +5,7 @@ import { Problem, post, audit, type Context } from "./domain.ts";
 import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { hasCapability } from "../shared/permissions.ts";
-import { canReviewBill } from "../shared/bill-approval.ts";
+import { billReviewDecision } from "../shared/bill-approval.ts";
 
 function requireFinance(ctx: Context) {
   if (!hasCapability(ctx.role, "books.post"))
@@ -509,21 +509,16 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       );
     if (c.action === "bill.approve" || c.action === "bill.return") {
       const policy = await get(tx, "entities", b.entity_id);
-      if (
-        !canReviewBill(
-          ctx.role,
-          ctx.userId,
-          { created_by: b.created_by, base_minor: b.base_minor },
-          {
-            bill_finance_limit_minor: policy.bill_finance_limit_minor,
-            bill_separate_approver: policy.bill_separate_approver,
-          },
-        )
-      )
-        throw new Problem(
-          403,
-          "This bill requires another authorized approver under the entity's approval rules.",
-        );
+      const decision = billReviewDecision(
+        ctx.role,
+        ctx.userId,
+        { created_by: b.created_by, base_minor: b.base_minor },
+        {
+          bill_finance_limit_minor: policy.bill_finance_limit_minor,
+          bill_separate_approver: policy.bill_separate_approver,
+        },
+      );
+      if (!decision.allowed) throw new Problem(403, decision.reason);
     }
     if (c.action === "bill.submit") {
       if (b.status !== "Draft")

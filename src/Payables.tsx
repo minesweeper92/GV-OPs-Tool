@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { hasCapability } from "../shared/permissions";
-import { canReviewBill } from "../shared/bill-approval";
+import { billReviewDecision } from "../shared/bill-approval";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Heading,
@@ -112,6 +112,15 @@ export function Payables({
       (b) => entity === "all" || b.entity_id === entity,
     ),
     payments = data.vendorPayments || [];
+  const review = (b: Bill) =>
+    billReviewDecision(
+      me.user.role,
+      me.user.id,
+      b,
+      data.entities.find((e) => e.id === b.entity_id),
+    );
+  const pending = bills.filter((b) => b.status === "Pending approval");
+  const ready = pending.filter((b) => review(b).allowed);
   async function save(c: Record<string, unknown>) {
     const result = await request<{ id: string }>(
       "commands",
@@ -203,6 +212,9 @@ export function Payables({
             </td>
             <td>
               <Badge>{status(b)}</Badge>
+              {b.status === "Pending approval" && (
+                <small>{review(b).reason}</small>
+              )}
             </td>
           </tr>
         ))}
@@ -294,6 +306,12 @@ export function Payables({
           title={b.reference}
           subtitle={`${b.vendor_name} · ${b.entity_name}`}
         />
+        {b.status === "Pending approval" && (
+          <p role="status">
+            {review(b).reason} Nothing is posted until approval.{" "}
+            <a href="#bills">Back to review queue →</a>
+          </p>
+        )}
         {data.vendorCredits
           .filter(
             (v) =>
@@ -345,13 +363,7 @@ export function Payables({
                 </button>
               </>
             ) : null}
-            {b.status === "Pending approval" &&
-            canReviewBill(
-              me.user.role,
-              me.user.id,
-              b,
-              data.entities.find((e) => e.id === b.entity_id)!,
-            ) ? (
+            {b.status === "Pending approval" && review(b).allowed ? (
               <>
                 <button onClick={() => setEditor({ kind: "return", bill: b })}>
                   Return to draft
@@ -612,6 +624,26 @@ export function Payables({
           action="New bill"
           onAction={() => setEditor({ kind: "create" })}
         />
+        <div className="toolbar" aria-label="Bill review queues">
+          <button
+            aria-pressed={filter === "my-review"}
+            onClick={() => setFilter("my-review")}
+          >
+            Ready for my review ({ready.length})
+          </button>
+          <button
+            aria-pressed={filter === "other-review"}
+            onClick={() => setFilter("other-review")}
+          >
+            Waiting for another reviewer ({pending.length - ready.length})
+          </button>
+          <button
+            aria-pressed={filter === "all"}
+            onClick={() => setFilter("all")}
+          >
+            All bills ({bills.length})
+          </button>
+        </div>
         <div className="toolbar">
           {me.user.role === "admin" && (
             <button onClick={() => setRulesOpen(true)}>Approval rules</button>
@@ -628,6 +660,8 @@ export function Payables({
             <select value={filter} onChange={(e) => setFilter(e.target.value)}>
               {[
                 "all",
+                "my-review",
+                "other-review",
                 "Draft",
                 "Pending approval",
                 "Open",
@@ -637,7 +671,13 @@ export function Payables({
                 "Voided",
               ].map((s) => (
                 <option key={s} value={s}>
-                  {s === "all" ? "All statuses" : s}
+                  {s === "all"
+                    ? "All statuses"
+                    : s === "my-review"
+                      ? "Ready for my review"
+                      : s === "other-review"
+                        ? "Waiting for another reviewer"
+                        : s}
                 </option>
               ))}
             </select>
@@ -648,6 +688,12 @@ export function Payables({
           bills.filter(
             (b) =>
               (filter === "all" ||
+                (filter === "my-review" &&
+                  b.status === "Pending approval" &&
+                  review(b).allowed) ||
+                (filter === "other-review" &&
+                  b.status === "Pending approval" &&
+                  !review(b).allowed) ||
                 status(b) === filter ||
                 (filter === "Open" && b.status === "Open")) &&
               `${b.reference} ${b.vendor_name}`
