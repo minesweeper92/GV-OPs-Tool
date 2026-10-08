@@ -118,16 +118,22 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       throw new Problem(409, "Approval rules changed. Refresh before saving.");
     const limit =
       c.finance_limit === null ? null : String(minor(c.finance_limit));
+    const twoStage = c.two_stage ?? entity.bill_two_stage;
     await tx.query(
-      "UPDATE entities SET bill_finance_limit_minor=$2,bill_separate_approver=$3,bill_approval_version=bill_approval_version+1 WHERE id=$1",
-      [entity.id, limit, c.separate_approver],
+      "UPDATE entities SET bill_finance_limit_minor=$2,bill_separate_approver=$3,bill_two_stage=$4,bill_approval_version=bill_approval_version+1 WHERE id=$1",
+      [entity.id, limit, c.separate_approver, twoStage],
     );
     await audit(tx, ctx, entity.id, c.action, {
       before: {
         financeLimit: entity.bill_finance_limit_minor,
         separateApprover: entity.bill_separate_approver,
+        twoStage: entity.bill_two_stage,
       },
-      after: { financeLimit: limit, separateApprover: c.separate_approver },
+      after: {
+        financeLimit: limit,
+        separateApprover: c.separate_approver,
+        twoStage,
+      },
       text: `Changed bill approval rules for ${entity.name}. Rules apply to subsequent review actions, including pending bills.`,
     });
     return { id: entity.id };
@@ -507,18 +513,31 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         409,
         "This bill changed. Refresh before taking this action.",
       );
-    if (c.action === "bill.approve" || c.action === "bill.return") {
+    if (["bill.approve", "bill.return", "bill.review"].includes(c.action)) {
       const policy = await get(tx, "entities", b.entity_id);
       const decision = billReviewDecision(
         ctx.role,
         ctx.userId,
-        { created_by: b.created_by, base_minor: b.base_minor },
+        {
+          created_by: b.created_by,
+          base_minor: b.base_minor,
+          reviewed_by: b.reviewed_by,
+        },
         {
           bill_finance_limit_minor: policy.bill_finance_limit_minor,
           bill_separate_approver: policy.bill_separate_approver,
+          bill_two_stage: policy.bill_two_stage,
         },
       );
       if (!decision.allowed) throw new Problem(403, decision.reason);
+      if (
+        c.action !== "bill.return" &&
+        c.action !== `bill.${decision.action || "approve"}`
+      )
+        throw new Problem(
+          409,
+          "The approval stage changed. Refresh and complete the required review step.",
+        );
     }
     if (c.action === "bill.submit") {
       if (b.status !== "Draft")
@@ -527,11 +546,18 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         "UPDATE bills SET status='Pending approval',version=version+1 WHERE id=$1",
         [b.id],
       );
+    } else if (c.action === "bill.review") {
+      if (b.status !== "Pending approval")
+        throw new Problem(409, "Submit the draft before first review.");
+      await tx.query(
+        "UPDATE bills SET reviewed_by=$2,reviewed_at=now(),version=version+1 WHERE id=$1",
+        [b.id, ctx.userId],
+      );
     } else if (c.action === "bill.return") {
       if (b.status !== "Pending approval")
         throw new Problem(409, "Only a submitted bill can be returned.");
       await tx.query(
-        "UPDATE bills SET status='Draft',version=version+1 WHERE id=$1",
+        "UPDATE bills SET status='Draft',reviewed_by=NULL,reviewed_at=NULL,version=version+1 WHERE id=$1",
         [b.id],
       );
     } else if (c.action === "bill.approve") {

@@ -1167,6 +1167,97 @@ export async function verifyPayables(t: TestContext, db: Database) {
     },
   );
   await t.test(
+    "two-stage bills retain first review, require a different administrator and post only at final approval",
+    async () => {
+      const profile = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      await owner.command({
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: profile.bill_approval_version,
+        finance_limit: "50000",
+        separate_approver: false,
+        two_stage: true,
+      });
+      const made = await accountant.command(draft());
+      await advance(made.id, "submit");
+      await owner.command(
+        { action: "bill.approve", id: made.id, version: 2 },
+        409,
+      );
+      await accountant.command({
+        action: "bill.review",
+        id: made.id,
+        version: 2,
+      });
+      await accountant.command(
+        { action: "bill.review", id: made.id, version: 2 },
+        409,
+      );
+      assert.equal((await bill(made.id)).reviewed_by, finance);
+      assert.equal((await ledger("bill", made.id)).length, 0);
+      await accountant.command(
+        { action: "bill.approve", id: made.id, version: 3 },
+        403,
+      );
+      await advance(made.id, "approve");
+      assert.equal((await bill(made.id)).status, "Open");
+      assert.equal((await bill(made.id)).reviewed_by, finance);
+      assert.ok((await ledger("bill", made.id)).length > 0);
+      await assert.rejects(() =>
+        inTenant(db, tenant, (tx) =>
+          tx.query(
+            "UPDATE bills SET reviewed_by=$2,version=version+1 WHERE id=$1",
+            [made.id, admin],
+          ),
+        ),
+      );
+      const self = await owner.command(draft());
+      await advance(self.id, "submit");
+      await advance(self.id, "review");
+      await owner.command(
+        { action: "bill.approve", id: self.id, version: 3 },
+        403,
+      );
+      assert.equal((await ledger("bill", self.id)).length, 0);
+      const returned = await accountant.command(draft());
+      await advance(returned.id, "submit");
+      await accountant.command({
+        action: "bill.review",
+        id: returned.id,
+        version: 2,
+      });
+      await advance(returned.id, "return", {
+        reason: "Correct the source invoice",
+      });
+      assert.equal((await bill(returned.id)).reviewed_by, null);
+      assert.equal((await bill(returned.id)).status, "Draft");
+      await inTenant(db, tenant, async (tx) =>
+        assert.equal(
+          (
+            await tx.query(
+              "SELECT id FROM audit_events WHERE record_id=$1 AND action='bill.review'",
+              [returned.id],
+            )
+          ).rows.length,
+          1,
+        ),
+      );
+      const latest = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      await owner.command({
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: latest.bill_approval_version,
+        finance_limit: null,
+        separate_approver: false,
+        two_stage: false,
+      });
+    },
+  );
+  await t.test(
     "multi-bill payments post one bank entry, allocate exactly, retry and reverse atomically",
     async () => {
       const a = await posted({

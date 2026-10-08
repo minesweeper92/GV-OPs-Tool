@@ -1,13 +1,14 @@
 export interface BillApprovalPolicy {
   bill_finance_limit_minor: string | null;
   bill_separate_approver: boolean;
+  bill_two_stage?: boolean;
 }
 // Limit is compared with the bill's stored base-currency amount, never its
 // foreign-currency face value. Null preserves administrator-only approval.
 export function canReviewBill(
   role: string,
   userId: string,
-  bill: { created_by: string; base_minor: string },
+  bill: { created_by: string; base_minor: string; reviewed_by?: string | null },
   policy: BillApprovalPolicy,
 ): boolean {
   return billReviewDecision(role, userId, bill, policy).allowed;
@@ -16,9 +17,9 @@ export function canReviewBill(
 export function billReviewDecision(
   role: string,
   userId: string,
-  bill: { created_by: string; base_minor: string },
+  bill: { created_by: string; base_minor: string; reviewed_by?: string | null },
   policy: BillApprovalPolicy | undefined,
-): { allowed: boolean; reason: string } {
+): { allowed: boolean; reason: string; action?: "review" | "approve" } {
   if (!policy)
     return {
       allowed: false,
@@ -37,6 +38,32 @@ export function billReviewDecision(
       reason:
         "A different person must review this bill because you created it.",
     };
+  if (policy.bill_two_stage) {
+    if (!bill.reviewed_by)
+      return {
+        allowed: true,
+        action: "review",
+        reason:
+          "First review required. An administrator must approve afterward; first review does not post to the books.",
+      };
+    if (userId === bill.reviewed_by)
+      return {
+        allowed: false,
+        reason:
+          "A different administrator must give final approval because you completed the first review.",
+      };
+    if (role !== "admin")
+      return {
+        allowed: false,
+        reason:
+          "First review is complete. An administrator must give final approval.",
+      };
+    return {
+      allowed: true,
+      action: "approve",
+      reason: "First review complete. Ready for final administrator approval.",
+    };
+  }
   if (role === "admin")
     return { allowed: true, reason: "Ready for administrator review." };
   if (policy.bill_finance_limit_minor === null)

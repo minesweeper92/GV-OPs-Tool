@@ -42,6 +42,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     version: z.number().int().positive(),
     finance_limit: money.nullable(),
     separate_approver: z.boolean(),
+    two_stage: z.boolean().optional(),
   }),
   ...bankCommands,
   ...projectCommands,
@@ -98,6 +99,11 @@ export const commandSchema = z.discriminatedUnion("action", [
   }),
   z.strictObject({
     action: z.literal("bill.submit"),
+    id,
+    version: z.number().int().positive(),
+  }),
+  z.strictObject({
+    action: z.literal("bill.review"),
     id,
     version: z.number().int().positive(),
   }),
