@@ -4,6 +4,7 @@ import type { SQL, Row } from "./db.ts";
 import { minor, scaled, round, baseAmount } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { signedMinor } from "../shared/banking.ts";
+import { hasCapability } from "../shared/permissions.ts";
 const day = (v: unknown) => String(v).slice(0, 10);
 const sum = (rows: Row[], key: string) =>
   rows.reduce((s, r) => s + BigInt(r[key]), 0n);
@@ -138,7 +139,7 @@ async function updateCredits(tx: SQL, i: Row, amount: bigint, base: bigint) {
   );
 }
 export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(
       403,
       "A finance role is required for credits and refunds.",
@@ -609,7 +610,7 @@ export async function executeCredit(tx: SQL, ctx: Context, c: Row) {
   return { id };
 }
 export async function creditSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     return { credits: [], creditApplications: [], customerRefunds: [] };
   const credits = (
     await tx.query(`SELECT c.*,i.currency,i.fx_micros,i.customer_name,i.company_id,i.number AS invoice_number,r.reversal_date,

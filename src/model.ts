@@ -383,7 +383,14 @@ export interface VendorPaymentBatch {
   }[];
 }
 export interface Me {
-  user: { id: string; name: string; role: string; email: string };
+  user: {
+    id: string;
+    name: string;
+    role: string;
+    email: string;
+    capabilities?: import("../shared/permissions").Capability[];
+    roleName?: string | null;
+  };
   organization: { id: string; name: string };
   csrf: string;
   mode: string;

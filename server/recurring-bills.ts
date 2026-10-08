@@ -6,6 +6,7 @@ import { executePayable } from "./payables.ts";
 import { scaled, totals, baseAmount } from "../shared/money.ts";
 import { occurrenceDate } from "../shared/recurring.ts";
 import { hasCapability } from "../shared/permissions.ts";
+import { currentMemberContext } from "./permission-checks.ts";
 const day = (value: unknown) => String(value).slice(0, 10);
 const rate = (value: string) =>
   `${BigInt(value) / 1000000n}.${String(BigInt(value) % 1000000n).padStart(6, "0")}`;
@@ -64,7 +65,7 @@ function snapshot(p: Row) {
   };
 }
 export async function billScheduleSnapshot(tx: SQL, ctx: Context) {
-  if (!hasCapability(ctx.role, "books.view"))
+  if (!hasCapability(ctx, "books.view"))
     return { billSchedules: [], billScheduleOccurrences: [] };
   return {
     billSchedules: (
@@ -85,7 +86,7 @@ export async function executeBillSchedule(
   c: Row,
   now = new Date(),
 ) {
-  if (!hasCapability(ctx.role, "books.post"))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(403, "Finance access is required for recurring bills.");
   if (c.action === "bill-schedule.create") {
     await get(tx, "entities", c.entity_id, true);

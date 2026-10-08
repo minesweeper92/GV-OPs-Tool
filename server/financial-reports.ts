@@ -9,9 +9,10 @@ import {
   type AgeingReport,
   type AccountDetail,
 } from "../shared/reporting.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 async function scope(tx: SQL, ctx: Context, entityId: string) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(403, "A finance role is required for financial reports.");
   const entities = (
     await tx.query(

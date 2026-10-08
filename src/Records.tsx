@@ -1,3 +1,4 @@
+import { hasCapability } from "../shared/permissions";
 import type { Data, Deal, Editor, Invoice, Me, Report } from "./model";
 import { day, money, invoiceBalance } from "./model";
 import { Badge, Empty, ErrorBox, Heading, Table } from "./components";
@@ -23,8 +24,8 @@ type Props = {
   run: (c: Record<string, unknown>) => Promise<void>;
   crmEdit: CrmOpen;
 };
-const finance = (me: Me) => ["admin", "finance"].includes(me.user.role),
-  sales = (me: Me) => ["admin", "sales"].includes(me.user.role);
+const finance = (me: Me) => hasCapability(me.user, "books.post"),
+  sales = (me: Me) => hasCapability(me.user, "crm.sales");
 export function DealRecord({
   deal,
   data,

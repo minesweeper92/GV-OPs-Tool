@@ -3,6 +3,7 @@ import type { SQL } from "./db.ts";
 import { audit, Problem, type Context } from "./domain.ts";
 import type { Command } from "../shared/commands.ts";
 import { occurrenceDate } from "../shared/recurring.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 type Transition = Extract<Command, { action: "period.transition" }>;
 type LegacyUnlock = Extract<Command, { action: "period.legacy-unlock" }>;
@@ -34,7 +35,7 @@ export async function periodPreview(
   entityId: string,
   month: string,
 ) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(403, "Only finance staff can review accounting periods.");
   const { start, end } = monthDates(month);
   const entity = (
@@ -295,7 +296,7 @@ export async function transitionPeriod(
   ctx: Context,
   command: Transition,
 ) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.view"))
     throw new Problem(403, "Only finance staff can manage accounting periods.");
   if (command.to === "Closed" || command.to === "Open") {
     if (ctx.role !== "admin")

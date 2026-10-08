@@ -1,6 +1,7 @@
 import { randomUUID as uuid } from "node:crypto";
 import { type SQL, type Row } from "./db.ts";
 import { type Context, Problem, audit } from "./domain.ts";
+import { requireCommandPermission } from "./permission-checks.ts";
 const tables: Record<string, string> = {
   contact: "contacts",
   company: "companies",
@@ -54,6 +55,7 @@ async function retry(tx: SQL, table: string, c: Row) {
   return r;
 }
 export async function executeCrm(tx: SQL, ctx: Context, c: Row) {
+  requireCommandPermission(ctx, c);
   if (ctx.role === "viewer")
     throw new Problem(403, "Read-only users cannot change CRM records.");
   let id = c.id || uuid(),

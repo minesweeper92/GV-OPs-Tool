@@ -1,5 +1,5 @@
-// Built-in policy only. Tenant-configured roles and entity-scoped grants must
-// be resolved on the server before they can replace this compatibility policy.
+// A custom profile can narrow its template, never broaden it. Resolve profiles
+// from authenticated membership on the server; never trust request-body grants.
 export const roles = ["admin", "finance", "sales", "viewer"] as const;
 export type BuiltInRole = (typeof roles)[number];
 export const capabilities = [
@@ -11,6 +11,14 @@ export const capabilities = [
   { key: "team.manage", label: "Manage team access" },
 ] as const;
 export type Capability = (typeof capabilities)[number]["key"];
+export type PermissionSubject =
+  | string
+  | null
+  | undefined
+  | {
+      role: string | null;
+      capabilities?: readonly string[];
+    };
 const grants: Readonly<Record<BuiltInRole, readonly Capability[]>> = {
   admin: capabilities.map((c) => c.key),
   finance: ["books.view", "books.post", "contacts.manage"],
@@ -18,15 +26,19 @@ const grants: Readonly<Record<BuiltInRole, readonly Capability[]>> = {
   viewer: [],
 };
 export function hasCapability(
-  role: string | null | undefined,
+  subject: PermissionSubject,
   capability: Capability,
 ): boolean {
+  const role = typeof subject === "object" && subject ? subject.role : subject;
   if (!role || !roles.some((r) => r === role)) return false;
-  return grants[role as BuiltInRole].includes(capability);
+  const selected =
+    typeof subject === "object" && subject ? subject.capabilities : undefined;
+  return (
+    grants[role as BuiltInRole].includes(capability) &&
+    (selected === undefined || selected.includes(capability))
+  );
 }
-export function grantedCapabilities(
-  role: string | null | undefined,
-): Capability[] {
+export function grantedCapabilities(role: PermissionSubject): Capability[] {
   return capabilities
     .filter((c) => hasCapability(role, c.key))
     .map((c) => c.key);

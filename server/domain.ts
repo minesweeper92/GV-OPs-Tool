@@ -7,7 +7,9 @@ import { createProjectInvoice } from "./projects.ts";
 import { detailsSnapshot } from "./documents.ts";
 import { allocateNumber, createNumberSeries } from "./numbering.ts";
 import { hasCapability } from "../shared/permissions.ts";
+import { requireCommandPermission } from "./permission-checks.ts";
 export type Context = {
+  capabilities?: import("../shared/permissions.ts").Capability[];
   tenantId: string;
   userId: string;
   role: "admin" | "finance" | "sales" | "viewer";
@@ -25,11 +27,11 @@ const reject = (status: number, message: string): never => {
   throw new Problem(status, message);
 };
 const crm = (ctx: Context) => {
-  if (!hasCapability(ctx.role, "crm.sales"))
+  if (!hasCapability(ctx, "crm.sales"))
     reject(403, "Your role cannot change CRM records.");
 };
 const finance = (ctx: Context) => {
-  if (!hasCapability(ctx.role, "books.post"))
+  if (!hasCapability(ctx, "books.post"))
     reject(403, "Your role cannot post or view the books.");
 };
 export const chart = [
@@ -206,7 +208,7 @@ export async function post(
 }
 export async function snapshot(tx: SQL, ctx: Context) {
   const own = ctx.role === "sales",
-    allowedBooks = ["admin", "finance"].includes(ctx.role);
+    allowedBooks = hasCapability(ctx, "books.view");
   const list = (table: string) =>
     tx
       .query(
@@ -360,7 +362,8 @@ export async function reports(
   from: string,
   to: string,
 ) {
-  finance(ctx);
+  if (!hasCapability(ctx, "books.view"))
+    throw new Problem(403, "Accounting view permission is required.");
   await record(tx, "entities", entityId, ctx);
   const trial = (
     await tx.query(
@@ -389,6 +392,7 @@ export async function reports(
   return { trial, journals, periods };
 }
 export async function execute(tx: SQL, ctx: Context, c: Row) {
+  requireCommandPermission(ctx, c);
   const t = ctx.tenantId,
     id = uuid();
   if (

@@ -6,6 +6,7 @@ import {
   capabilities,
   hasCapability,
   roles as policyRoles,
+  type Capability,
 } from "../shared/permissions";
 
 const roles = [
@@ -258,26 +259,88 @@ interface Member {
   role: Role;
   active: boolean;
   version: number;
+  role_profile_id: string | null;
 }
 interface Invitation {
   id: string;
   email: string;
   role: Role;
+  role_profile_id: string | null;
   expires_at: string;
   accepted_by: string | null;
   revoked_at: string | null;
+}
+type Template = Exclude<Role, "admin">;
+interface RoleProfile {
+  id: string;
+  name: string;
+  base_role: Template;
+  capabilities: Capability[];
+  version: number;
+}
+const roleLabel = (
+  role: Role,
+  profileId: string | null,
+  profiles?: RoleProfile[],
+) => {
+  const profile = profileId && profiles?.find((p) => p.id === profileId);
+  return profile ? `${profile.name} (${role} template)` : role;
+};
+// A custom role narrows one built-in template; admins always keep full access.
+function ProfileSelect({
+  role,
+  value,
+  onChange,
+  profiles,
+  ...labelProps
+}: {
+  role: Role;
+  value: string | null;
+  onChange: (value: string | null) => void;
+  profiles: RoleProfile[];
+  id?: string;
+  "aria-describedby"?: string;
+}) {
+  const options = profiles.filter((p) => p.base_role === role);
+  return (
+    <select
+      {...labelProps}
+      value={value || ""}
+      disabled={role === "admin" || !options.length}
+      onChange={(e) => onChange(e.target.value || null)}
+    >
+      <option value="">
+        {role === "admin"
+          ? "Not available for administrators"
+          : options.length
+            ? "None — full template permissions"
+            : "No custom roles for this template"}
+      </option>
+      {options.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name}
+        </option>
+      ))}
+    </select>
+  );
 }
 export function Team({ me }: { me: Me }) {
   const cache = useQueryClient();
   const q = useQuery({
     queryKey: ["team", me.organization.id],
     queryFn: () =>
-      request<{ members: Member[]; invitations: Invitation[] }>("team"),
+      request<{
+        members: Member[];
+        invitations: Invitation[];
+        profiles: RoleProfile[];
+      }>("team"),
     enabled: me.user.role === "admin",
   });
   const [member, setMember] = useState<Member | null>(null),
     [email, setEmail] = useState(""),
     [role, setRole] = useState<Role>("sales"),
+    [inviteProfile, setInviteProfile] = useState<string | null>(null),
+    [profile, setProfile] = useState<RoleProfile | "new" | null>(null),
     [link, setLink] = useState(""),
     action = useAction();
   async function refresh() {
@@ -304,8 +367,8 @@ export function Team({ me }: { me: Me }) {
         <p>
           Current action permissions are shared by the interface and server.
           Sales ownership checks still apply. Viewer access is read-only CRM and
-          sales, not accounting. Custom roles and per-entity grants are not
-          available yet.
+          sales, not accounting. Custom roles below can narrow a template.
+          Per-entity grants are not available yet.
         </p>
         <Table
           label="Built-in role permissions"
@@ -349,11 +412,12 @@ export function Team({ me }: { me: Me }) {
               const r = await request<{ id: string }>(
                 "team/invite",
                 "POST",
-                { email, role },
+                { email, role, roleProfileId: inviteProfile },
                 me.csrf,
               );
               setLink(`${location.origin}/#join/${r.id}`);
               setEmail("");
+              setInviteProfile(null);
               await refresh();
             });
           }}
@@ -368,7 +432,21 @@ export function Team({ me }: { me: Me }) {
             />
           </Field>
           <Field label="Invitation role">
-            <RoleSelect value={role} onChange={setRole} />
+            <RoleSelect
+              value={role}
+              onChange={(r) => {
+                setRole(r);
+                setInviteProfile(null);
+              }}
+            />
+          </Field>
+          <Field label="Invitation custom role">
+            <ProfileSelect
+              role={role}
+              value={inviteProfile}
+              onChange={setInviteProfile}
+              profiles={q.data?.profiles || []}
+            />
           </Field>
           <button className="primary" disabled={action.busy}>
             {action.busy ? "Saving…" : "Create invitation"}
@@ -402,7 +480,9 @@ export function Team({ me }: { me: Me }) {
                   </strong>
                   <small>{m.email}</small>
                 </td>
-                <td>{m.role}</td>
+                <td>
+                  {roleLabel(m.role, m.role_profile_id, q.data?.profiles)}
+                </td>
                 <td>{m.active ? "Active" : "Removed"}</td>
                 <td>
                   <button
@@ -415,6 +495,49 @@ export function Team({ me }: { me: Me }) {
               </tr>
             ))}
           </Table>
+        )}
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Custom roles</h2>
+          <button onClick={() => setProfile("new")}>New custom role</button>
+        </div>
+        <p className="muted">
+          A custom role starts from a built-in template and can only remove
+          permissions. Saving a change signs out everyone assigned to it.
+        </p>
+        {q.data?.profiles.length ? (
+          <Table
+            label="Custom roles"
+            headers={["Role", "Template", "Permissions", "Actions"]}
+          >
+            {q.data.profiles.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <strong>{p.name}</strong>
+                </td>
+                <td>{p.base_role}</td>
+                <td>
+                  {p.capabilities.length
+                    ? capabilities
+                        .filter((c) => p.capabilities.includes(c.key))
+                        .map((c) => c.label)
+                        .join(", ")
+                    : "Read-only"}
+                </td>
+                <td>
+                  <button
+                    aria-label={`Edit ${p.name}`}
+                    onClick={() => setProfile(p)}
+                  >
+                    Edit
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        ) : (
+          <p className="muted">No custom roles yet.</p>
         )}
       </section>
       <section className="panel">
@@ -432,7 +555,9 @@ export function Team({ me }: { me: Me }) {
               return (
                 <tr key={i.id}>
                   <td>{i.email}</td>
-                  <td>{i.role}</td>
+                  <td>
+                    {roleLabel(i.role, i.role_profile_id, q.data?.profiles)}
+                  </td>
                   <td>
                     {status}
                     <small>Expires {day(i.expires_at)}</small>
@@ -486,28 +611,215 @@ export function Team({ me }: { me: Me }) {
           key={member.id}
           member={member}
           me={me}
+          profiles={q.data?.profiles || []}
           close={() => setMember(null)}
+          saved={refresh}
+        />
+      ) : null}
+      {profile ? (
+        <ProfileEditor
+          key={profile === "new" ? "new" : profile.id}
+          profile={profile === "new" ? null : profile}
+          me={me}
+          close={() => setProfile(null)}
           saved={refresh}
         />
       ) : null}
     </>
   );
 }
+const requires: Partial<Record<Capability, Capability>> = {
+  "books.post": "books.view",
+  "crm.sales": "contacts.manage",
+};
+function ProfileEditor({
+  profile,
+  me,
+  close,
+  saved,
+}: {
+  profile: RoleProfile | null;
+  me: Me;
+  close: () => void;
+  saved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(profile?.name || ""),
+    [base, setBase] = useState<Template>(profile?.base_role || "sales"),
+    [selected, setSelected] = useState<Capability[]>(
+      profile?.capabilities ||
+        capabilities
+          .filter((c) => hasCapability("sales", c.key))
+          .map((c) => c.key),
+    ),
+    action = useAction();
+  const allowed = capabilities.filter((c) => hasCapability(base, c.key));
+  const dirty = profile
+    ? name !== profile.name ||
+      [...selected].sort().join() !== [...profile.capabilities].sort().join()
+    : !!name;
+  function toggle(key: Capability, on: boolean) {
+    let next = on ? [...selected, key] : selected.filter((k) => k !== key);
+    // Keep dependent permissions valid instead of letting the server reject them.
+    for (const [cap, needs] of Object.entries(requires) as [
+      Capability,
+      Capability,
+    ][]) {
+      if (on && key === cap && !next.includes(needs)) next.push(needs);
+      if (!on && key === needs) next = next.filter((k) => k !== cap);
+    }
+    setSelected([...new Set(next)]);
+  }
+  return (
+    <Drawer
+      title={profile ? `Edit ${profile.name}` : "New custom role"}
+      close={close}
+      dirty={dirty}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void action.run(async () => {
+            if (
+              profile &&
+              !confirm(
+                `Save ${name}? Everyone assigned to this role will be signed out of this organization.`,
+              )
+            )
+              return;
+            await request(
+              "team/role",
+              "POST",
+              {
+                ...(profile
+                  ? { id: profile.id, version: profile.version }
+                  : {}),
+                name,
+                baseRole: base,
+                capabilities: selected.filter((k) => hasCapability(base, k)),
+              },
+              me.csrf,
+            );
+            await saved();
+            close();
+          });
+        }}
+      >
+        <div className="editor-body">
+          <Field label="Role name">
+            <input
+              required
+              maxLength={80}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Template"
+            hint={
+              profile
+                ? "The template cannot change after creation. Create another role instead."
+                : "Permissions can be removed from the template, never added."
+            }
+          >
+            <select
+              value={base}
+              disabled={!!profile}
+              onChange={(e) => {
+                const next = e.target.value as Template;
+                setBase(next);
+                setSelected(
+                  capabilities
+                    .filter((c) => hasCapability(next, c.key))
+                    .map((c) => c.key),
+                );
+              }}
+            >
+              {roles
+                .filter(([id]) => id !== "admin")
+                .map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+            </select>
+          </Field>
+          <fieldset className="role-permissions">
+            <legend>Permissions</legend>
+            {allowed.length ? (
+              allowed.map((c) => (
+                <div key={c.key} className="check">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(c.key)}
+                      aria-describedby={
+                        requires[c.key] ? `needs-${c.key}` : undefined
+                      }
+                      onChange={(e) => toggle(c.key, e.target.checked)}
+                    />
+                    {c.label}
+                  </label>
+                  {requires[c.key] ? (
+                    <small id={`needs-${c.key}`} className="muted">
+                      Also needs “
+                      {
+                        capabilities.find((x) => x.key === requires[c.key])
+                          ?.label
+                      }
+                      ”
+                    </small>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <p className="muted">This template is read-only.</p>
+            )}
+          </fieldset>
+          <p className="muted">
+            Sales ownership limits still apply. Unchecked permissions are
+            enforced by the server.
+          </p>
+          {action.error ? <ErrorBox error={action.error} /> : null}
+        </div>
+        <div className="editor-footer">
+          <button
+            type="button"
+            onClick={() => {
+              if (!dirty || confirm("Discard your unsaved changes?")) close();
+            }}
+            disabled={action.busy}
+          >
+            Cancel
+          </button>
+          <button className="primary" disabled={action.busy || !dirty}>
+            {action.busy ? "Saving…" : profile ? "Save role" : "Create role"}
+          </button>
+        </div>
+      </form>
+    </Drawer>
+  );
+}
 function MemberEditor({
   member,
   me,
+  profiles,
   close,
   saved,
 }: {
   member: Member;
   me: Me;
+  profiles: RoleProfile[];
   close: () => void;
   saved: () => Promise<void>;
 }) {
   const [role, setRole] = useState(member.role),
+    [profileId, setProfileId] = useState(member.role_profile_id),
     [active, setActive] = useState(member.active),
     action = useAction();
-  const dirty = role !== member.role || active !== member.active;
+  const dirty =
+    role !== member.role ||
+    active !== member.active ||
+    profileId !== member.role_profile_id;
   return (
     <Drawer title={`Access for ${member.name}`} close={close} dirty={dirty}>
       <form
@@ -523,7 +835,13 @@ function MemberEditor({
             const result = await request<{ self: boolean }>(
               "team/member",
               "POST",
-              { userId: member.id, role, active, version: member.version },
+              {
+                userId: member.id,
+                role,
+                active,
+                version: member.version,
+                roleProfileId: profileId,
+              },
               me.csrf,
             );
             if (result.self) {
@@ -538,7 +856,21 @@ function MemberEditor({
         <div className="editor-body">
           <p>{member.email}</p>
           <Field label="Role">
-            <RoleSelect value={role} onChange={setRole} />
+            <RoleSelect
+              value={role}
+              onChange={(r) => {
+                setRole(r);
+                setProfileId(null);
+              }}
+            />
+          </Field>
+          <Field label="Custom role">
+            <ProfileSelect
+              role={role}
+              value={profileId}
+              onChange={setProfileId}
+              profiles={profiles}
+            />
           </Field>
           <Field label="Organization access">
             <select

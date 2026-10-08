@@ -3,9 +3,10 @@ import { isDeepStrictEqual } from "node:util";
 import type { SQL, Row } from "./db.ts";
 import { Problem, post, audit, type Context } from "./domain.ts";
 import { signedMinor, type BankDetail } from "../shared/banking.ts";
+import { hasCapability } from "../shared/permissions.ts";
 
 function finance(ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx, "books.post"))
     throw new Problem(403, "A finance role is required for banking.");
 }
 const activeMatches = `SELECT m.* FROM bank_matches m JOIN bank_statements s ON s.id=m.statement_id WHERE s.status<>'Cancelled' AND NOT EXISTS(SELECT 1 FROM bank_match_reversals r WHERE r.match_id=m.id)`;
@@ -52,7 +53,7 @@ async function retry(
   return r ? { id: r.id } : null;
 }
 export async function bankAccounts(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role)) return [];
+  if (!hasCapability(ctx, "books.view")) return [];
   return (
     await tx.query(`SELECT b.id,b.entity_id,e.code AS entity_code,b.name,b.reference,b.account_code,b.opening_on,b.opening_minor::text,b.last_reconciled_on,
     coalesce(sum(l.debit_minor-l.credit_minor),0)::text AS balance FROM bank_accounts b JOIN entities e ON e.id=b.entity_id
@@ -65,7 +66,8 @@ export async function bankDetail(
   id: string,
   statementId?: string,
 ): Promise<BankDetail> {
-  finance(ctx);
+  if (!hasCapability(ctx, "books.view"))
+    throw new Problem(403, "Accounting view permission is required.");
   const account = await bank(tx, id);
   const statements = (
     await tx.query(
