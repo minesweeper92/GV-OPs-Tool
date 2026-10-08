@@ -390,6 +390,7 @@ export interface Me {
     email: string;
     capabilities?: import("../shared/permissions").Capability[];
     roleName?: string | null;
+    entityIds?: string[] | null;
   };
   organization: { id: string; name: string };
   csrf: string;

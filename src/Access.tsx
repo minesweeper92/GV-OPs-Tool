@@ -260,12 +260,14 @@ interface Member {
   active: boolean;
   version: number;
   role_profile_id: string | null;
+  entity_ids: string[] | null;
 }
 interface Invitation {
   id: string;
   email: string;
   role: Role;
   role_profile_id: string | null;
+  entity_ids: string[] | null;
   expires_at: string;
   accepted_by: string | null;
   revoked_at: string | null;
@@ -324,6 +326,90 @@ function ProfileSelect({
     </select>
   );
 }
+interface LegalEntity {
+  id: string;
+  code: string;
+  name: string;
+}
+const entityLabel = (ids: string[] | null, entities: LegalEntity[] = []) =>
+  ids
+    ? entities
+        .filter((e) => ids.includes(e.id))
+        .map((e) => e.code)
+        .join(", ")
+    : "All entities";
+// Null grants every legal entity. Administrators always keep every entity.
+function EntityAccess({
+  role,
+  value,
+  onChange,
+  entities,
+}: {
+  role: Role;
+  value: string[] | null;
+  onChange: (value: string[] | null) => void;
+  entities: LegalEntity[];
+}) {
+  if (role === "admin")
+    return (
+      <p className="muted">Administrators always have every legal entity.</p>
+    );
+  return (
+    <fieldset className="role-permissions">
+      <legend>Legal entities</legend>
+      <div className="check">
+        <label>
+          <input
+            type="radio"
+            checked={value === null}
+            onChange={() => onChange(null)}
+          />
+          All legal entities, including ones added later
+        </label>
+      </div>
+      <div className="check">
+        <label>
+          <input
+            type="radio"
+            checked={value !== null}
+            onChange={() => onChange(value ?? [])}
+          />
+          Only selected legal entities
+        </label>
+      </div>
+      {value !== null
+        ? entities.map((e) => (
+            <div key={e.id} className="check entity-choice">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={value.includes(e.id)}
+                  onChange={(event) =>
+                    onChange(
+                      event.target.checked
+                        ? [...value, e.id]
+                        : value.filter((id) => id !== e.id),
+                    )
+                  }
+                />
+                {e.code} — {e.name}
+              </label>
+            </div>
+          ))
+        : null}
+      {value !== null && !value.length ? (
+        <small className="muted">Choose at least one legal entity.</small>
+      ) : null}
+      <small className="muted">
+        Books, quotes, deals and leads of other entities are hidden. Contacts
+        and companies stay shared.
+      </small>
+    </fieldset>
+  );
+}
+const sameEntities = (a: string[] | null, b: string[] | null) =>
+  a === b ||
+  (!!a && !!b && a.length === b.length && a.every((id) => b.includes(id)));
 export function Team({ me }: { me: Me }) {
   const cache = useQueryClient();
   const q = useQuery({
@@ -333,6 +419,7 @@ export function Team({ me }: { me: Me }) {
         members: Member[];
         invitations: Invitation[];
         profiles: RoleProfile[];
+        entities: LegalEntity[];
       }>("team"),
     enabled: me.user.role === "admin",
   });
@@ -340,6 +427,7 @@ export function Team({ me }: { me: Me }) {
     [email, setEmail] = useState(""),
     [role, setRole] = useState<Role>("sales"),
     [inviteProfile, setInviteProfile] = useState<string | null>(null),
+    [inviteEntities, setInviteEntities] = useState<string[] | null>(null),
     [profile, setProfile] = useState<RoleProfile | "new" | null>(null),
     [link, setLink] = useState(""),
     action = useAction();
@@ -412,12 +500,18 @@ export function Team({ me }: { me: Me }) {
               const r = await request<{ id: string }>(
                 "team/invite",
                 "POST",
-                { email, role, roleProfileId: inviteProfile },
+                {
+                  email,
+                  role,
+                  roleProfileId: inviteProfile,
+                  entityIds: inviteEntities,
+                },
                 me.csrf,
               );
               setLink(`${location.origin}/#join/${r.id}`);
               setEmail("");
               setInviteProfile(null);
+              setInviteEntities(null);
               await refresh();
             });
           }}
@@ -437,6 +531,7 @@ export function Team({ me }: { me: Me }) {
               onChange={(r) => {
                 setRole(r);
                 setInviteProfile(null);
+                if (r === "admin") setInviteEntities(null);
               }}
             />
           </Field>
@@ -448,7 +543,16 @@ export function Team({ me }: { me: Me }) {
               profiles={q.data?.profiles || []}
             />
           </Field>
-          <button className="primary" disabled={action.busy}>
+          <EntityAccess
+            role={role}
+            value={inviteEntities}
+            onChange={setInviteEntities}
+            entities={q.data?.entities || []}
+          />
+          <button
+            className="primary"
+            disabled={action.busy || inviteEntities?.length === 0}
+          >
             {action.busy ? "Saving…" : "Create invitation"}
           </button>
         </form>
@@ -470,7 +574,7 @@ export function Team({ me }: { me: Me }) {
         {q.isPending ? (
           <p aria-busy="true">Loading team…</p>
         ) : (
-          <Table headers={["Person", "Role", "Access", "Actions"]}>
+          <Table headers={["Person", "Role", "Entities", "Access", "Actions"]}>
             {q.data?.members.map((m) => (
               <tr key={m.id}>
                 <td>
@@ -483,6 +587,7 @@ export function Team({ me }: { me: Me }) {
                 <td>
                   {roleLabel(m.role, m.role_profile_id, q.data?.profiles)}
                 </td>
+                <td>{entityLabel(m.entity_ids, q.data?.entities)}</td>
                 <td>{m.active ? "Active" : "Removed"}</td>
                 <td>
                   <button
@@ -543,7 +648,7 @@ export function Team({ me }: { me: Me }) {
       <section className="panel">
         <h2>Invitations</h2>
         {q.data?.invitations.length ? (
-          <Table headers={["Email", "Role", "Status", "Actions"]}>
+          <Table headers={["Email", "Role", "Entities", "Status", "Actions"]}>
             {q.data.invitations.map((i) => {
               const status = i.accepted_by
                 ? "Accepted"
@@ -558,6 +663,7 @@ export function Team({ me }: { me: Me }) {
                   <td>
                     {roleLabel(i.role, i.role_profile_id, q.data?.profiles)}
                   </td>
+                  <td>{entityLabel(i.entity_ids, q.data?.entities)}</td>
                   <td>
                     {status}
                     <small>Expires {day(i.expires_at)}</small>
@@ -612,6 +718,7 @@ export function Team({ me }: { me: Me }) {
           member={member}
           me={me}
           profiles={q.data?.profiles || []}
+          entities={q.data?.entities || []}
           close={() => setMember(null)}
           saved={refresh}
         />
@@ -803,23 +910,27 @@ function MemberEditor({
   member,
   me,
   profiles,
+  entities,
   close,
   saved,
 }: {
   member: Member;
   me: Me;
   profiles: RoleProfile[];
+  entities: LegalEntity[];
   close: () => void;
   saved: () => Promise<void>;
 }) {
   const [role, setRole] = useState(member.role),
     [profileId, setProfileId] = useState(member.role_profile_id),
     [active, setActive] = useState(member.active),
+    [entityIds, setEntityIds] = useState(member.entity_ids),
     action = useAction();
   const dirty =
     role !== member.role ||
     active !== member.active ||
-    profileId !== member.role_profile_id;
+    profileId !== member.role_profile_id ||
+    !sameEntities(entityIds, member.entity_ids);
   return (
     <Drawer title={`Access for ${member.name}`} close={close} dirty={dirty}>
       <form
@@ -841,6 +952,7 @@ function MemberEditor({
                 active,
                 version: member.version,
                 roleProfileId: profileId,
+                entityIds: role === "admin" ? null : entityIds,
               },
               me.csrf,
             );
@@ -872,6 +984,12 @@ function MemberEditor({
               profiles={profiles}
             />
           </Field>
+          <EntityAccess
+            role={role}
+            value={entityIds}
+            onChange={setEntityIds}
+            entities={entities}
+          />
           <Field label="Organization access">
             <select
               value={active ? "active" : "removed"}
@@ -899,7 +1017,14 @@ function MemberEditor({
           >
             Cancel
           </button>
-          <button className="primary" disabled={action.busy || !dirty}>
+          <button
+            className="primary"
+            disabled={
+              action.busy ||
+              !dirty ||
+              (role !== "admin" && entityIds?.length === 0)
+            }
+          >
             {action.busy ? "Saving…" : "Save access"}
           </button>
         </div>

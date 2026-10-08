@@ -217,6 +217,7 @@ export function createApp(
         role: s.role || "",
         capabilities: s.capabilities,
         roleName: s.roleName,
+        entityIds: s.entityIds ?? null,
       },
       organization: { id: s.tenantId || "", name: s.organization || "" },
       csrf: s.csrf,
@@ -231,7 +232,7 @@ export function createApp(
     const ctx = access.context(sessions.get(req)!);
     if (!hasCapability(ctx, "crm.sales"))
       throw new Problem(403, "Sales permission is required to share quotes.");
-    return inTenant(db, ctx.tenantId, (tx) =>
+    return inTenant(db, ctx, (tx) =>
       issueQuoteLink(tx, ctx, input.quoteId, input.contactId, origin),
     );
   });
@@ -304,7 +305,7 @@ export function createApp(
       const ctx = access.context(sessions.get(req)!);
       if (!hasCapability(ctx, "books.post") && !hasCapability(ctx, "crm.sales"))
         throw new Problem(403, "Your role cannot add document attachments.");
-      const document = await inTenant(db, ctx.tenantId, async (tx) => {
+      const document = await inTenant(db, ctx, async (tx) => {
         const sql =
           params.type === "quote"
             ? "SELECT q.id,d.owner_id FROM quotes q JOIN deals d ON d.id=q.deal_id WHERE q.id=$1"
@@ -320,7 +321,7 @@ export function createApp(
       const id = uuid();
       await persistAttachment(id, file.bytes);
       try {
-        return await inTenant(db, ctx.tenantId, async (tx) => {
+        return await inTenant(db, ctx, async (tx) => {
           const count = (
             await tx.query(
               "SELECT count(*)::int AS count FROM document_attachments WHERE quote_id=$1 OR invoice_id=$1",
@@ -365,7 +366,7 @@ export function createApp(
     const ctx = access.context(sessions.get(req)!);
     const attachment = await inTenant(
       db,
-      ctx.tenantId,
+      ctx,
       async (tx) =>
         (
           await tx.query(
@@ -407,6 +408,7 @@ export function createApp(
   });
   const role = z.enum(["admin", "finance", "sales", "viewer"]);
   const idBody = z.object({ id: z.uuid() }).strict();
+  const entityGrant = z.array(z.uuid()).min(1).max(100).nullable().optional();
   app.get("/api/team", async (req) => access.team(sessions.get(req)!));
   app.post("/api/team/role", async (req) =>
     access.saveProfile(
@@ -432,6 +434,7 @@ export function createApp(
           email: z.email().max(254),
           role,
           roleProfileId: z.uuid().nullable().optional(),
+          entityIds: entityGrant,
         })
         .strict()
         .parse(req.body),
@@ -453,6 +456,7 @@ export function createApp(
           active: z.boolean(),
           version: z.number().int().positive(),
           roleProfileId: z.uuid().nullable().optional(),
+          entityIds: entityGrant,
         })
         .strict()
         .parse(req.body),
@@ -468,7 +472,7 @@ export function createApp(
     ).rows;
     return inTenant(
       db,
-      ctx.tenantId,
+      ctx,
       async (tx) => ({
         ...(await snapshot(tx, ctx)),
         ...(await payableSnapshot(tx, ctx)),
@@ -495,7 +499,7 @@ export function createApp(
     if (q.from > q.to)
       throw new Problem(400, "Start date must precede end date.");
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, (tx) =>
+    return inTenant(db, ctx, (tx) =>
       reports(tx, ctx, q.entityId, q.from, q.to),
     );
   });
@@ -509,7 +513,7 @@ export function createApp(
     const ctx = access.context(sessions.get(req)!);
     return inTenant(
       db,
-      ctx.tenantId,
+      ctx,
       (tx) => periodPreview(tx, ctx, q.entityId, q.month),
       true,
     );
@@ -517,22 +521,12 @@ export function createApp(
   app.get("/api/cutover", async (req) => {
     const q = z.strictObject({ entityId: z.uuid() }).parse(req.query);
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(
-      db,
-      ctx.tenantId,
-      (tx) => cutoverHistory(tx, ctx, q.entityId),
-      true,
-    );
+    return inTenant(db, ctx, (tx) => cutoverHistory(tx, ctx, q.entityId), true);
   });
   app.post("/api/cutover/preview", { bodyLimit: 512 * 1024 }, async (req) => {
     const input = cutoverInput.parse(req.body);
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(
-      db,
-      ctx.tenantId,
-      (tx) => previewCutover(tx, ctx, input),
-      true,
-    );
+    return inTenant(db, ctx, (tx) => previewCutover(tx, ctx, input), true);
   });
   app.post("/api/cutover/commit", { bodyLimit: 512 * 1024 }, async (req) => {
     const body = z
@@ -544,7 +538,7 @@ export function createApp(
       })
       .parse(req.body);
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, (tx) =>
+    return inTenant(db, ctx, (tx) =>
       commitCutover(
         tx,
         ctx,
@@ -558,17 +552,12 @@ export function createApp(
   app.get("/api/financial-reports", async (req) => {
     const q = reportFilter.parse(req.query),
       ctx = access.context(sessions.get(req)!);
-    return inTenant(
-      db,
-      ctx.tenantId,
-      (tx) => financialReports(tx, ctx, q),
-      true,
-    );
+    return inTenant(db, ctx, (tx) => financialReports(tx, ctx, q), true);
   });
   app.get("/api/party-statement", async (req) => {
     const q = statementFilter.parse(req.query),
       ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, (tx) => partyStatement(tx, ctx, q), true);
+    return inTenant(db, ctx, (tx) => partyStatement(tx, ctx, q), true);
   });
   app.get<{ Params: { id: string } }>(
     "/api/bills/:id/approval-history",
@@ -580,7 +569,7 @@ export function createApp(
       const ctx = access.context(sessions.get(req)!);
       return inTenant(
         db,
-        ctx.tenantId,
+        ctx,
         (tx) => billApprovalHistory(tx, ctx, id, query.cursor),
         true,
       );
@@ -593,7 +582,7 @@ export function createApp(
       ctx = access.context(sessions.get(req)!);
     return inTenant(
       db,
-      ctx.tenantId,
+      ctx,
       (tx) => bankDetail(tx, ctx, q.bankId, q.statementId),
       true,
     );
@@ -607,13 +596,13 @@ export function createApp(
       })
       .parse(req.query);
     const ctx = access.context(sessions.get(req)!);
-    return inTenant(db, ctx.tenantId, (tx) => accountDetail(tx, ctx, q), true);
+    return inTenant(db, ctx, (tx) => accountDetail(tx, ctx, q), true);
   });
   app.post("/api/commands", async (req) => {
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     requireCommandPermission(ctx, c);
-    return inTenant(db, ctx.tenantId, (tx) =>
+    return inTenant(db, ctx, (tx) =>
       c.action.startsWith("document.")
         ? executeDocument(tx, ctx, c)
         : c.action === "period.transition"
