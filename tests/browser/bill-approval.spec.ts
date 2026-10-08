@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 test("bill approval rules save by entity and survive refresh", async ({
   page,
 }) => {
@@ -54,4 +55,105 @@ test("bill approval rules save by entity and survive refresh", async ({
     .uncheck();
   await dialog.getByRole("button", { name: "Save approval rules" }).click();
   await expect(dialog).not.toBeVisible();
+});
+
+test("review queues explain self-review restrictions and update when policy changes", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
+  const me = await (await page.request.get("/api/me")).json();
+  const data = await (await page.request.get("/api/data")).json();
+  const entity = data.entities[0];
+  const command = async (payload: Record<string, unknown>) => {
+    const response = await page.request.post("/api/commands", {
+      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      data: payload,
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return response.json();
+  };
+  const vendor = await command({
+    action: "company.create",
+    name: `Review vendor ${randomUUID()}`,
+    vendor: true,
+    customer: false,
+    service_entity_id: null,
+  });
+  const reference = `Review-${randomUUID()}`;
+  const bill = await command({
+    action: "bill.create",
+    entity_id: entity.id,
+    vendor_id: vendor.id,
+    deal_id: null,
+    reference,
+    bill_date: "2030-01-01",
+    due_date: "2030-01-31",
+    currency: "PKR",
+    fx: "1",
+    lines: [
+      {
+        description: "Reviewable service",
+        quantity: "1",
+        price: "100",
+        tax: "0",
+        account_code: "5000",
+      },
+    ],
+    tax_treatment: "expense",
+    request_key: randomUUID(),
+    notes: "",
+  });
+  await command({ action: "bill.submit", id: bill.id, version: 1 });
+  await command({
+    action: "bill.approval-policy",
+    entity_id: entity.id,
+    version: entity.bill_approval_version,
+    finance_limit: null,
+    separate_approver: true,
+  });
+  await page.goto("/?view=bills");
+  await page.getByLabel("Search bills", { exact: true }).fill(reference);
+  await page
+    .getByRole("button", { name: /^Waiting for another reviewer/ })
+    .click();
+  await expect(
+    page.getByRole("link", { name: reference, exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /^Ready for my review/ }).click();
+  await expect(
+    page.getByRole("link", { name: reference, exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: /^Waiting for another reviewer/ })
+    .click();
+  await page.getByRole("link", { name: reference, exact: true }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "A different person must review this bill",
+  );
+  await expect(
+    page.getByRole("button", { name: "Approve & post", exact: true }),
+  ).toHaveCount(0);
+  await command({
+    action: "bill.approval-policy",
+    entity_id: entity.id,
+    version: entity.bill_approval_version + 1,
+    finance_limit: null,
+    separate_approver: false,
+  });
+  await page.goto("/?view=bills");
+  await page.getByLabel("Search bills", { exact: true }).fill(reference);
+  await page.getByRole("button", { name: /^Ready for my review/ }).click();
+  await expect(
+    page.getByRole("link", { name: reference, exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: reference, exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Approve & post", exact: true }),
+  ).toBeVisible();
 });
