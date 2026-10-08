@@ -131,7 +131,7 @@ export async function billApprovalHistory(
   const anchor = cursor
     ? (
         await tx.query(
-          "SELECT created_at,id FROM audit_events WHERE id=$1 AND record_id=$2 AND action=ANY($3::text[])",
+          "SELECT id FROM audit_events WHERE id=$1 AND record_id=$2 AND action=ANY($3::text[])",
           [cursor, billId, actions],
         )
       ).rows[0]
@@ -140,8 +140,10 @@ export async function billApprovalHistory(
     throw new Problem(400, "Invalid approval history cursor.");
   const rows = (
     await tx.query(
-      "SELECT id,record_id,actor_id,action,created_at,details FROM audit_events WHERE record_id=$1 AND action=ANY($2::text[]) AND ($3::timestamptz IS NULL OR (created_at,id)<($3::timestamptz,$4::uuid)) ORDER BY created_at DESC,id DESC LIMIT 101",
-      [billId, actions, anchor?.created_at ?? null, anchor?.id ?? null],
+      // Keep the timestamp comparison in SQL: pg's JavaScript Date decoding
+      // truncates microseconds and can otherwise skip same-transaction events.
+      "SELECT id,record_id,actor_id,action,created_at,details FROM audit_events WHERE record_id=$1 AND action=ANY($2::text[]) AND ($3::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM audit_events WHERE id=$3::uuid AND record_id=$1 AND action=ANY($2::text[]))) ORDER BY created_at DESC,id DESC LIMIT 101",
+      [billId, actions, anchor?.id ?? null],
     )
   ).rows;
   return {
