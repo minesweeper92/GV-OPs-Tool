@@ -91,6 +91,7 @@ async function migrations() {
       "./migrations/030_bill_approval_rules.sql",
       "./migrations/031_two_stage_bill_approval.sql",
       "./migrations/032_role_profiles.sql",
+      "./migrations/033_entity_grants.sql",
     ].map(async (path, index) => {
       const sql = await readFile(new URL(path, import.meta.url), "utf8");
       return {
@@ -155,19 +156,26 @@ export async function bindEnvironment(db: Database, mode: "sample" | "oidc") {
   });
 }
 // Only the authenticated gateway chooses tenantId. Context is transaction-local, never pooled/global.
+// A member's entity grant narrows every entity-tagged row through RLS; an
+// omitted or null grant (administrators, workers, portal) sees all entities.
 export async function inTenant<T>(
   db: Database,
-  tenantId: string,
+  scope: string | { tenantId: string; entityIds?: readonly string[] | null },
   fn: (tx: SQL) => Promise<T>,
   consistentRead = false,
 ): Promise<T> {
+  const { tenantId, entityIds } =
+    typeof scope === "string" ? { tenantId: scope, entityIds: null } : scope;
   return db.transaction(async (tx) => {
     if (consistentRead)
       await tx.query(
         "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY",
       );
     await tx.query("SET LOCAL ROLE gv_workspace_runtime");
-    await tx.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
+    await tx.query(
+      "SELECT set_config('app.tenant_id',$1,true),set_config('app.entity_ids',$2,true)",
+      [tenantId, entityIds?.join(",") ?? ""],
+    );
     return fn(tx);
   });
 }

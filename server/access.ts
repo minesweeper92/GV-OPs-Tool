@@ -23,6 +23,7 @@ export interface Session {
   capabilities?: Capability[];
   roleProfileId?: string | null;
   roleName?: string | null;
+  entityIds?: string[] | null;
 }
 async function admin(tx: SQL, s: Session) {
   if (!s.tenantId)
@@ -52,7 +53,7 @@ export class Access {
       throw new Problem(401, "Sign in to continue.");
     const r = (
       await this.db.query(
-        `SELECT s.*,u.name,u.email,t.name AS organization,m.role,m.active,m.role_profile_id,p.name AS role_name,p.base_role,p.capabilities AS selected_capabilities FROM sessions s
+        `SELECT s.*,u.name,u.email,t.name AS organization,m.role,m.active,m.role_profile_id,m.entity_ids,p.name AS role_name,p.base_role,p.capabilities AS selected_capabilities FROM sessions s
    JOIN users u ON u.id=s.user_id LEFT JOIN tenants t ON t.id=s.tenant_id
    LEFT JOIN memberships m ON m.user_id=s.user_id AND m.tenant_id=s.tenant_id
    LEFT JOIN role_profiles p ON p.id=m.role_profile_id AND p.tenant_id=m.tenant_id
@@ -84,6 +85,7 @@ export class Access {
       }),
       roleProfileId: r.role_profile_id,
       roleName: r.role_name,
+      entityIds: r.entity_ids ?? null,
     };
   }
   async issue(userId: string, tenantId: string | null, previousHash?: string) {
@@ -127,6 +129,7 @@ export class Access {
       role: s.role,
       name: s.name,
       capabilities: s.capabilities,
+      entityIds: s.entityIds ?? null,
     };
   }
   async organizations(s: Session) {
@@ -221,13 +224,13 @@ export class Access {
       const ctx = await admin(tx, s);
       const members = (
         await tx.query(
-          "SELECT u.id,u.name,u.email,m.role,m.active,m.version,m.role_profile_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 ORDER BY u.name",
+          "SELECT u.id,u.name,u.email,m.role,m.active,m.version,m.role_profile_id,m.entity_ids FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 ORDER BY u.name",
           [ctx.tenantId],
         )
       ).rows;
       const invitations = (
         await tx.query(
-          "SELECT id,email,role,role_profile_id,expires_at,accepted_by,revoked_at FROM invitations WHERE tenant_id=$1 ORDER BY created_at DESC",
+          "SELECT id,email,role,role_profile_id,entity_ids,expires_at,accepted_by,revoked_at FROM invitations WHERE tenant_id=$1 ORDER BY created_at DESC",
           [ctx.tenantId],
         )
       ).rows;
@@ -237,12 +240,23 @@ export class Access {
           [ctx.tenantId],
         )
       ).rows;
-      return { members, invitations, profiles };
+      const entities = (
+        await tx.query(
+          "SELECT id,code,name FROM entities WHERE tenant_id=$1 ORDER BY code",
+          [ctx.tenantId],
+        )
+      ).rows;
+      return { members, invitations, profiles, entities };
     });
   }
   async invite(
     s: Session,
-    b: { email: string; role: Context["role"]; roleProfileId?: string | null },
+    b: {
+      email: string;
+      role: Context["role"];
+      roleProfileId?: string | null;
+      entityIds?: string[] | null;
+    },
   ) {
     return this.db.transaction(async (tx) => {
       const ctx = await admin(tx, s),
@@ -265,14 +279,29 @@ export class Access {
       );
       const id = uuid();
       await this.validateProfile(tx, ctx.tenantId, b.role, b.roleProfileId);
+      const entityIds = await this.validateEntities(
+        tx,
+        ctx.tenantId,
+        b.role,
+        b.entityIds,
+      );
       await tx.query(
-        "INSERT INTO invitations(id,tenant_id,email,role,created_by,expires_at,role_profile_id) VALUES($1,$2,$3,$4,$5,now()+interval '7 days',$6)",
-        [id, ctx.tenantId, email, b.role, ctx.userId, b.roleProfileId || null],
+        "INSERT INTO invitations(id,tenant_id,email,role,created_by,expires_at,role_profile_id,entity_ids) VALUES($1,$2,$3,$4,$5,now()+interval '7 days',$6,$7)",
+        [
+          id,
+          ctx.tenantId,
+          email,
+          b.role,
+          ctx.userId,
+          b.roleProfileId || null,
+          entityIds,
+        ],
       );
       await audit(tx, ctx, id, "team.invited", {
         email,
         role: b.role,
         roleProfileId: b.roleProfileId || null,
+        entityIds,
         text: `${s.name} invited ${email} as ${b.role}.`,
       });
       return { id };
@@ -318,8 +347,14 @@ export class Access {
           "Membership already exists. Ask an administrator to change your access.",
         );
       await tx.query(
-        "INSERT INTO memberships(tenant_id,user_id,role,role_profile_id) VALUES($1,$2,$3,$4)",
-        [invite.tenant_id, s.userId, invite.role, invite.role_profile_id],
+        "INSERT INTO memberships(tenant_id,user_id,role,role_profile_id,entity_ids) VALUES($1,$2,$3,$4,$5)",
+        [
+          invite.tenant_id,
+          s.userId,
+          invite.role,
+          invite.role_profile_id,
+          invite.entity_ids,
+        ],
       );
       await tx.query("UPDATE invitations SET accepted_by=$2 WHERE id=$1", [
         id,
@@ -343,13 +378,14 @@ export class Access {
       active: boolean;
       version: number;
       roleProfileId?: string | null;
+      entityIds?: string[] | null;
     },
   ) {
     return this.db.transaction(async (tx) => {
       const ctx = await admin(tx, s);
       const before = (
         await tx.query(
-          "SELECT role,active,version,role_profile_id FROM memberships WHERE tenant_id=$1 AND user_id=$2 FOR UPDATE",
+          "SELECT role,active,version,role_profile_id,entity_ids FROM memberships WHERE tenant_id=$1 AND user_id=$2 FOR UPDATE",
           [ctx.tenantId, b.userId],
         )
       ).rows[0];
@@ -366,6 +402,17 @@ export class Access {
           ? before.role_profile_id
           : b.roleProfileId;
       await this.validateProfile(tx, ctx.tenantId, b.role, profileId);
+      // Older clients must not silently widen access on an unrelated edit.
+      const entityIds = await this.validateEntities(
+        tx,
+        ctx.tenantId,
+        b.role,
+        b.entityIds === undefined
+          ? b.role === "admin"
+            ? null
+            : before.entity_ids
+          : b.entityIds,
+      );
       if (
         before.role === "admin" &&
         before.active &&
@@ -384,8 +431,8 @@ export class Access {
           );
       }
       await tx.query(
-        "UPDATE memberships SET role=$3,active=$4,version=version+1,role_profile_id=$5 WHERE tenant_id=$1 AND user_id=$2",
-        [ctx.tenantId, b.userId, b.role, b.active, profileId],
+        "UPDATE memberships SET role=$3,active=$4,version=version+1,role_profile_id=$5,entity_ids=$6 WHERE tenant_id=$1 AND user_id=$2",
+        [ctx.tenantId, b.userId, b.role, b.active, profileId, entityIds],
       );
       await tx.query("DELETE FROM sessions WHERE tenant_id=$1 AND user_id=$2", [
         ctx.tenantId,
@@ -396,11 +443,43 @@ export class Access {
       ).rows[0];
       await audit(tx, ctx, b.userId, "team.access-changed", {
         before,
-        after: { role: b.role, active: b.active, role_profile_id: profileId },
+        after: {
+          role: b.role,
+          active: b.active,
+          role_profile_id: profileId,
+          entity_ids: entityIds,
+        },
         text: `${s.name} changed ${person.name}: ${before.role} (${before.active ? "active" : "removed"}) → ${b.role} (${b.active ? "active" : "removed"}).`,
       });
       return { ok: true, self: b.userId === s.userId };
     });
+  }
+  // Null grants every entity. A list must name this organization's entities;
+  // administrators always keep every entity.
+  private async validateEntities(
+    tx: SQL,
+    tenantId: string,
+    role: string,
+    ids?: string[] | null,
+  ): Promise<string[] | null> {
+    if (!ids) return null;
+    if (role === "admin")
+      throw new Problem(
+        400,
+        "Administrators always have every legal entity. Choose all entities.",
+      );
+    const unique = [...new Set(ids)].sort();
+    if (!unique.length)
+      throw new Problem(400, "Choose at least one legal entity.");
+    const found = (
+      await tx.query(
+        "SELECT count(*)::int AS n FROM entities WHERE tenant_id=$1 AND id=ANY($2::uuid[])",
+        [tenantId, unique],
+      )
+    ).rows[0].n;
+    if (found !== unique.length)
+      throw new Problem(400, "Choose legal entities from this organization.");
+    return unique;
   }
   private async validateProfile(
     tx: SQL,

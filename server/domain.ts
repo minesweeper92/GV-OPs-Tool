@@ -14,6 +14,7 @@ export type Context = {
   userId: string;
   role: "admin" | "finance" | "sales" | "viewer";
   name?: string;
+  entityIds?: string[] | null;
 };
 export class Problem extends Error {
   constructor(
