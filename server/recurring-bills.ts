@@ -5,6 +5,7 @@ import { Problem, audit, type Context } from "./domain.ts";
 import { executePayable } from "./payables.ts";
 import { scaled, totals, baseAmount } from "../shared/money.ts";
 import { occurrenceDate } from "../shared/recurring.ts";
+import { hasCapability } from "../shared/permissions.ts";
 const day = (value: unknown) => String(value).slice(0, 10);
 const rate = (value: string) =>
   `${BigInt(value) / 1000000n}.${String(BigInt(value) % 1000000n).padStart(6, "0")}`;
@@ -63,7 +64,7 @@ function snapshot(p: Row) {
   };
 }
 export async function billScheduleSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.view"))
     return { billSchedules: [], billScheduleOccurrences: [] };
   return {
     billSchedules: (
@@ -84,7 +85,7 @@ export async function executeBillSchedule(
   c: Row,
   now = new Date(),
 ) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.post"))
     throw new Problem(403, "Finance access is required for recurring bills.");
   if (c.action === "bill-schedule.create") {
     await get(tx, "entities", c.entity_id, true);
@@ -195,7 +196,7 @@ export async function executeBillSchedule(
           [ctx.tenantId, ctx.userId],
         )
       ).rows[0];
-      if (!membership || !["admin", "finance"].includes(membership.role))
+      if (!membership || !hasCapability(membership.role, "books.post"))
         throw new Problem(
           403,
           "Active finance access is required to generate bills.",
@@ -300,7 +301,12 @@ export async function runRecurringBillsDue(db: Database, now = new Date()) {
       // valid earlier drafts or move the cursor past the blocked cycle.
       for (let cycle = 0; cycle < 12; cycle++) {
         const result = await inTenant(db, p.tenant_id, (tx) =>
-          executeBillSchedule(tx, ctx, { action: "bill-schedule.run", id: p.id }, now),
+          executeBillSchedule(
+            tx,
+            ctx,
+            { action: "bill-schedule.run", id: p.id },
+            now,
+          ),
         );
         if (!result.generated) break;
       }

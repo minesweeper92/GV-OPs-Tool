@@ -4,6 +4,7 @@ import { Problem, post, audit, type Context } from "./domain.ts";
 import type { SQL, Row } from "./db.ts";
 import { minor, scaled, round, baseAmount } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
+import { hasCapability } from "../shared/permissions.ts";
 const sum = (rows: Row[], key: string) =>
   rows.reduce((n, r) => n + BigInt(r[key]), 0n);
 async function get(tx: SQL, table: string, id: string, lock = false) {
@@ -80,7 +81,7 @@ async function updateBill(
   );
 }
 export async function executeVendorCredit(tx: SQL, ctx: Context, c: Row) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.post"))
     throw new Problem(
       403,
       "A finance role is required for vendor credits and refunds.",
@@ -513,7 +514,7 @@ export async function executeVendorCredit(tx: SQL, ctx: Context, c: Row) {
   return { id };
 }
 export async function vendorCreditSnapshot(tx: SQL, ctx: Context) {
-  if (!["admin", "finance"].includes(ctx.role))
+  if (!hasCapability(ctx.role, "books.view"))
     return {
       vendorCredits: [],
       vendorCreditApplications: [],
