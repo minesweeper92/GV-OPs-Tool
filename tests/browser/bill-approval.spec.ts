@@ -133,9 +133,9 @@ test("review queues explain self-review restrictions and update when policy chan
     .getByRole("button", { name: /^Waiting for another reviewer/ })
     .click();
   await page.getByRole("link", { name: reference, exact: true }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "A different person must review this bill",
-  );
+  await expect(
+    page.getByRole("status", { name: "Bill review status" }),
+  ).toContainText("A different person must review this bill");
   await expect(
     page.getByRole("button", { name: "Approve & post", exact: true }),
   ).toHaveCount(0);
@@ -238,9 +238,9 @@ test("two-stage review passes from finance to a different administrator before p
   await page
     .getByRole("button", { name: "Complete first review", exact: true })
     .click();
-  await expect(page.getByRole("status")).toContainText(
-    "A different administrator must give final approval",
-  );
+  await expect(
+    page.getByRole("status", { name: "Bill review status" }),
+  ).toContainText("A different administrator must give final approval");
   await expect(
     page.getByRole("button", { name: "Approve & post", exact: true }),
   ).toHaveCount(0);
@@ -261,6 +261,20 @@ test("two-stage review passes from finance to a different administrator before p
   expect(posted.status).toBe("Open");
   expect(posted.reviewed_by).toBe(finance.user_id);
   expect(posted.approved_by).toBe(owner.user.id);
+  await expect(
+    page.getByRole("heading", { name: "Approval history", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("First review completed — not posted", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Final approval — posted to books", { exact: true }),
+  ).toBeVisible();
+  const trail = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Approval history", exact: true }),
+  });
+  await expect(trail).toContainText(finance.name);
+  await expect(trail).toContainText(owner.user.name);
   await command({
     action: "bill.approval-policy",
     entity_id: entity.id,

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { hasCapability } from "../shared/permissions";
 import { billReviewDecision } from "../shared/bill-approval";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import {
   Heading,
   Table,
@@ -26,6 +26,7 @@ import {
   type Bill,
   type VendorPayment,
   type Line,
+  type Event,
 } from "./model";
 import { totals } from "../shared/money";
 import { openRemittanceAdvice } from "./remittanceAdvice";
@@ -307,7 +308,7 @@ export function Payables({
           subtitle={`${b.vendor_name} · ${b.entity_name}`}
         />
         {b.status === "Pending approval" && (
-          <p role="status">
+          <p role="status" aria-label="Bill review status">
             {review(b).reason} Nothing is posted until approval.{" "}
             <a href="#bills">Back to review queue →</a>
           </p>
@@ -504,6 +505,9 @@ export function Payables({
                 {p.reversal_date ? "Reversed" : "Multi-bill payment"}
               </p>
             ))}
+        </section>
+        <section className="panel">
+          <BillApprovalTrail bill={b} me={me} />
         </section>
         <section className="panel">
           <h2>Bill activity</h2>
@@ -727,6 +731,83 @@ export function Payables({
           close={() => setEditor(null)}
           save={save}
         />
+      ) : null}
+    </>
+  );
+}
+
+function BillApprovalTrail({ bill, me }: { bill: Bill; me: Me }) {
+  const history = useInfiniteQuery({
+    queryKey: [
+      "bill-approval-history",
+      me.organization.id,
+      me.user.id,
+      bill.id,
+      bill.version,
+    ],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      request<{ events: Event[]; nextCursor: string | null }>(
+        `bills/${bill.id}/approval-history${pageParam ? `?cursor=${pageParam}` : ""}`,
+      ),
+    getNextPageParam: (page) => page.nextCursor || undefined,
+  });
+  const labels: Record<string, string> = {
+    "bill.create": "Draft created",
+    "bill.submit": "Submitted for approval",
+    "bill.review": "First review completed — not posted",
+    "bill.return": "Returned to draft",
+    "bill.approve": "Final approval — posted to books",
+    "bill.void": "Bill voided",
+  };
+  return (
+    <>
+      <h2>Approval history</h2>
+      <p className="muted">
+        Newest first. Previous reviews remain here when a bill is returned and
+        resubmitted.
+      </p>
+      {history.isPending ? (
+        <p role="status">Loading approval history…</p>
+      ) : null}
+      {history.error ? (
+        <>
+          <ErrorBox error={history.error.message} />
+          <button onClick={() => void history.refetch()}>Retry history</button>
+        </>
+      ) : null}
+      {history.data ? (
+        <ol>
+          {history.data.pages
+            .flatMap((page) => page.events)
+            .map((event) => (
+              <li key={event.id}>
+                <strong>{labels[event.action] || event.action}</strong>
+                {" · "}
+                {typeof event.details.actorName === "string"
+                  ? event.details.actorName
+                  : `Team member (${event.actor_id.slice(0, 8)})`}
+                {" · "}
+                <time dateTime={event.created_at}>
+                  {new Date(event.created_at).toLocaleString()}
+                </time>
+                {event.action === "bill.return" &&
+                typeof event.details.text === "string" ? (
+                  <p>{event.details.text}</p>
+                ) : null}
+              </li>
+            ))}
+        </ol>
+      ) : null}
+      {history.hasNextPage ? (
+        <button
+          disabled={history.isFetchingNextPage}
+          onClick={() => void history.fetchNextPage()}
+        >
+          {history.isFetchingNextPage
+            ? "Loading older approvals…"
+            : "Load older approvals"}
+        </button>
       ) : null}
     </>
   );

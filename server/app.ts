@@ -8,7 +8,11 @@ import { audit, execute, snapshot, reports, Problem } from "./domain.ts";
 import { commandSchema } from "../shared/commands.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
-import { executePayable, payableSnapshot } from "./payables.ts";
+import {
+  executePayable,
+  payableSnapshot,
+  billApprovalHistory,
+} from "./payables.ts";
 import {
   executePurchaseOrder,
   purchaseOrderSnapshot,
@@ -534,6 +538,22 @@ export function createApp(
       ctx = access.context(sessions.get(req)!);
     return inTenant(db, ctx.tenantId, (tx) => partyStatement(tx, ctx, q), true);
   });
+  app.get<{ Params: { id: string } }>(
+    "/api/bills/:id/approval-history",
+    async (req) => {
+      const id = z.uuid().parse(req.params.id);
+      const query = z
+        .strictObject({ cursor: z.uuid().optional() })
+        .parse(req.query);
+      const ctx = access.context(sessions.get(req)!);
+      return inTenant(
+        db,
+        ctx.tenantId,
+        (tx) => billApprovalHistory(tx, ctx, id, query.cursor),
+        true,
+      );
+    },
+  );
   app.get("/api/banking", async (req) => {
     const q = z
         .strictObject({ bankId: z.uuid(), statementId: z.uuid().optional() })

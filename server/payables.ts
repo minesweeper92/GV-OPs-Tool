@@ -103,6 +103,54 @@ export async function payableSnapshot(tx: SQL, ctx: Context) {
     ).rows,
   };
 }
+// Record-scoped pagination avoids losing older approvals when the global
+// activity feed rolls past its 200-event window. No auth-directory access needed.
+export async function billApprovalHistory(
+  tx: SQL,
+  ctx: Context,
+  billId: string,
+  cursor?: string,
+) {
+  if (!hasCapability(ctx.role, "books.view"))
+    throw new Problem(
+      403,
+      "Accounting access is required to view bill approvals.",
+    );
+  if (
+    !(await tx.query("SELECT id FROM bills WHERE id=$1", [billId])).rows.length
+  )
+    throw new Problem(404, "Bill not found in this organization.");
+  const actions = [
+    "bill.create",
+    "bill.submit",
+    "bill.review",
+    "bill.return",
+    "bill.approve",
+    "bill.void",
+  ];
+  const anchor = cursor
+    ? (
+        await tx.query(
+          "SELECT id FROM audit_events WHERE id=$1 AND record_id=$2 AND action=ANY($3::text[])",
+          [cursor, billId, actions],
+        )
+      ).rows[0]
+    : undefined;
+  if (cursor && !anchor)
+    throw new Problem(400, "Invalid approval history cursor.");
+  const rows = (
+    await tx.query(
+      // Keep the timestamp comparison in SQL: pg's JavaScript Date decoding
+      // truncates microseconds and can otherwise skip same-transaction events.
+      "SELECT id,record_id,actor_id,action,created_at,details FROM audit_events WHERE record_id=$1 AND action=ANY($2::text[]) AND ($3::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM audit_events WHERE id=$3::uuid AND record_id=$1 AND action=ANY($2::text[]))) ORDER BY created_at DESC,id DESC LIMIT 101",
+      [billId, actions, anchor?.id ?? null],
+    )
+  ).rows;
+  return {
+    events: rows.slice(0, 100),
+    nextCursor: rows.length > 100 ? rows[99].id : null,
+  };
+}
 export async function executePayable(tx: SQL, ctx: Context, c: Row) {
   requireFinance(ctx);
   const t = ctx.tenantId,
@@ -501,6 +549,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         ],
       );
     await audit(tx, ctx, old?.id || id, c.action, {
+      actorName: ctx.name || null,
       text: `${old ? "Updated" : "Created"} draft bill ${c.reference} from ${vendor.name}.`,
       duplicateAcknowledged: !!duplicate && c.acknowledge_duplicate,
     });
@@ -634,6 +683,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       );
     } else throw new Problem(400, "Unknown bill action.");
     await audit(tx, ctx, b.id, c.action, {
+      actorName: ctx.name || null,
       text: `Bill ${b.reference}: ${c.action.split(".")[1]}${c.reason ? ` — ${c.reason}` : ""}.`,
     });
     return { id: b.id };

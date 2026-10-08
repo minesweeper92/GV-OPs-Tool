@@ -3,7 +3,7 @@ import { randomUUID as uuid } from "node:crypto";
 import type { TestContext } from "node:test";
 import type { Database } from "../server/db.ts";
 import { inTenant } from "../server/db.ts";
-import { seedAccounts } from "../server/domain.ts";
+import { seedAccounts, audit } from "../server/domain.ts";
 import { createApp } from "../server/app.ts";
 import { partyStatement } from "../server/statements.ts";
 import { ageing, financialReports } from "../server/financial-reports.ts";
@@ -69,6 +69,14 @@ export async function verifyPayables(t: TestContext, db: Database) {
     const headers = { host: "127.0.0.1:4320", origin, cookie };
     const me = (await app.inject({ url: "/api/me", headers })).json();
     return {
+      history: async (id: string, cursor?: string, expected = 200) => {
+        const result = await app.inject({
+          url: `/api/bills/${id}/approval-history${cursor ? `?cursor=${cursor}` : ""}`,
+          headers,
+        });
+        assert.equal(result.statusCode, expected, result.body);
+        return result.json();
+      },
       get: async () => (await app.inject({ url: "/api/data", headers })).json(),
       command: async (payload: Record<string, unknown>, expected = 200) => {
         const result = await app.inject({
@@ -1205,6 +1213,17 @@ export async function verifyPayables(t: TestContext, db: Database) {
       assert.equal((await bill(made.id)).status, "Open");
       assert.equal((await bill(made.id)).reviewed_by, finance);
       assert.ok((await ledger("bill", made.id)).length > 0);
+      const history = await accountant.history(made.id);
+      assert.equal(
+        history.events.find((e: any) => e.action === "bill.review").details
+          .actorName,
+        "finance",
+      );
+      assert.equal(
+        history.events.find((e: any) => e.action === "bill.approve").details
+          .actorName,
+        "admin",
+      );
       await assert.rejects(() =>
         inTenant(db, tenant, (tx) =>
           tx.query(
@@ -1255,6 +1274,49 @@ export async function verifyPayables(t: TestContext, db: Database) {
         separate_approver: false,
         two_stage: false,
       });
+    },
+  );
+  await t.test(
+    "bill approval history paginates independently of the global feed and enforces role, tenant and cursor boundaries",
+    async () => {
+      const made = await accountant.command(draft());
+      await inTenant(db, tenant, async (tx) => {
+        for (let i = 0; i < 105; i++)
+          await audit(
+            tx,
+            { tenantId: tenant, userId: finance, role: "finance" },
+            made.id,
+            "bill.submit",
+            { text: `History fixture ${i}`, actorName: "Reviewer snapshot" },
+          );
+      });
+      const first = await accountant.history(made.id);
+      assert.equal(first.events.length, 100);
+      assert.ok(first.nextCursor);
+      const second = await accountant.history(made.id, first.nextCursor);
+      assert.equal(second.events.length, 6);
+      assert.equal(second.nextCursor, null);
+      assert.equal(
+        new Set([...first.events, ...second.events].map((e: any) => e.id)).size,
+        106,
+      );
+      await rep.history(made.id, undefined, 403);
+      await accountant.history(uuid(), undefined, 404);
+      await accountant.history(made.id, uuid(), 400);
+      const another = await accountant.command(draft());
+      await accountant.history(another.id, first.nextCursor, 400);
+      const { billApprovalHistory } = await import("../server/payables.ts");
+      await assert.rejects(
+        () =>
+          inTenant(db, other, (tx) =>
+            billApprovalHistory(
+              tx,
+              { tenantId: other, userId: admin, role: "admin" },
+              made.id,
+            ),
+          ),
+        /Bill not found/,
+      );
     },
   );
   await t.test(
