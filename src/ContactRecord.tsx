@@ -196,82 +196,110 @@ export function ContactRecord({
               <button
                 key={value}
                 role="tab"
+                id={`contact-tab-${value}`}
+                aria-controls="contact-tab-panel"
+                tabIndex={tab === value ? 0 : -1}
                 aria-selected={tab === value}
                 onClick={() => setTab(value)}
+                onKeyDown={(e) => {
+                  if (
+                    ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)
+                  ) {
+                    e.preventDefault();
+                    const next =
+                      e.key === "Home"
+                        ? "Overview"
+                        : e.key === "End"
+                          ? "Activities"
+                          : tab === "Overview"
+                            ? "Activities"
+                            : "Overview";
+                    setTab(next);
+                    document.getElementById(`contact-tab-${next}`)?.focus();
+                  }
+                }}
               >
                 {value}
               </button>
             ))}
           </div>
-          {tab === "Overview" ? (
-            <>
-              <div className="contact-highlight-grid">
-                <div>
-                  <span>Open tasks</span>
-                  <strong>{tasks.length}</strong>
+          <div
+            role="tabpanel"
+            id="contact-tab-panel"
+            aria-labelledby={`contact-tab-${tab}`}
+          >
+            {tab === "Overview" ? (
+              <>
+                <div className="contact-highlight-grid">
+                  <div>
+                    <span>Open tasks</span>
+                    <strong>{tasks.length}</strong>
+                  </div>
+                  <div>
+                    <span>Last activity</span>
+                    <strong>
+                      {latest ? day(latest.occurred_at) : "None recorded"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Deals</span>
+                    <strong>{deals.length}</strong>
+                  </div>
                 </div>
-                <div>
-                  <span>Last activity</span>
-                  <strong>
-                    {latest ? day(latest.occurred_at) : "None recorded"}
-                  </strong>
-                </div>
-                <div>
-                  <span>Deals</span>
-                  <strong>{deals.length}</strong>
-                </div>
-              </div>
-              <section className="contact-panel">
-                <div className="section-title">
-                  <h2>Recent activity</h2>
-                  <button onClick={() => setTab("Activities")}>View all</button>
-                </div>
-                {latest ? (
-                  <p>
-                    <Badge>{latest.kind}</Badge>{" "}
-                    <strong>{latest.subject}</strong>
-                    <br />
-                    <small>{day(latest.occurred_at)}</small>
-                  </p>
-                ) : (
-                  <p className="muted">
-                    No activity logged yet. Use Note, Call, Email or Meeting
-                    above to record an interaction.
-                  </p>
-                )}
-              </section>
-              <section className="contact-panel">
-                <h2>Tasks</h2>
-                {recentTasks.length ? (
-                  recentTasks.map((t) => (
-                    <div className="association-item" key={t.id}>
-                      <strong>{t.title}</strong>
-                      <Badge>{t.status}</Badge>
-                      <small>Due {day(t.due_at)}</small>
-                      <button
-                        onClick={() => crmEdit("task", "contact", id, t.id)}
-                      >
-                        Review task
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted">Nothing due for this contact.</p>
-                )}
-              </section>
-            </>
-          ) : (
-            <Suspense fallback={<p>Loading activity…</p>}>
-              <CrmPanel
-                data={data}
-                me={me}
-                open={crmEdit}
-                type="contact"
-                id={id}
-                events={events}
-              />
-            </Suspense>
-          )}
+                <section className="contact-panel">
+                  <div className="section-title">
+                    <h2>Recent activity</h2>
+                    <button onClick={() => setTab("Activities")}>
+                      View all
+                    </button>
+                  </div>
+                  {latest ? (
+                    <p>
+                      <Badge>{latest.kind}</Badge>{" "}
+                      <strong>{latest.subject}</strong>
+                      <br />
+                      <small>{day(latest.occurred_at)}</small>
+                    </p>
+                  ) : (
+                    <p className="muted">
+                      No activity logged yet. Use Note, Call, Email or Meeting
+                      above to record an interaction.
+                    </p>
+                  )}
+                </section>
+                <section className="contact-panel">
+                  <h2>Tasks</h2>
+                  {recentTasks.length ? (
+                    recentTasks.map((t) => (
+                      <div className="association-item" key={t.id}>
+                        <strong>{t.title}</strong>
+                        <Badge>{t.status}</Badge>
+                        <small>Due {day(t.due_at)}</small>
+                        <button
+                          onClick={() => crmEdit("task", "contact", id, t.id)}
+                        >
+                          Review task
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="muted">Nothing due for this contact.</p>
+                  )}
+                </section>
+              </>
+            ) : (
+              <Suspense fallback={<p>Loading activity…</p>}>
+                <CrmPanel
+                  data={data}
+                  me={me}
+                  open={crmEdit}
+                  type="contact"
+                  id={id}
+                  events={events}
+                />
+              </Suspense>
+            )}
+          </div>
         </section>
         <aside className="contact-related" aria-label="Related records">
           <section>

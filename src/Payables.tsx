@@ -11,6 +11,7 @@ import {
   ErrorBox,
   Badge,
   Empty,
+  ConfirmationDialog,
 } from "./components";
 import { Timeline } from "./Records";
 import { BankSelect } from "./Banking";
@@ -94,6 +95,9 @@ export function Payables({
   view,
   id,
   newVendor,
+  list,
+  setList,
+  rememberPosition,
 }: {
   data: Data;
   me: Me;
@@ -101,13 +105,20 @@ export function Payables({
   view: string;
   id?: string;
   newVendor: () => void;
+  list: { filter: string; search: string };
+  setList: (value: { filter: string; search: string }) => void;
+  rememberPosition: () => void;
 }) {
   const cache = useQueryClient(),
     [editor, setEditor] = useState<Editor | null>(null),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false),
-    [filter, setFilter] = useState("all"),
-    [search, setSearch] = useState("");
+    [busy, setBusy] = useState(false);
+  const { filter, search } = list;
+  const setFilter = (filter: string) => setList({ ...list, filter });
+  const setSearch = (search: string) => setList({ ...list, search });
+  const [posting, setPosting] = useState<Bill | null>(null);
+  const [notice, setNotice] = useState("");
+  const [pendingAction, setPendingAction] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
   const bills = (data.bills || []).filter(
       (b) => entity === "all" || b.entity_id === entity,
@@ -139,21 +150,25 @@ export function Payables({
     return result;
   }
   async function action(b: Bill, kind: "submit" | "approve" | "review") {
-    if (
-      kind === "approve" &&
-      !confirm(
-        `Approve ${b.reference} and post ${money(b.total_minor, b.currency)} to ${b.entity_name}?`,
-      )
-    )
-      return;
     setBusy(true);
+    setPendingAction(kind);
     setError("");
+    setNotice("");
     try {
       await save({ action: `bill.${kind}`, id: b.id, version: b.version });
+      setPosting(null);
+      setNotice(
+        kind === "submit"
+          ? `${b.reference} submitted for approval. Nothing posted yet.`
+          : kind === "review"
+            ? `First review completed for ${b.reference}. Final approval is still required.`
+            : `${b.reference} approved and posted to ${b.entity_name}.`,
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      setPendingAction("");
     }
   }
   const entityCode = (id: string) =>
@@ -192,7 +207,9 @@ export function Payables({
         {rows.map((b) => (
           <tr key={b.id}>
             <td>
-              <a href={`#bill/${b.id}`}>{b.reference}</a>
+              <a href={`#bill/${b.id}`} onClick={rememberPosition}>
+                {b.reference}
+              </a>
               <small>{b.vendor_name}</small>
             </td>
             <td>
@@ -337,7 +354,7 @@ export function Payables({
             will be released.
           </p>
         )}
-        <div className="toolbar">
+        <div className="toolbar record-action-bar">
           {b.purchase_order_id && (
             <a href={`#purchase-orders/${b.purchase_order_id}`}>
               View purchase order
@@ -360,7 +377,9 @@ export function Payables({
                   disabled={busy}
                   onClick={() => void action(b, "submit")}
                 >
-                  Submit for approval
+                  {pendingAction === "submit"
+                    ? "Submitting…"
+                    : "Submit for approval"}
                 </button>
               </>
             ) : null}
@@ -372,11 +391,18 @@ export function Payables({
                 <button
                   className="primary"
                   disabled={busy}
-                  onClick={() => void action(b, review(b).action || "approve")}
+                  onClick={() => {
+                    setError("");
+                    review(b).action === "review"
+                      ? void action(b, "review")
+                      : setPosting(b);
+                  }}
                 >
-                  {review(b).action === "review"
-                    ? "Complete first review"
-                    : "Approve & post"}
+                  {pendingAction === "review"
+                    ? "Completing review…"
+                    : review(b).action === "review"
+                      ? "Complete first review"
+                      : "Approve & post"}
                 </button>
               </>
             ) : null}
@@ -402,7 +428,7 @@ export function Payables({
             ) : null}
           </div>
         </div>
-        <section className="panel">
+        <section className="panel bill-record-panel">
           <div className="payable-metrics">
             <div>
               <span>Total bill</span>
@@ -711,8 +737,51 @@ export function Payables({
     );
   return (
     <>
-      {error ? <ErrorBox error={error} /> : null}
+      {error && !posting ? <ErrorBox error={error} /> : null}
+      {notice ? (
+        <div className="action-notice" role="status">
+          {notice}
+          <button
+            aria-label="Dismiss confirmation"
+            onClick={() => setNotice("")}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       {content}
+      {posting ? (
+        <ConfirmationDialog
+          title="Approve and post this bill?"
+          confirmLabel="Confirm & post"
+          busy={busy}
+          error={error}
+          cancel={() => {
+            setPosting(null);
+            setError("");
+          }}
+          confirm={() => void action(posting, "approve")}
+        >
+          <p>
+            This records the vendor payable in your books. It does not send
+            money or email the vendor.
+          </p>
+          <dl className="posting-summary">
+            <dt>Bill</dt>
+            <dd>{posting.reference}</dd>
+            <dt>Vendor</dt>
+            <dd>{posting.vendor_name}</dd>
+            <dt>Legal entity</dt>
+            <dd>{posting.entity_name}</dd>
+            <dt>Amount</dt>
+            <dd>{money(posting.total_minor, posting.currency)}</dd>
+          </dl>
+          <p className="muted">
+            Once posted, bill details cannot be edited. Corrections need a
+            credit or reversal.
+          </p>
+        </ConfirmationDialog>
+      ) : null}
       {rulesOpen && (
         <BillApprovalRules
           data={data}

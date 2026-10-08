@@ -84,7 +84,7 @@ test("recurring vendor bill draft recovery, lost-response retry and reviewed pos
   expect(schedules).toHaveLength(1);
   if (schedules[0].status === "Active")
     await page
-        .getByRole("button", { name: "Generate next draft", exact: true })
+      .getByRole("button", { name: "Generate next draft", exact: true })
       .click();
   await expect(page.getByText("Draft created", { exact: true })).toBeVisible();
   data = await (await page.request.get("/api/data")).json();
@@ -99,9 +99,11 @@ test("recurring vendor bill draft recovery, lost-response retry and reviewed pos
   await page
     .getByRole("button", { name: "Submit for approval", exact: true })
     .click();
-  page.once("dialog", (d) => d.accept());
   await page
     .getByRole("button", { name: "Approve & post", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Confirm & post", exact: true })
     .click();
   await expect(
     page.getByRole("button", { name: "Record vendor payment", exact: true }),

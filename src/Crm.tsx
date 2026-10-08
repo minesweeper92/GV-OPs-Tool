@@ -1590,7 +1590,7 @@ export function CrmEditor({
           )}
           {profileMode ? (
             <>
-              <details open={!isNew}>
+              <details>
                 <summary>Full details, owner and custom fields</summary>
                 <Field label="Record owner">
                   <select name="owner_id" defaultValue={currentOwner}>
@@ -1619,30 +1619,32 @@ export function CrmEditor({
               </details>
             </>
           ) : null}
-          <button
-            type="submit"
-            className="primary"
-            disabled={addingCompany || addingContact || companyBusy}
-          >
-            {busy
-              ? "Saving…"
-              : state.mode === "activity"
-                ? "Save activity"
-                : state.mode === "task"
-                  ? "Save task"
-                  : isNew
-                    ? "Save"
-                    : "Save changes"}
-          </button>
-          {state.mode === "contact" && isNew ? (
+          <div className="crm-save-bar">
             <button
               type="submit"
-              disabled={addingCompany || companyBusy}
-              data-add-another="true"
+              className="primary"
+              disabled={addingCompany || addingContact || companyBusy}
             >
-              Create and add another
+              {busy
+                ? "Saving…"
+                : state.mode === "activity"
+                  ? "Save activity"
+                  : state.mode === "task"
+                    ? "Save task"
+                    : isNew
+                      ? "Save"
+                      : "Save changes"}
             </button>
-          ) : null}
+            {state.mode === "contact" && isNew ? (
+              <button
+                type="submit"
+                disabled={addingCompany || companyBusy}
+                data-add-another="true"
+              >
+                Create and add another
+              </button>
+            ) : null}
+          </div>
         </fieldset>
       </form>
     </Drawer>

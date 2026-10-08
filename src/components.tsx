@@ -205,3 +205,59 @@ export function ErrorBox({ error }: { error: string }) {
     </p>
   );
 }
+
+export function ConfirmationDialog({
+  title,
+  children,
+  confirmLabel,
+  busy,
+  error,
+  confirm,
+  cancel,
+}: {
+  title: string;
+  children: ReactNode;
+  confirmLabel: string;
+  busy: boolean;
+  error?: string;
+  confirm: () => void;
+  cancel: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = ref.current;
+    dialog?.showModal();
+    dialog?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      // Release modal inertness before restoring the triggering control.
+      dialog?.close();
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      else document.getElementById("main")?.focus({ preventScroll: true });
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="confirmation-dialog"
+      aria-labelledby={titleId}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) cancel();
+      }}
+    >
+      <h2 id={titleId}>{title}</h2>
+      {children}
+      {error ? <ErrorBox error={error} /> : null}
+      <div className="confirmation-actions">
+        <button disabled={busy} onClick={cancel}>
+          Cancel
+        </button>
+        <button className="primary" disabled={busy} onClick={confirm}>
+          {busy ? "Posting bill…" : confirmLabel}
+        </button>
+      </div>
+    </dialog>
+  );
+}
