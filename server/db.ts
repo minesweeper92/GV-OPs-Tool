@@ -94,12 +94,15 @@ async function migrations() {
       "./migrations/033_entity_grants.sql",
       "./migrations/034_bill_approval_tiers.sql",
       "./migrations/035_bill_approval_snapshots.sql",
+      "./migrations/036_shared_approvals.sql",
       "./migrations/040_bank_transactions.sql",
       "./migrations/041_sales_tax_withholding.sql",
-    ].map(async (path, index) => {
+      "./migrations/042_approval_directory.sql",
+    ].map(async (path) => {
       const sql = await readFile(new URL(path, import.meta.url), "utf8");
       return {
-        version: index + 1,
+        version:
+          path === "./schema.sql" ? 1 : Number(path.match(/\/(\d+)_/)![1]),
         sql,
         hash: createHash("sha256").update(sql).digest("hex"),
       };

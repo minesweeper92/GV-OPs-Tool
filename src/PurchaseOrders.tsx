@@ -14,6 +14,8 @@ import { request, today, money, rate, type Data, type Me } from "./model";
 import { totals, scaled } from "../shared/money";
 import type { PurchaseOrder } from "../shared/purchase-orders";
 import { hasCapability } from "../shared/permissions";
+import { ApprovalTimeline } from "./ApprovalWorkflows";
+import { workflowProgress } from "../shared/approval-workflows";
 
 const blankLine = () => ({
   description: "",
@@ -53,6 +55,32 @@ export function PurchaseOrders({
     [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const po = data.purchaseOrders.find((p) => p.id === id);
+  const run = data.approvalRuns?.find((r) => r.document_id === id);
+  const configured = data.approvalRules?.some(
+    (r) => r.entity_id === po?.entity_id && r.kind === "purchase-order",
+  );
+  const progress = run ? workflowProgress(run, me.user.id) : null;
+  const [reviewing, setReviewing] = useState<"review" | "return" | null>(null);
+  const [comment, setComment] = useState("");
+  async function workflow(verb: "submit" | "review" | "return") {
+    if (!po) return;
+    setBusy(true);
+    setError("");
+    try {
+      await save({
+        action: `purchase-order.${verb}`,
+        id: po.id,
+        version: po.version,
+        comment,
+      });
+      setReviewing(null);
+      setComment("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function save(c: unknown) {
     const result = await request<{ id: string }>(
       "commands",
@@ -124,11 +152,43 @@ export function PurchaseOrders({
               {po.status === "Draft" && (
                 <button onClick={() => setEditing(true)}>Edit draft</button>
               )}
-              {["Draft", "Closed"].includes(po.status) && (
-                <button disabled={busy} onClick={() => void status("Issued")}>
-                  {po.status === "Closed" ? "Reopen" : "Issue purchase order"}
+              {po.status === "Draft" && configured && (
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void workflow("submit")}
+                >
+                  Submit for approval
                 </button>
               )}
+              {po.status === "Pending approval" &&
+                (progress?.allowed || me.user.role === "admin") && (
+                  <>
+                    {progress?.allowed && (
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => setReviewing("review")}
+                      >
+                        {progress.final
+                          ? "Review & issue"
+                          : "Review current step"}
+                      </button>
+                    )}
+                    <button
+                      disabled={busy}
+                      onClick={() => setReviewing("return")}
+                    >
+                      Return to draft
+                    </button>
+                  </>
+                )}
+              {["Draft", "Closed"].includes(po.status) &&
+                !(po.status === "Draft" && configured) && (
+                  <button disabled={busy} onClick={() => void status("Issued")}>
+                    {po.status === "Closed" ? "Reopen" : "Issue purchase order"}
+                  </button>
+                )}
               {po.status === "Issued" && (
                 <>
                   <button className="primary" onClick={() => setBilling(true)}>
@@ -151,6 +211,65 @@ export function PurchaseOrders({
             </div>
           ) : null}
         </div>
+        {reviewing && (
+          <form
+            className="panel"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void workflow(reviewing);
+            }}
+          >
+            <h2>
+              {reviewing === "return"
+                ? "Return for changes"
+                : progress?.final
+                  ? "Final approval — issue purchase order"
+                  : "Approve current step"}
+            </h2>
+            <p>
+              {po.entity_name} · {po.vendor_name} ·{" "}
+              {money(po.total_minor, po.currency)}.{" "}
+              {reviewing === "return"
+                ? "The order becomes editable and resubmission starts a new review."
+                : progress?.final
+                  ? "This issues the order. No email is sent and no ledger entry is posted."
+                  : "The order remains pending. Nothing is issued or posted."}
+            </p>
+            <Field
+              label={
+                reviewing === "return"
+                  ? "Reason for returning"
+                  : "Review note (optional)"
+              }
+            >
+              <textarea
+                required={reviewing === "return"}
+                maxLength={2000}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+            </Field>
+            <div className="row-actions">
+              <button className="primary" disabled={busy}>
+                {busy
+                  ? "Saving…"
+                  : reviewing === "return"
+                    ? "Confirm return"
+                    : progress?.final
+                      ? "Approve & issue"
+                      : "Approve step"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setReviewing(null)}
+              >
+                Cancel review
+              </button>
+            </div>
+          </form>
+        )}
+        {run && <ApprovalTimeline run={run} />}
         <p>
           Ordered {po.order_date}
           {po.delivery_date ? ` · Delivery ${po.delivery_date}` : ""} ·{" "}

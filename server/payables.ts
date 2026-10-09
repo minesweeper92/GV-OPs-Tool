@@ -6,6 +6,12 @@ import { minor, scaled, totals, baseAmount, round } from "../shared/money.ts";
 import { cashAccount } from "./bank-account.ts";
 import { hasCapability } from "../shared/permissions.ts";
 import {
+  approvalSnapshot,
+  pendingApproval,
+  startApproval,
+  actApproval,
+} from "./approval-workflows.ts";
+import {
   billReviewDecision,
   tierProblem,
   type ApprovalTier,
@@ -92,6 +98,10 @@ export async function payableSnapshot(tx: SQL, ctx: Context) {
       "SELECT b.*,coalesce((SELECT jsonb_agg(a.approver_id ORDER BY a.step) FROM bill_approvals a WHERE a.bill_id=b.id AND a.round=b.approval_round),'[]'::jsonb) AS approvals FROM bills b ORDER BY b.bill_date DESC,b.created_at DESC",
     )
   ).rows;
+  const workflows = await approvalSnapshot(tx, ctx);
+  for (const bill of bills)
+    bill.workflow =
+      workflows.approvalRuns.find((r) => r.document_id === bill.id) || null;
   const vendorPayments = (
     await tx.query(
       "SELECT p.*,r.reversal_date,r.reason AS reversal_reason FROM vendor_payments p LEFT JOIN vendor_payment_reversals r ON r.payment_id=p.id ORDER BY p.payment_date DESC,p.created_at DESC",
@@ -597,6 +607,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     let approvals: string[] = [],
       stage: { step?: number; steps?: number } = {};
     let submissionPolicy: Row | undefined;
+    const workflow = await pendingApproval(tx, b.id);
     if (["bill.approve", "bill.return", "bill.review"].includes(c.action)) {
       const policy = await get(tx, "entities", b.entity_id);
       approvals = (
@@ -613,6 +624,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
           base_minor: b.base_minor,
           approvals,
           approval_policy: b.approval_policy,
+          workflow,
         },
         {
           bill_finance_limit_minor: policy.bill_finance_limit_minor,
@@ -621,7 +633,11 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
           bill_approval_tiers: policy.bill_approval_tiers,
         },
       );
-      if (!decision.allowed) throw new Problem(403, decision.reason);
+      if (
+        !decision.allowed &&
+        !(workflow && c.action === "bill.return" && ctx.role === "admin")
+      )
+        throw new Problem(403, decision.reason);
       stage = { step: decision.step, steps: decision.steps };
       if (
         c.action !== "bill.return" &&
@@ -649,10 +665,12 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         "UPDATE bills SET status='Pending approval',approval_round=approval_round+1,approval_policy=$2,version=version+1 WHERE id=$1",
         [b.id, JSON.stringify(snapshot)],
       );
+      await startApproval(tx, ctx, "bill", b, b.base_minor);
     } else if (c.action === "bill.review") {
       if (b.status !== "Pending approval")
         throw new Problem(409, "Submit the draft before first review.");
-      await recordApproval(tx, ctx, b, approvals.length);
+      if (workflow) await actApproval(tx, ctx, workflow, c.comment || "");
+      else await recordApproval(tx, ctx, b, approvals.length);
       // reviewed_by keeps the first reviewer; later steps live in bill_approvals.
       await tx.query(
         "UPDATE bills SET reviewed_by=coalesce(reviewed_by,$2),reviewed_at=coalesce(reviewed_at,now()),version=version+1 WHERE id=$1",
@@ -661,6 +679,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     } else if (c.action === "bill.return") {
       if (b.status !== "Pending approval")
         throw new Problem(409, "Only a submitted bill can be returned.");
+      if (workflow) await actApproval(tx, ctx, workflow, c.reason, true);
       await tx.query(
         "UPDATE bills SET status='Draft',reviewed_by=NULL,reviewed_at=NULL,version=version+1 WHERE id=$1",
         [b.id],
@@ -669,7 +688,8 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       if (b.status !== "Pending approval")
         throw new Problem(409, "Submit the draft for approval first.");
       await openDate(tx, b, String(b.bill_date).slice(0, 10));
-      await recordApproval(tx, ctx, b, approvals.length);
+      if (workflow) await actApproval(tx, ctx, workflow, c.comment || "");
+      else await recordApproval(tx, ctx, b, approvals.length);
       const total = BigInt(b.total_minor),
         net = BigInt(b.net_minor),
         base = BigInt(b.base_minor),
@@ -703,6 +723,8 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         [b.id, ctx.userId],
       );
     } else if (c.action === "bill.void") {
+      if (workflow)
+        throw new Problem(409, "Return this bill to draft before voiding it.");
       if (
         b.status === "Voided" ||
         BigInt(b.paid_minor) !== 0n ||

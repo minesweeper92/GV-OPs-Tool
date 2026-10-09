@@ -2,7 +2,12 @@ import { randomUUID as uuid } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { SQL, Row } from "./db.ts";
 import { Problem, audit, type Context } from "./domain.ts";
-import { totals, scaled } from "../shared/money.ts";
+import { totals, scaled, baseAmount } from "../shared/money.ts";
+import {
+  pendingApproval,
+  startApproval,
+  actApproval,
+} from "./approval-workflows.ts";
 import { allocateNumber } from "./numbering.ts";
 import { executePayable } from "./payables.ts";
 import { hasCapability } from "../shared/permissions.ts";
@@ -188,6 +193,39 @@ export async function executePurchaseOrder(tx: SQL, ctx: Context, c: Row) {
       409,
       "This purchase order changed. Refresh before continuing.",
     );
+  if (c.action === "purchase-order.submit") {
+    if (po.status !== "Draft")
+      throw new Problem(409, "Only a draft can be submitted.");
+    const run = await startApproval(
+      tx,
+      ctx,
+      "purchase-order",
+      po,
+      String(baseAmount(BigInt(po.total_minor), BigInt(po.fx_micros))),
+    );
+    if (!run)
+      throw new Problem(409, "Configure purchase-order approval rules first.");
+    await tx.query(
+      "UPDATE purchase_orders SET status='Pending approval',version=version+1 WHERE id=$1",
+      [po.id],
+    );
+    return { id: po.id };
+  }
+  if (
+    c.action === "purchase-order.review" ||
+    c.action === "purchase-order.return"
+  ) {
+    const run = await pendingApproval(tx, po.id);
+    if (po.status !== "Pending approval" || !run)
+      throw new Problem(409, "No pending approval for this order.");
+    const returned = c.action === "purchase-order.return";
+    const final = await actApproval(tx, ctx, run, c.comment, returned);
+    await tx.query(
+      "UPDATE purchase_orders SET status=$2,version=version+1 WHERE id=$1",
+      [po.id, returned ? "Draft" : final ? "Issued" : "Pending approval"],
+    );
+    return { id: po.id };
+  }
   const active = (
     await tx.query(
       "SELECT a.* FROM purchase_order_bill_lines a JOIN bills b ON b.id=a.bill_id WHERE a.purchase_order_id=$1 AND b.status<>'Voided'",
@@ -195,6 +233,26 @@ export async function executePurchaseOrder(tx: SQL, ctx: Context, c: Row) {
     )
   ).rows;
   if (c.action === "purchase-order.status") {
+    // Pending reviews may only be returned through the audited workflow action.
+    if (po.status === "Pending approval")
+      throw new Problem(
+        409,
+        "Return this order through its approval workflow first.",
+      );
+    if (
+      c.status === "Issued" &&
+      po.status === "Draft" &&
+      (
+        await tx.query(
+          "SELECT id FROM approval_rules WHERE entity_id=$1 AND kind='purchase-order'",
+          [po.entity_id],
+        )
+      ).rows.length
+    )
+      throw new Problem(
+        409,
+        "Submit this order and complete its approvals before issuing.",
+      );
     const allowed =
       c.status === "Issued"
         ? ["Draft", "Closed"].includes(po.status)

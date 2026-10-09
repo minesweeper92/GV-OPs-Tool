@@ -1,4 +1,5 @@
 import { hasCapability, type PermissionSubject } from "./permissions.ts";
+import { workflowProgress, type ApprovalRun } from "./approval-workflows.ts";
 
 // "finance" means anyone who may post to the books (finance or an
 // administrator); "admin" means an administrator only.
@@ -16,6 +17,7 @@ export interface BillApprovalPolicy {
   bill_approval_tiers?: ApprovalTier[] | null;
 }
 export interface ReviewableBill {
+  workflow?: ApprovalRun | null;
   approval_policy?:
     | (BillApprovalPolicy & {
         bill_approval_version: number;
@@ -100,6 +102,16 @@ export function billReviewDecision(
   steps?: number;
   waitingFor?: ApprovalRole;
 } {
+  if (bill.workflow) {
+    const p = workflowProgress(bill.workflow, userId);
+    return {
+      allowed: hasCapability(subject, "books.post") && p.allowed,
+      step: p.at + 1,
+      steps: bill.workflow.steps.length,
+      action: p.final ? "approve" : "review",
+      reason: `${p.step?.label || "Review complete"}: ${p.remaining.map((x) => x.name).join(", ") || "no outstanding reviewers"}. ${p.final ? "Final approval posts to the books." : "No posting until every required step is complete."}`,
+    };
+  }
   policy = bill.approval_policy || policy;
   if (!policy)
     return {

@@ -25,6 +25,14 @@ const fields = {
   delivery_address: z.string().max(4000).default(""),
 };
 export const purchaseOrderCommands = [
+  ...(["submit", "review", "return"] as const).map((verb) =>
+    z.strictObject({
+      action: z.literal(`purchase-order.${verb}`),
+      id,
+      version: z.number().int().positive(),
+      comment: z.string().trim().max(2000).default(""),
+    }),
+  ),
   z.strictObject({
     action: z.literal("purchase-order.create"),
     entity_id: id,
@@ -87,7 +95,7 @@ export interface PurchaseOrder {
   notes: string;
   terms: string;
   delivery_address: string;
-  status: "Draft" | "Issued" | "Closed" | "Cancelled";
+  status: "Draft" | "Pending approval" | "Issued" | "Closed" | "Cancelled";
   version: number;
   allocations: {
     bill_id: string;

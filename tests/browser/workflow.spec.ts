@@ -483,6 +483,10 @@ test("historical financial reports, drill-down, export and responsive ageing", a
     page.getByRole("row").filter({ hasText: "Studio Supplies Test" }),
   ).toContainText("PKR 68,000.00");
   await page.getByLabel("Report", { exact: true }).selectOption("balance");
+  // Drill into the entity that owns the fixture, not whichever entity sorts last.
+  await page.getByLabel("Legal entity view", { exact: true }).selectOption({
+    label: "PVT · Sample Private Limited",
+  });
   await page
     .getByRole("button", { name: "2000 · Accounts payable", exact: true })
     .filter({ visible: true })
@@ -491,6 +495,9 @@ test("historical financial reports, drill-down, export and responsive ageing", a
   await expect(page.getByRole("dialog")).toContainText("Bill STUDIO-BILL-101");
   await expect(page.getByRole("dialog")).toContainText("PKR -68,000.00");
   await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page
+    .getByLabel("Legal entity view", { exact: true })
+    .selectOption("all");
   await page.getByLabel("Report", { exact: true }).selectOption("cash");
   await expect(
     page.getByText("Net operating cash", { exact: false }),

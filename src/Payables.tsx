@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { hasCapability } from "../shared/permissions";
+import { ApprovalTimeline } from "./ApprovalWorkflows";
 import {
   approvalPlan,
   approvalTiers,
@@ -171,7 +172,7 @@ export function Payables({
         kind === "submit"
           ? `${b.reference} submitted for approval. Nothing posted yet.`
           : kind === "review"
-            ? `First review completed for ${b.reference}. Final approval is still required.`
+            ? `Review recorded for ${b.reference}. Remaining approvals are shown below; nothing posted yet.`
             : `${b.reference} approved and posted to ${b.entity_name}.`,
       );
     } catch (e) {
@@ -343,6 +344,9 @@ export function Payables({
             <ApprovalSteps bill={b} data={data} />
           </>
         )}
+        {b.status !== "Pending approval" && b.workflow && (
+          <ApprovalTimeline run={b.workflow} />
+        )}
         {data.vendorCredits
           .filter(
             (v) =>
@@ -396,6 +400,14 @@ export function Payables({
                 </button>
               </>
             ) : null}
+            {b.status === "Pending approval" &&
+              b.workflow &&
+              me.user.role === "admin" &&
+              !review(b).allowed && (
+                <button onClick={() => setEditor({ kind: "return", bill: b })}>
+                  Return to draft
+                </button>
+              )}
             {b.status === "Pending approval" && review(b).allowed ? (
               <>
                 <button onClick={() => setEditor({ kind: "return", bill: b })}>
@@ -432,6 +444,7 @@ export function Payables({
             {canPost &&
             b.status !== "Voided" &&
             b.status !== "Paid" &&
+            !(b.workflow && b.status === "Pending approval") &&
             BigInt(b.paid_minor) === 0n &&
             BigInt(b.credited_minor) === 0n &&
             !data.vendorCredits.some(
@@ -696,6 +709,11 @@ export function Payables({
           {canManageRules && (
             <button onClick={() => setRulesOpen(true)}>Approval rules</button>
           )}
+          {canManageRules && (
+            <a href="#approval-workflows">
+              Shared bill & purchase-order workflows
+            </a>
+          )}
           <Field label="Search bills">
             <input
               type="search"
@@ -827,6 +845,7 @@ const roleNames: Record<ApprovalRole, string> = {
 };
 // Shows every step of the current submission so the next reviewer is clear.
 function ApprovalSteps({ bill, data }: { bill: Bill; data: Data }) {
+  if (bill.workflow) return <ApprovalTimeline run={bill.workflow} />;
   const policy =
     bill.approval_policy || data.entities.find((e) => e.id === bill.entity_id);
   if (!policy) return null;

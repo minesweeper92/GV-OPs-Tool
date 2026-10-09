@@ -199,6 +199,7 @@ export function Field({
   );
 }
 export function ErrorBox({ error }: { error: string }) {
+  if (!error) return null;
   return (
     <p className="error" role="alert">
       {error}

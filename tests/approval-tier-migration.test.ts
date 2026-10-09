@@ -15,22 +15,22 @@ test("tier migration keeps pending first reviews and legacy policies intact", as
   const list = (
     await readFile(new URL("../server/db.ts", import.meta.url), "utf8")
   ).match(/"\.\/(schema\.sql|migrations\/\d{3}_[\w-]+\.sql)"/g)!;
-  const before = list
-    .map((p) => p.slice(3, -1))
-    .filter((p) => !/migrations\/0(3[4-9]|[4-9]\d)/.test(p));
+  const before = [...new Set(list.map((p) => p.slice(3, -1)))].filter(
+    (p) => !/migrations\/0(3[4-9]|[4-9]\d)/.test(p),
+  );
   assert.equal(before.at(-1), "migrations/033_entity_grants.sql");
   await db.transaction(async (tx) => {
     await tx.query(
       "CREATE TABLE migrations(version integer PRIMARY KEY,checksum text NOT NULL)",
     );
-    for (const [index, path] of before.entries()) {
+    for (const path of before) {
       const sql = await readFile(
         new URL(`../server/${path}`, import.meta.url),
         "utf8",
       );
       await tx.exec!(sql);
       await tx.query("INSERT INTO migrations VALUES($1,$2)", [
-        index + 1,
+        path === "schema.sql" ? 1 : Number(path.match(/\/(\d+)_/)![1]),
         createHash("sha256").update(sql).digest("hex"),
       ]);
     }
