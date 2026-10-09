@@ -721,7 +721,7 @@ test("real UI lead-to-cash, project expense, persisted ledger and audit", async 
     .getByRole("button", { name: "Record payment", exact: true })
     .click();
   await page.getByLabel("Money received (PKR)").fill("110000");
-  await page.getByLabel("Withholding deducted (PKR)").fill("8000");
+  await page.getByLabel("Income tax withheld (PKR)").fill("8000");
   await page.getByLabel("Bank or receipt reference").fill("UI-BANK-001");
   await page
     .getByRole("dialog")
