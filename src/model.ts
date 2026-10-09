@@ -168,6 +168,7 @@ export interface Payment {
   payment_date: string;
   amount_minor: string;
   wht_minor: string;
+  sales_tax_withheld_minor?: string;
   reference: string;
   fx_micros: string;
 }

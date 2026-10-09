@@ -44,7 +44,7 @@ export async function ageing(
     SELECT i.id AS doc,j.id AS journal,CASE WHEN j.source_type='invoice' THEN i.total_minor ELSE -i.total_minor END AS amount
     FROM invoices i JOIN journals j ON j.source_id=i.id AND j.source_type IN ('invoice','invoice_void')
     UNION ALL
-    SELECT p.invoice_id,j.id,-(p.amount_minor+p.wht_minor) FROM payments p JOIN journals j ON j.source_id=p.id AND j.source_type='payment'
+    SELECT p.invoice_id,j.id,-(p.amount_minor+p.wht_minor+p.sales_tax_withheld_minor) FROM payments p JOIN journals j ON j.source_id=p.id AND j.source_type='payment'
     UNION ALL SELECT a.invoice_id,j.id,-a.amount_minor FROM credit_applications a JOIN journals j ON j.source_id=a.id AND j.source_type='credit-application'
     UNION ALL SELECT a.invoice_id,j.id,a.amount_minor FROM application_reversals r JOIN credit_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='credit-application-reversal'`
       : `SELECT b.id AS doc,j.id AS journal,CASE WHEN j.source_type='bill' THEN b.total_minor ELSE -b.total_minor END AS amount
@@ -130,9 +130,39 @@ export async function financialReports(
   );
   const opening = sum(cashAccounts, (a) => BigInt(a.opening)),
     closing = sum(cashAccounts, (a) => BigInt(a.closing));
+  // Bank transactions classify by where the money went: owner equity is a
+  // financing flow; other balance-sheet accounts they settle (salary tax,
+  // partner reimbursements) are operating working capital.
+  const bankTransactionLines = (
+    await tx.query(
+      `SELECT j.id,a.code,a.type,(l.debit_minor-l.credit_minor)::text AS net
+    FROM journals j JOIN journal_lines l ON l.journal_id=j.id
+    JOIN accounts a ON a.entity_id=l.entity_id AND a.code=l.account_code
+    WHERE j.source_type='bank-transaction' AND j.entity_id=ANY($1::uuid[]) AND j.posted_on BETWEEN $2 AND $3`,
+      [ids, filter.from, filter.to],
+    )
+  ).rows;
+  const bankTransactionEquity = new Map<string, bigint>(),
+    bankTransactionWorking = new Set<string>();
+  for (const l of bankTransactionLines) {
+    if (l.type === "Equity")
+      bankTransactionEquity.set(
+        l.id,
+        (bankTransactionEquity.get(l.id) || 0n) + BigInt(l.net),
+      );
+    else if (
+      ["Asset", "Liability"].includes(l.type) &&
+      l.code !== "1000" &&
+      !l.code.startsWith("10B") &&
+      l.code !== "1500"
+    )
+      bankTransactionWorking.add(l.code);
+  }
   const workingCodes = [
+    ...bankTransactionWorking,
     "1100",
     "1200",
+    "1210",
     "1300",
     "1400",
     "2000",
@@ -227,6 +257,8 @@ export async function financialReports(
     ) {
       if (!allocationMap.has(j.source_id)) unsupported.add(j.source_type);
       else investing += allocationMap.get(j.source_id)!;
+    } else if (j.source_type === "bank-transaction") {
+      financing -= bankTransactionEquity.get(j.id) || 0n;
     } else if (
       ![
         "payment",

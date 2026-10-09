@@ -1602,7 +1602,8 @@ export default function App() {
               "Date",
               "Entity",
               "Amount received",
-              "Withholding",
+              "Income tax withheld",
+              "Sales tax withheld",
             ]}
           >
             {data.payments
@@ -1621,6 +1622,9 @@ export default function App() {
                       {money(p.amount_minor, i?.currency)}
                     </td>
                     <td className="num">{money(p.wht_minor, i?.currency)}</td>
+                    <td className="num">
+                      {money(p.sales_tax_withheld_minor || "0", i?.currency)}
+                    </td>
                   </tr>
                 );
               })}
