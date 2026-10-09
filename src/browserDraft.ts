@@ -100,6 +100,81 @@ export const invoiceDraftKey = (
   id: string,
 ) => `gv-invoice-draft-v1:${scope}:${kind}:${id || "new"}`;
 
+export const bankTransactionDraft = z.object({
+  savedAt: z.number(),
+  direction: z.enum(["in", "out"]),
+  amount: z.string().max(100),
+  description: z.string().max(200),
+  date: z.string().max(20),
+  reference: z.string().max(200),
+  hint: z.string().max(200),
+  requestKey: z.uuid(),
+  lines: z
+    .array(
+      z.object({
+        account_code: z.string().max(100),
+        debit: z.string().max(100),
+        credit: z.string().max(100),
+        memo: z.string().max(400),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+
+export const bankTransactionDraftKey = (
+  organization: string,
+  user: string,
+  entity: string,
+  bank: string,
+) => `gv-bank-transaction-draft-v1:${organization}:${user}:${entity}:${bank}`;
+
+export const journalEntryDraft = bankTransactionDraft
+  .pick({
+    savedAt: true,
+    lines: true,
+    requestKey: true,
+    date: true,
+    reference: true,
+  })
+  .extend({
+    memo: z.string().max(200),
+    autoReverseOn: z.string().max(20),
+    scheduleName: z.string().max(200),
+    frequency: z.enum(["weekly", "monthly", "quarterly", "yearly"]),
+    timezone: z.enum(["Asia/Karachi", "UTC"]),
+    endDate: z.string().max(20),
+    occurrences: z.string().max(100),
+    reverseNextMonth: z.boolean(),
+  });
+export const journalEntryDraftKey = (
+  organization: string,
+  user: string,
+  entity: string,
+  focus: "manual" | "schedules",
+) => `gv-journal-entry-draft-v1:${organization}:${user}:${entity}:${focus}`;
+
+export const accountEntryDraft = z
+  .object({
+    savedAt: z.number(),
+    mode: z.enum(["create", "edit"]),
+    selected: z
+      .object({ code: z.string().max(8), version: z.number().int() })
+      .nullable(),
+    code: z.string().max(8),
+    name: z.string().max(200),
+    type: z.enum(["Asset", "Liability", "Equity", "Income", "Expense"]),
+    parent: z.string().max(8),
+    description: z.string().max(1000),
+    requestKey: z.uuid(),
+  })
+  .refine((draft) => draft.mode === "create" || draft.selected !== null);
+export const accountEntryDraftKey = (
+  organization: string,
+  user: string,
+  entity: string,
+) => `gv-account-entry-draft-v1:${organization}:${user}:${entity}`;
+
 export function clearBrowserDraft(key: string, storage?: DraftStorage) {
   try {
     (storage ?? window.sessionStorage).removeItem(key);

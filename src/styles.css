@@ -1187,6 +1187,10 @@ tbody tr:hover {
 .manual-journal-form > p {
   margin: 0;
 }
+.manual-journal-form > fieldset {
+  display: grid;
+  gap: 18px;
+}
 .manual-journal-form label {
   display: grid;
   gap: 6px;
@@ -3359,9 +3363,32 @@ details[open] summary {
   gap: 12px;
   min-width: 0;
 }
+.financial-entry-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.financial-entry-fields[hidden] {
+  display: none;
+}
+.bank-review-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px;
+}
+.bank-review-details dt {
+  color: var(--muted);
+}
+.bank-review-details dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
 .allocation-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) minmax(0, 2fr) auto;
+  grid-template-columns:
+    minmax(0, 2fr) repeat(2, minmax(0, 1fr)) minmax(0, 2fr)
+    auto;
   gap: 8px;
   align-items: end;
 }

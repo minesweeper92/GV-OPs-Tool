@@ -59,6 +59,7 @@ import { QuoteComposer } from "./QuoteComposer";
 import { InvoiceComposer } from "./InvoiceComposer";
 import { ManualJournals } from "./ManualJournals";
 import { ChartOfAccounts } from "./ChartOfAccounts";
+import { useNavigationSafety } from "./NavigationSafety";
 const MonthEndClose = lazy(() =>
   import("./MonthEndClose").then((m) => ({ default: m.MonthEndClose })),
 );
@@ -90,21 +91,62 @@ import {
   Timeline,
 } from "./Records";
 function useRoute() {
+  const { canLeave } = useNavigationSafety();
   const currentRoute = () =>
     location.hash.slice(1) ||
     new URLSearchParams(location.search).get("view") ||
     "home";
   const [route, setRoute] = useState(currentRoute);
+  const accepted = useRef({
+    url: location.href,
+    index: Number(history.state?.gvNavigationIndex) || 0,
+  });
+  const restoring = useRef("");
   useEffect(() => {
-    const change = () => setRoute(currentRoute());
+    history.replaceState(
+      { ...history.state, gvNavigationIndex: accepted.current.index },
+      "",
+    );
+    const change = () => {
+      if (restoring.current) {
+        if (location.href === restoring.current) restoring.current = "";
+        return;
+      }
+      if (location.href === accepted.current.url) return;
+      const knownIndex = history.state?.gvNavigationIndex;
+      const index =
+        typeof knownIndex === "number"
+          ? knownIndex
+          : accepted.current.index + 1;
+      if (!canLeave()) {
+        restoring.current = accepted.current.url;
+        // Undo traversal, preserving both Back and Forward history entries.
+        history.go(
+          typeof knownIndex === "number" ? accepted.current.index - index : -1,
+        );
+        return;
+      }
+      history.replaceState({ ...history.state, gvNavigationIndex: index }, "");
+      accepted.current = { url: location.href, index };
+      setRoute(currentRoute());
+    };
     window.addEventListener("hashchange", change);
     window.addEventListener("popstate", change);
     return () => {
       window.removeEventListener("hashchange", change);
       window.removeEventListener("popstate", change);
     };
-  }, []);
-  return route;
+  }, [canLeave]);
+  function navigate(url: string) {
+    const target = new URL(url, location.href).href;
+    if (target === accepted.current.url) return;
+    if (restoring.current || !canLeave()) return;
+    const index = accepted.current.index + 1;
+    history.pushState({ gvNavigationIndex: index }, "", target);
+    accepted.current = { url: target, index };
+    setRoute(currentRoute());
+  }
+  return { route, navigate };
 }
 const groups = [
   { label: "Home", items: [["home", "My day", LayoutDashboard]] },
@@ -295,8 +337,9 @@ function Login({ done }: { done: () => void }) {
   );
 }
 export default function App() {
+  const { canLeave } = useNavigationSafety();
+  const { route, navigate } = useRoute();
   const cache = useQueryClient(),
-    route = useRoute(),
     [view, id] = route.split("/");
   const [entity, setEntity] = useState("all"),
     [search, setSearch] = useState(""),
@@ -1742,7 +1785,9 @@ export default function App() {
                       type="date"
                       aria-label="Report start date"
                       value={from}
-                      onChange={(e) => setFrom(e.target.value)}
+                      onChange={(e) => {
+                        if (canLeave()) setFrom(e.target.value);
+                      }}
                     />
                   </label>
                   <label>
@@ -1751,7 +1796,9 @@ export default function App() {
                       type="date"
                       aria-label="Report end date"
                       value={to}
-                      onChange={(e) => setTo(e.target.value)}
+                      onChange={(e) => {
+                        if (canLeave()) setTo(e.target.value);
+                      }}
                     />
                   </label>
                 </div>
@@ -1761,7 +1808,8 @@ export default function App() {
               ) : reportQuery.data ? (
                 view === "journals" || view === "journal-schedules" ? (
                   <ManualJournals
-                    key={`${entity}-${view}`}
+                    key={`${me.organization.id}-${me.user.id}-${entity}-${view}`}
+                    me={me}
                     entity={data.entities.find((e) => e.id === entity)!}
                     report={reportQuery.data}
                     data={data}
@@ -1773,7 +1821,11 @@ export default function App() {
                   />
                 ) : view === "accounts" ? (
                   <ChartOfAccounts
-                    key={entity}
+                    key={`${me.organization.id}:${me.user.id}:${entity}`}
+                    draftScope={{
+                      organization: me.organization.id,
+                      user: me.user.id,
+                    }}
                     entity={data.entities.find((e) => e.id === entity)!}
                     report={reportQuery.data}
                     canManage={me!.user.role === "admin"}
@@ -2089,10 +2141,7 @@ export default function App() {
                                 !e.altKey
                               ) {
                                 e.preventDefault();
-                                history.pushState(null, "", `/?view=${key}`);
-                                window.dispatchEvent(
-                                  new PopStateEvent("popstate"),
-                                );
+                                navigate(`/?view=${key}`);
                               }
                             }}
                             aria-label={label}
@@ -2152,6 +2201,7 @@ export default function App() {
           <button
             aria-label="Sign out"
             onClick={async () => {
+              if (!canLeave()) return;
               try {
                 await request("logout", "POST", {}, me.csrf);
                 cache.clear();
@@ -2181,7 +2231,9 @@ export default function App() {
             <select
               aria-label="Legal entity view"
               value={entity}
-              onChange={(e) => setEntity(e.target.value)}
+              onChange={(e) => {
+                if (canLeave()) setEntity(e.target.value);
+              }}
             >
               <option value="all">All legal entities</option>
               {data?.entities.map((e) => (

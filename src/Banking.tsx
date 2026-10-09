@@ -676,8 +676,13 @@ export function Banking({
       )}
       {modal === "transaction" && d ? (
         <BankTransactionEditor
+          key={`${me.organization.id}-${me.user.id}-${d.account.id}`}
           me={me}
           account={d.account}
+          entityName={
+            data.entities.find((e) => e.id === d.account.entity_id)?.name ||
+            d.account.entity_id
+          }
           close={() => setModal(null)}
           save={(c) => run(c)}
         />
