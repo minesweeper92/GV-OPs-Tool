@@ -56,7 +56,7 @@ export async function recurringSnapshot(tx: SQL, ctx: Context) {
   };
 }
 async function runProfile(tx: SQL, ctx: Context, p: Row, now: Date) {
-  ctx = await currentMemberContext(tx, ctx);
+  ctx = await currentMemberContext(tx, ctx, p.entity_id);
   if (!hasCapability(ctx, "books.post"))
     throw new Problem(
       403,

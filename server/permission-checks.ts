@@ -9,10 +9,11 @@ import type { Row, SQL } from "./db.ts";
 export async function currentMemberContext(
   tx: SQL,
   ctx: Context,
+  entityId?: string,
 ): Promise<Context> {
   const m = (
     await tx.query(
-      `SELECT m.role,m.role_profile_id,p.base_role,p.capabilities FROM memberships m
+      `SELECT m.role,m.role_profile_id,m.entity_ids,p.base_role,p.capabilities FROM memberships m
     LEFT JOIN role_profiles p ON p.tenant_id=m.tenant_id AND p.id=m.role_profile_id
     WHERE m.tenant_id=$1 AND m.user_id=$2 AND m.active`,
       [ctx.tenantId, ctx.userId],
@@ -23,9 +24,15 @@ export async function currentMemberContext(
       403,
       "Active finance access is required to generate drafts.",
     );
+  if (entityId && m.entity_ids && !m.entity_ids.includes(entityId))
+    throw new Problem(
+      403,
+      "The schedule creator no longer has access to this legal entity.",
+    );
   return {
     ...ctx,
     role: m.role,
+    entityIds: m.entity_ids ?? null,
     capabilities: grantedCapabilities({
       role: m.role,
       capabilities: m.role_profile_id ? m.capabilities : undefined,
