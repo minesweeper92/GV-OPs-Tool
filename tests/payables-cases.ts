@@ -1277,6 +1277,291 @@ export async function verifyPayables(t: TestContext, db: Database) {
     },
   );
   await t.test(
+    "tiered rules route larger bills through ordered steps with distinct approvers and fresh rounds",
+    async () => {
+      const second = uuid();
+      await db.transaction(async (tx) => {
+        await tx.query("INSERT INTO users VALUES($1,$2,$3)", [
+          second,
+          "second finance",
+          `${second}@example.test`,
+        ]);
+        await tx.query(
+          "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'finance')",
+          [tenant, second],
+        );
+      });
+      const checker = await login(second);
+      const profile = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      const rules = {
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: profile.bill_approval_version,
+        finance_limit: null,
+        separate_approver: true,
+        tiers: [
+          { from: "0", steps: [{ role: "finance" }] },
+          {
+            from: "1000",
+            steps: [
+              { role: "finance" },
+              { role: "finance" },
+              { role: "admin" },
+            ],
+          },
+        ],
+      };
+      await accountant.command(rules, 403);
+      await owner.command(
+        { ...rules, tiers: [{ from: "5", steps: [{ role: "finance" }] }] },
+        400,
+      );
+      await owner.command(rules);
+      const stored = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      assert.equal(stored.bill_approval_tiers[1].from_minor, "100000");
+      // Below the threshold one finance approval posts, as before.
+      const small = await owner.command(
+        draft({
+          lines: [
+            {
+              description: "Small",
+              quantity: "1",
+              price: "500",
+              tax: "0",
+              account_code: "5200",
+            },
+          ],
+        }),
+      );
+      await advance(small.id, "submit");
+      await accountant.command({
+        action: "bill.approve",
+        id: small.id,
+        version: 2,
+      });
+      assert.equal((await bill(small.id)).status, "Open");
+
+      const big = await owner.command(draft());
+      await advance(big.id, "submit");
+      // Final approval cannot skip the earlier steps; the creator cannot act.
+      await accountant.command(
+        { action: "bill.approve", id: big.id, version: 2 },
+        409,
+      );
+      await owner.command(
+        { action: "bill.review", id: big.id, version: 2 },
+        403,
+      );
+      await accountant.command({
+        action: "bill.review",
+        id: big.id,
+        version: 2,
+      });
+      await accountant.command(
+        { action: "bill.review", id: big.id, version: 3 },
+        403,
+      );
+      assert.deepEqual((await bill(big.id)).approvals, [finance]);
+      assert.equal((await ledger("bill", big.id)).length, 0);
+      // Return starts a new round; earlier approvals stay as history only.
+      // Only someone who may act on the current step can return the bill.
+      await checker.command({
+        action: "bill.return",
+        id: big.id,
+        version: 3,
+        reason: "Wrong cost centre",
+      });
+      await advance(big.id, "submit");
+      const resubmitted = await bill(big.id);
+      assert.equal(resubmitted.approval_round, 2);
+      assert.deepEqual(resubmitted.approvals, []);
+      await checker.command({
+        action: "bill.review",
+        id: big.id,
+        version: resubmitted.version,
+      });
+      await accountant.command({
+        action: "bill.review",
+        id: big.id,
+        version: resubmitted.version + 1,
+      });
+      // An administrator who created the bill still cannot approve it.
+      await owner.command(
+        {
+          action: "bill.approve",
+          id: big.id,
+          version: resubmitted.version + 2,
+        },
+        403,
+      );
+      await owner.command({
+        ...rules,
+        version: stored.bill_approval_version,
+        separate_approver: false,
+      });
+      // A settings edit cannot waive creator separation mid-submission.
+      await owner.command(
+        {
+          action: "bill.approve",
+          id: big.id,
+          version: resubmitted.version + 2,
+        },
+        403,
+      );
+      const finalAdmin = uuid();
+      await db.query("INSERT INTO users VALUES($1,'Final reviewer',$2)", [
+        finalAdmin,
+        `${finalAdmin}@example.test`,
+      ]);
+      await db.query(
+        "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'admin')",
+        [tenant, finalAdmin],
+      );
+      const director = await login(finalAdmin);
+      await director.command({
+        action: "bill.approve",
+        id: big.id,
+        version: resubmitted.version + 2,
+      });
+      assert.equal((await bill(big.id)).status, "Open");
+      assert.ok((await ledger("bill", big.id)).length > 0);
+      const history = await accountant.history(big.id);
+      assert.deepEqual(
+        history.events
+          .filter((e: any) =>
+            ["bill.review", "bill.approve"].includes(e.action),
+          )
+          .map((e: any) => [e.action, e.details.step, e.details.steps])
+          .reverse(),
+        [
+          ["bill.review", 1, 3],
+          ["bill.review", 1, 3],
+          ["bill.review", 2, 3],
+          ["bill.approve", 3, 3],
+        ],
+      );
+      await inTenant(db, tenant, async (tx) => {
+        assert.equal(
+          (
+            await tx.query(
+              "SELECT count(*)::int AS n FROM bill_approvals WHERE bill_id=$1",
+              [big.id],
+            )
+          ).rows[0].n,
+          4,
+        );
+        await assert.rejects(
+          tx.query("UPDATE bill_approvals SET step=9 WHERE bill_id=$1", [
+            big.id,
+          ]),
+        );
+      });
+      const latest = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      await owner.command({
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: latest.bill_approval_version,
+        finance_limit: null,
+        separate_approver: false,
+        two_stage: false,
+        tiers: null,
+      });
+    },
+  );
+  await t.test(
+    "submitted bills retain approval rules, while returned drafts adopt new rules only on resubmission",
+    async () => {
+      const current = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      const rules = {
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: current.bill_approval_version,
+        finance_limit: null,
+        separate_approver: false,
+        tiers: [{ from: "0", steps: [{ role: "finance" }, { role: "admin" }] }],
+      };
+      await owner.command(rules);
+      const made = await accountant.command(draft());
+      await advance(made.id, "submit");
+      const submitted = await bill(made.id);
+      assert.equal(submitted.approval_policy.source, "submission");
+      const version = submitted.approval_policy.bill_approval_version;
+      await owner.command({
+        ...rules,
+        version,
+        tiers: [{ from: "0", steps: [{ role: "finance" }] }],
+      });
+      await accountant.command(
+        { action: "bill.approve", id: made.id, version: submitted.version },
+        409,
+      );
+      await accountant.command({
+        action: "bill.review",
+        id: made.id,
+        version: submitted.version,
+      });
+      assert.equal((await bill(made.id)).status, "Pending approval");
+      assert.equal(
+        (await ledger("bill", made.id)).length,
+        0,
+        "rule reduction must not skip final review",
+      );
+      assert.deepEqual(
+        (await bill(made.id)).approval_policy,
+        submitted.approval_policy,
+      );
+      await assert.rejects(
+        () =>
+          inTenant(db, tenant, (tx) =>
+            tx.query(
+              "UPDATE bills SET approval_policy='{}',version=version+1 WHERE id=$1",
+              [made.id],
+            ),
+          ),
+        /Saved approval rules/,
+      );
+      await advance(made.id, "return", {
+        reason: "Re-submit under updated rules",
+      });
+      await advance(made.id, "submit");
+      const resubmitted = await bill(made.id);
+      assert.equal(resubmitted.approval_round, 2);
+      assert.equal(
+        resubmitted.approval_policy.bill_approval_version,
+        version + 1,
+      );
+      assert.equal(
+        resubmitted.approval_policy.bill_approval_tiers[0].steps.length,
+        1,
+      );
+      assert.deepEqual(resubmitted.approvals, []);
+      await accountant.command({
+        action: "bill.approve",
+        id: made.id,
+        version: resubmitted.version,
+      });
+      assert.equal((await bill(made.id)).status, "Open");
+      assert.ok((await ledger("bill", made.id)).length > 0);
+      const last = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      await owner.command({
+        ...rules,
+        version: last.bill_approval_version,
+        tiers: null,
+        two_stage: false,
+      });
+    },
+  );
+  await t.test(
     "bill approval history paginates independently of the global feed and enforces role, tenant and cursor boundaries",
     async () => {
       const made = await accountant.command(draft());

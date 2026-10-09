@@ -3309,3 +3309,28 @@ details[open] summary {
 .role-permissions .check input {
   width: auto;
 }
+.approval-tier {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: grid;
+  gap: 8px;
+}
+.approval-tier ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+.approval-tier li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.approval-steps {
+  display: grid;
+  gap: 6px;
+  padding-left: 20px;
+}

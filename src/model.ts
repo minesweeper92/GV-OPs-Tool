@@ -1,4 +1,5 @@
 export interface Entity {
+  bill_approval_tiers: import("../shared/bill-approval").ApprovalTier[] | null;
   bill_two_stage: boolean;
   bill_finance_limit_minor: string | null;
   bill_separate_approver: boolean;
@@ -317,6 +318,10 @@ export interface Data {
   events: Event[];
 }
 export interface Bill {
+  approval_round: number;
+  approval_policy: import("../shared/bill-approval").ReviewableBill["approval_policy"];
+  // Approvers of the current submission, in step order.
+  approvals: string[];
   reviewed_by: string | null;
   reviewed_at: string | null;
   created_by: string;

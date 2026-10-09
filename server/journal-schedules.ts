@@ -72,6 +72,12 @@ export async function journalScheduleSnapshot(tx: SQL, ctx: Context) {
   };
 }
 async function generate(tx: SQL, ctx: Context, profile: Row, now: Date) {
+  ctx = await currentMemberContext(tx, ctx, profile.entity_id);
+  if (!hasCapability(ctx, "books.post"))
+    throw new Problem(
+      403,
+      "Active finance access is required to generate journal drafts.",
+    );
   const membership = (
     await tx.query(
       "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2 AND active",

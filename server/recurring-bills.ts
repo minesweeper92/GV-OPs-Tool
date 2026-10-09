@@ -189,6 +189,12 @@ export async function executeBillSchedule(
     let next = p.next_index,
       generated = 0;
     if (c.action === "bill-schedule.run") {
+      ctx = await currentMemberContext(tx, ctx, p.entity_id);
+      if (!hasCapability(ctx, "books.post"))
+        throw new Problem(
+          403,
+          "Active finance access is required to generate bills.",
+        );
       if (p.status !== "Active")
         throw new Problem(409, "Resume the schedule before generating bills.");
       const membership = (

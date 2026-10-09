@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { ContactCompanyField } from "./ContactCompanyField";
 import { hasCapability } from "../shared/permissions";
-import { billReviewDecision } from "../shared/bill-approval";
+import {
+  approvalPlan,
+  approvalTiers,
+  billReviewDecision,
+  tierProblem,
+  type ApprovalRole,
+} from "../shared/bill-approval";
+import { minor } from "../shared/money";
 import { useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import {
   Heading,
@@ -328,10 +335,13 @@ export function Payables({
           subtitle={`${b.vendor_name} · ${b.entity_name}`}
         />
         {b.status === "Pending approval" && (
-          <p role="status" aria-label="Bill review status">
-            {review(b).reason} Nothing is posted until approval.{" "}
-            <a href="#bills">Back to review queue →</a>
-          </p>
+          <>
+            <p role="status" aria-label="Bill review status">
+              {review(b).reason} Nothing is posted until approval.{" "}
+              <a href="#bills">Back to review queue →</a>
+            </p>
+            <ApprovalSteps bill={b} data={data} />
+          </>
         )}
         {data.vendorCredits
           .filter(
@@ -404,7 +414,9 @@ export function Payables({
                   {pendingAction === "review"
                     ? "Completing review…"
                     : review(b).action === "review"
-                      ? "Complete first review"
+                      ? review(b).step === 1
+                        ? "Complete first review"
+                        : `Approve step ${review(b).step} of ${review(b).steps}`
                       : "Approve & post"}
                 </button>
               </>
@@ -809,6 +821,53 @@ export function Payables({
   );
 }
 
+const roleNames: Record<ApprovalRole, string> = {
+  finance: "Finance or administrator",
+  admin: "Administrator",
+};
+// Shows every step of the current submission so the next reviewer is clear.
+function ApprovalSteps({ bill, data }: { bill: Bill; data: Data }) {
+  const policy =
+    bill.approval_policy || data.entities.find((e) => e.id === bill.entity_id);
+  if (!policy) return null;
+  const { steps } = approvalPlan(policy, bill.base_minor),
+    approvals = bill.approvals || [],
+    name = (id: string) =>
+      data.crmMembers.find((m) => m.id === id)?.name || "Former team member";
+  return (
+    <section className="panel" aria-label="Approval steps">
+      <h2>Approval steps</h2>
+      {bill.approval_policy ? (
+        <p className="muted">
+          Saved rules · version {bill.approval_policy.bill_approval_version}
+          {bill.approval_policy.source === "upgrade"
+            ? " · retained at system upgrade"
+            : " · retained on submission"}
+          . Later rule changes do not alter these steps.
+        </p>
+      ) : null}
+      <ol className="approval-steps">
+        {steps.map((step, i) => (
+          <li key={i}>
+            <strong>{roleNames[step.role]}</strong>
+            {" — "}
+            {approvals[i]
+              ? `Approved by ${name(approvals[i])}`
+              : i === approvals.length
+                ? i === steps.length - 1
+                  ? "Waiting · approval posts to the books"
+                  : "Waiting"
+                : "Not started"}
+          </li>
+        ))}
+      </ol>
+      <p className="muted">
+        Each step needs a different person. Returning the bill restarts the
+        steps.
+      </p>
+    </section>
+  );
+}
 function BillApprovalTrail({ bill, me }: { bill: Bill; me: Me }) {
   const history = useInfiniteQuery({
     queryKey: [
@@ -825,6 +884,12 @@ function BillApprovalTrail({ bill, me }: { bill: Bill; me: Me }) {
       ),
     getNextPageParam: (page) => page.nextCursor || undefined,
   });
+  const label = (event: Event) =>
+    event.action === "bill.review" &&
+    typeof event.details.step === "number" &&
+    event.details.step > 1
+      ? `Step ${event.details.step} of ${event.details.steps} approved — not posted`
+      : labels[event.action] || event.action;
   const labels: Record<string, string> = {
     "bill.create": "Draft created",
     "bill.submit": "Submitted for approval",
@@ -855,7 +920,7 @@ function BillApprovalTrail({ bill, me }: { bill: Bill; me: Me }) {
             .flatMap((page) => page.events)
             .map((event) => (
               <li key={event.id}>
-                <strong>{labels[event.action] || event.action}</strong>
+                <strong>{label(event)}</strong>
                 {" · "}
                 {typeof event.details.actorName === "string"
                   ? event.details.actorName
@@ -886,6 +951,7 @@ function BillApprovalTrail({ bill, me }: { bill: Bill; me: Me }) {
   );
 }
 
+type TierDraft = { from: string; steps: ApprovalRole[] };
 function BillApprovalRules({
   data,
   entity,
@@ -901,20 +967,55 @@ function BillApprovalRules({
     entity === "all" ? data.entities[0]?.id || "" : entity,
   );
   const policy = data.entities.find((e) => e.id === selected);
+  const draftFrom = (id: string): TierDraft[] => {
+    const p = data.entities.find((e) => e.id === id);
+    return p
+      ? approvalTiers(p).map((t) => ({
+          from: decimal(t.from_minor),
+          steps: t.steps.map((s) => s.role),
+        }))
+      : [];
+  };
+  const [tiers, setTiers] = useState(() => draftFrom(selected));
+  const [separate, setSeparate] = useState(!!policy?.bill_separate_approver);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const change = (next: TierDraft[]) => {
+    setTiers(next);
+    setDirty(true);
+  };
+  const setTier = (i: number, tier: TierDraft) =>
+    change(tiers.map((t, j) => (j === i ? tier : t)));
+  let problem: string | null = null;
+  try {
+    problem = tierProblem(
+      tiers.map((t) => ({
+        from_minor: String(minor(t.from || "0")),
+        steps: t.steps.map((role) => ({ role })),
+      })),
+    );
+  } catch {
+    problem = "Use amounts with at most two decimals.";
+  }
   return (
     <Drawer title="Bill approval rules" close={close} dirty={dirty}>
       <p>
-        Rules apply to future review actions, including bills already pending.
-        All bills still require submission before posting.
+        Choose who approves a bill, by its PKR amount including tax. Steps run
+        in order, each by a different person, and only the last step posts to
+        the books. New rules apply when a draft is submitted. Pending bills keep
+        their saved rules; return a bill to draft and resubmit to use new rules.
       </p>
       <Field label="Legal entity">
         <select
           value={selected}
           disabled={dirty || busy}
-          onChange={(e) => setSelected(e.target.value)}
+          onChange={(e) => {
+            const p = data.entities.find((x) => x.id === e.target.value);
+            setSelected(e.target.value);
+            setTiers(draftFrom(e.target.value));
+            setSeparate(!!p?.bill_separate_approver);
+          }}
         >
           {data.entities.map((e) => (
             <option key={e.id} value={e.id}>
@@ -926,10 +1027,9 @@ function BillApprovalRules({
       {policy && (
         <form
           key={selected}
-          onChange={() => setDirty(true)}
           onSubmit={async (e) => {
             e.preventDefault();
-            const f = new FormData(e.currentTarget);
+            if (problem) return setError(problem);
             setBusy(true);
             setError("");
             try {
@@ -938,9 +1038,14 @@ function BillApprovalRules({
                 entity_id: selected,
                 version: policy.bill_approval_version,
                 finance_limit:
-                  f.get("finance") === "on" ? String(f.get("limit")) : null,
-                separate_approver: f.get("separate") === "on",
-                two_stage: f.get("two_stage") === "on",
+                  policy.bill_finance_limit_minor === null
+                    ? null
+                    : decimal(policy.bill_finance_limit_minor),
+                separate_approver: separate,
+                tiers: tiers.map((t) => ({
+                  from: t.from || "0",
+                  steps: t.steps.map((role) => ({ role })),
+                })),
               });
               close();
             } catch (err) {
@@ -950,61 +1055,119 @@ function BillApprovalRules({
             }
           }}
         >
-          <Field label="Finance approval">
-            <label>
-              <input
-                type="checkbox"
-                name="finance"
-                defaultChecked={policy.bill_finance_limit_minor !== null}
-              />{" "}
-              Allow finance to approve within the limit below
-            </label>
-          </Field>
-          <Field label="Finance approval limit (PKR)">
-            <input
-              name="limit"
-              type="number"
-              min="0"
-              step="0.01"
-              defaultValue={decimal(policy.bill_finance_limit_minor || "0")}
-            />
-          </Field>
-          <p>
-            The limit includes tax and uses the bill's recorded PKR exchange
-            rate. Above the limit, an administrator must review.
-          </p>
+          {tiers.map((tier, i) => (
+            <fieldset
+              key={i}
+              className="approval-tier"
+              aria-label={`Tier ${i + 1}`}
+            >
+              <legend>
+                {i === 0
+                  ? "All bills"
+                  : `Tier ${i + 1}: bills from PKR ${tier.from || "…"}`}
+              </legend>
+              {i > 0 ? (
+                <Field label={`Tier ${i + 1} starts at (PKR)`}>
+                  <input
+                    inputMode="decimal"
+                    value={tier.from}
+                    onChange={(e) =>
+                      setTier(i, { ...tier, from: e.target.value })
+                    }
+                  />
+                </Field>
+              ) : null}
+              <ol>
+                {tier.steps.map((role, j) => (
+                  <li key={j}>
+                    <Field label={`Tier ${i + 1} step ${j + 1} approver`}>
+                      <select
+                        value={role}
+                        onChange={(e) =>
+                          setTier(i, {
+                            ...tier,
+                            steps: tier.steps.map((r, k) =>
+                              k === j ? (e.target.value as ApprovalRole) : r,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="finance">
+                          Finance or administrator
+                        </option>
+                        <option value="admin">Administrator only</option>
+                      </select>
+                    </Field>
+                    {tier.steps.length > 1 ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove tier ${i + 1} step ${j + 1}`}
+                        onClick={() =>
+                          setTier(i, {
+                            ...tier,
+                            steps: tier.steps.filter((_, k) => k !== j),
+                          })
+                        }
+                      >
+                        Remove step
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+              <div className="row-actions">
+                {tier.steps.length < 4 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTier(i, { ...tier, steps: [...tier.steps, "admin"] })
+                    }
+                  >
+                    Add step to tier {i + 1}
+                  </button>
+                ) : null}
+                {i > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => change(tiers.filter((_, j) => j !== i))}
+                  >
+                    Remove tier {i + 1}
+                  </button>
+                ) : null}
+              </div>
+            </fieldset>
+          ))}
+          {tiers.length < 5 ? (
+            <button
+              type="button"
+              onClick={() =>
+                change([...tiers, { from: "", steps: ["finance", "admin"] }])
+              }
+            >
+              Add amount tier
+            </button>
+          ) : null}
           <Field label="Separate reviewer">
             <label>
               <input
                 type="checkbox"
-                name="separate"
-                defaultChecked={policy.bill_separate_approver}
+                checked={separate}
+                onChange={(e) => {
+                  setSeparate(e.target.checked);
+                  setDirty(true);
+                }}
               />{" "}
               Bill creators cannot approve their own bills
             </label>
           </Field>
-          <Field label="Two-stage approval">
-            <label>
-              <input
-                type="checkbox"
-                name="two_stage"
-                defaultChecked={policy.bill_two_stage}
-              />{" "}
-              Require first review then final administrator approval
-            </label>
-          </Field>
-          <p>
-            First review can be completed by finance or an administrator. A
-            different administrator must approve and post afterward, regardless
-            of the finance limit. Enable only when those reviewers are
-            available.
+          <p className="muted">
+            Add steps only when enough different people are available. A bill
+            waiting on a step nobody can complete can still be returned by
+            someone allowed to act on that step.
           </p>
-          <p>
-            Enable separate review only when another authorized person is
-            available. Administrators are also subject to this rule.
-          </p>
+          {problem && dirty ? <p role="alert">{problem}</p> : null}
           {error && <ErrorBox error={error} />}
-          <button className="primary" disabled={busy}>
+          <button className="primary" disabled={busy || !!problem}>
             {busy ? "Saving…" : "Save approval rules"}
           </button>
         </form>
