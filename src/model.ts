@@ -319,6 +319,7 @@ export interface Data {
 }
 export interface Bill {
   approval_round: number;
+  approval_policy: import("../shared/bill-approval").ReviewableBill["approval_policy"];
   // Approvers of the current submission, in step order.
   approvals: string[];
   reviewed_by: string | null;

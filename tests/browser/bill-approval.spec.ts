@@ -215,7 +215,7 @@ test("tiered rules show each approval step and who acts next", async ({
   }
 });
 
-test("review queues explain self-review restrictions and update when policy changes", async ({
+test("review queues retain submitted self-review restrictions when policy changes", async ({
   page,
 }) => {
   await page.goto("/");
@@ -267,7 +267,6 @@ test("review queues explain self-review restrictions and update when policy chan
     request_key: randomUUID(),
     notes: "",
   });
-  await command({ action: "bill.submit", id: bill.id, version: 1 });
   await command({
     action: "bill.approval-policy",
     entity_id: entity.id,
@@ -275,6 +274,7 @@ test("review queues explain self-review restrictions and update when policy chan
     finance_limit: null,
     separate_approver: true,
   });
+  await command({ action: "bill.submit", id: bill.id, version: 1 });
   await page.goto("/?view=bills");
   await page.getByLabel("Search bills", { exact: true }).fill(reference);
   await page
@@ -316,11 +316,17 @@ test("review queues explain self-review restrictions and update when policy chan
   await page.getByRole("button", { name: /^Ready for my review/ }).click();
   await expect(
     page.getByRole("link", { name: reference, exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: /^Waiting for another reviewer/ })
+    .click();
   await page.getByRole("link", { name: reference, exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Approve & post", exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("status", { name: "Bill review status" }),
+  ).toContainText("A different person must review this bill");
 });
 
 test("two-stage review passes from finance to a different administrator before posting", async ({
@@ -384,6 +390,18 @@ test("two-stage review passes from finance to a different administrator before p
     notes: "",
   });
   await command({ action: "bill.submit", id: bill.id, version: 1 });
+  // Settings changes must not remove review steps from a submitted bill.
+  const retained = await (await page.request.get("/api/data")).json();
+  const retainedPolicy = retained.entities.find((e: any) => e.id === entity.id);
+  await command({
+    action: "bill.approval-policy",
+    entity_id: entity.id,
+    version: retainedPolicy.bill_approval_version,
+    finance_limit: "100000",
+    separate_approver: false,
+    two_stage: false,
+    tiers: [{ from: "0", steps: [{ role: "finance" }] }],
+  });
   const accounts = await (await page.request.get("/api/demo-accounts")).json();
   const finance = accounts.find(
     (a: any) => a.tenant_id === owner.organization.id && a.role === "finance",
@@ -400,6 +418,9 @@ test("two-stage review passes from finance to a different administrator before p
     await page.goto(`/?view=bill/${bill.id}`);
   };
   await login(finance.user_id);
+  await expect(
+    page.getByRole("region", { name: "Approval steps" }),
+  ).toContainText("Later rule changes do not alter these steps.");
   await page
     .getByRole("button", { name: "Complete first review", exact: true })
     .click();
@@ -477,5 +498,6 @@ test("two-stage review passes from finance to a different administrator before p
     finance_limit: null,
     separate_approver: false,
     two_stage: false,
+    tiers: null,
   });
 });

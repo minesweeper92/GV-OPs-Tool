@@ -1403,7 +1403,26 @@ export async function verifyPayables(t: TestContext, db: Database) {
         version: stored.bill_approval_version,
         separate_approver: false,
       });
-      await owner.command({
+      // A settings edit cannot waive creator separation mid-submission.
+      await owner.command(
+        {
+          action: "bill.approve",
+          id: big.id,
+          version: resubmitted.version + 2,
+        },
+        403,
+      );
+      const finalAdmin = uuid();
+      await db.query("INSERT INTO users VALUES($1,'Final reviewer',$2)", [
+        finalAdmin,
+        `${finalAdmin}@example.test`,
+      ]);
+      await db.query(
+        "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'admin')",
+        [tenant, finalAdmin],
+      );
+      const director = await login(finalAdmin);
+      await director.command({
         action: "bill.approve",
         id: big.id,
         version: resubmitted.version + 2,
@@ -1452,6 +1471,93 @@ export async function verifyPayables(t: TestContext, db: Database) {
         separate_approver: false,
         two_stage: false,
         tiers: null,
+      });
+    },
+  );
+  await t.test(
+    "submitted bills retain approval rules, while returned drafts adopt new rules only on resubmission",
+    async () => {
+      const current = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      const rules = {
+        action: "bill.approval-policy",
+        entity_id: entity,
+        version: current.bill_approval_version,
+        finance_limit: null,
+        separate_approver: false,
+        tiers: [{ from: "0", steps: [{ role: "finance" }, { role: "admin" }] }],
+      };
+      await owner.command(rules);
+      const made = await accountant.command(draft());
+      await advance(made.id, "submit");
+      const submitted = await bill(made.id);
+      assert.equal(submitted.approval_policy.source, "submission");
+      const version = submitted.approval_policy.bill_approval_version;
+      await owner.command({
+        ...rules,
+        version,
+        tiers: [{ from: "0", steps: [{ role: "finance" }] }],
+      });
+      await accountant.command(
+        { action: "bill.approve", id: made.id, version: submitted.version },
+        409,
+      );
+      await accountant.command({
+        action: "bill.review",
+        id: made.id,
+        version: submitted.version,
+      });
+      assert.equal((await bill(made.id)).status, "Pending approval");
+      assert.equal(
+        (await ledger("bill", made.id)).length,
+        0,
+        "rule reduction must not skip final review",
+      );
+      assert.deepEqual(
+        (await bill(made.id)).approval_policy,
+        submitted.approval_policy,
+      );
+      await assert.rejects(
+        () =>
+          inTenant(db, tenant, (tx) =>
+            tx.query(
+              "UPDATE bills SET approval_policy='{}',version=version+1 WHERE id=$1",
+              [made.id],
+            ),
+          ),
+        /Saved approval rules/,
+      );
+      await advance(made.id, "return", {
+        reason: "Re-submit under updated rules",
+      });
+      await advance(made.id, "submit");
+      const resubmitted = await bill(made.id);
+      assert.equal(resubmitted.approval_round, 2);
+      assert.equal(
+        resubmitted.approval_policy.bill_approval_version,
+        version + 1,
+      );
+      assert.equal(
+        resubmitted.approval_policy.bill_approval_tiers[0].steps.length,
+        1,
+      );
+      assert.deepEqual(resubmitted.approvals, []);
+      await accountant.command({
+        action: "bill.approve",
+        id: made.id,
+        version: resubmitted.version,
+      });
+      assert.equal((await bill(made.id)).status, "Open");
+      assert.ok((await ledger("bill", made.id)).length > 0);
+      const last = (await owner.get()).entities.find(
+        (e: any) => e.id === entity,
+      );
+      await owner.command({
+        ...rules,
+        version: last.bill_approval_version,
+        tiers: null,
+        two_stage: false,
       });
     },
   );

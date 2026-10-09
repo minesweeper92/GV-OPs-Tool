@@ -80,13 +80,16 @@ test("tier migration keeps pending first reviews and legacy policies intact", as
   await inTenant(db, tenant, async (tx) => {
     const rows = (
       await tx.query(
-        "SELECT id,approval_round,version FROM bills ORDER BY status",
+        "SELECT id,approval_round,version,approval_policy FROM bills ORDER BY status",
       )
     ).rows;
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
     assert.equal(byId[pending].approval_round, 1);
     assert.equal(byId[pending].version, 2, "backfill must not bump versions");
     assert.equal(byId[draft].approval_round, 0);
+    assert.equal(byId[draft].approval_policy, null);
+    assert.equal(byId[pending].approval_policy.source, "upgrade");
+    assert.equal(byId[pending].approval_policy.bill_two_stage, true);
     const approvals = (
       await tx.query(
         "SELECT round,step,approver_id FROM bill_approvals WHERE bill_id=$1",

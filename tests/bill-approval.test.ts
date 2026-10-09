@@ -7,6 +7,54 @@ import {
   tierProblem,
 } from "../shared/bill-approval.ts";
 
+test("saved submission policy controls review despite later rule or separation changes", () => {
+  const original = {
+    bill_finance_limit_minor: null,
+    bill_separate_approver: true,
+    bill_two_stage: true,
+    bill_approval_version: 7,
+    source: "submission" as const,
+  };
+  const changed = {
+    bill_finance_limit_minor: "999999",
+    bill_separate_approver: false,
+    bill_two_stage: false,
+  };
+  const bill = {
+    created_by: "maker",
+    base_minor: "10000",
+    approval_policy: original,
+    approvals: [] as string[],
+  };
+  assert.equal(
+    billReviewDecision("finance", "reviewer", bill, changed).action,
+    "review",
+  );
+  assert.equal(
+    billReviewDecision("admin", "maker", bill, changed).allowed,
+    false,
+  );
+  const reviewed = { ...bill, approvals: ["reviewer"] };
+  assert.equal(
+    billReviewDecision("finance", "another", reviewed, changed).allowed,
+    false,
+  );
+  assert.equal(
+    billReviewDecision("admin", "director", reviewed, undefined).action,
+    "approve",
+  );
+  assert.equal(
+    billReviewDecision(
+      { role: "admin", capabilities: [] },
+      "director",
+      reviewed,
+      changed,
+    ).allowed,
+    false,
+    "saved rules never freeze or restore a user's revoked permissions",
+  );
+});
+
 test("bill review policy uses exact base-currency limits and never bypasses separation", () => {
   const bill = { created_by: "creator", base_minor: "9007199254740993" };
   const policy = {

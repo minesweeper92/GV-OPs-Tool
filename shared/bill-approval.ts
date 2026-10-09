@@ -16,6 +16,12 @@ export interface BillApprovalPolicy {
   bill_approval_tiers?: ApprovalTier[] | null;
 }
 export interface ReviewableBill {
+  approval_policy?:
+    | (BillApprovalPolicy & {
+        bill_approval_version: number;
+        source: "submission" | "upgrade";
+      })
+    | null;
   created_by: string;
   base_minor: string;
   reviewed_by?: string | null;
@@ -94,6 +100,7 @@ export function billReviewDecision(
   steps?: number;
   waitingFor?: ApprovalRole;
 } {
+  policy = bill.approval_policy || policy;
   if (!policy)
     return {
       allowed: false,
@@ -104,7 +111,7 @@ export function billReviewDecision(
   const { index, steps } = approvalPlan(policy, bill.base_minor);
   const approvals =
     bill.approvals ?? (bill.reviewed_by ? [bill.reviewed_by] : []);
-  // If rules shrank after earlier approvals, the last step remains to do.
+  // Submitted bills use their retained policy; later settings never shrink it.
   const at = Math.min(approvals.length, steps.length - 1),
     n = steps.length,
     next = steps[at],

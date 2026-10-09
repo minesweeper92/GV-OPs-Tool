@@ -827,7 +827,8 @@ const roleNames: Record<ApprovalRole, string> = {
 };
 // Shows every step of the current submission so the next reviewer is clear.
 function ApprovalSteps({ bill, data }: { bill: Bill; data: Data }) {
-  const policy = data.entities.find((e) => e.id === bill.entity_id);
+  const policy =
+    bill.approval_policy || data.entities.find((e) => e.id === bill.entity_id);
   if (!policy) return null;
   const { steps } = approvalPlan(policy, bill.base_minor),
     approvals = bill.approvals || [],
@@ -836,6 +837,15 @@ function ApprovalSteps({ bill, data }: { bill: Bill; data: Data }) {
   return (
     <section className="panel" aria-label="Approval steps">
       <h2>Approval steps</h2>
+      {bill.approval_policy ? (
+        <p className="muted">
+          Saved rules · version {bill.approval_policy.bill_approval_version}
+          {bill.approval_policy.source === "upgrade"
+            ? " · retained at system upgrade"
+            : " · retained on submission"}
+          . Later rule changes do not alter these steps.
+        </p>
+      ) : null}
       <ol className="approval-steps">
         {steps.map((step, i) => (
           <li key={i}>
@@ -993,8 +1003,8 @@ function BillApprovalRules({
       <p>
         Choose who approves a bill, by its PKR amount including tax. Steps run
         in order, each by a different person, and only the last step posts to
-        the books. Rules apply to future review actions, including bills already
-        pending.
+        the books. New rules apply when a draft is submitted. Pending bills keep
+        their saved rules; return a bill to draft and resubmit to use new rules.
       </p>
       <Field label="Legal entity">
         <select

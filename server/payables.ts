@@ -214,7 +214,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
         twoStage,
         tiers,
       },
-      text: `Changed bill approval rules for ${entity.name}. Rules apply to subsequent review actions, including pending bills.`,
+      text: `Changed bill approval rules for ${entity.name}. Rules apply to new submissions; pending bills retain their saved review rules.`,
     });
     return { id: entity.id };
   }
@@ -596,6 +596,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
       );
     let approvals: string[] = [],
       stage: { step?: number; steps?: number } = {};
+    let submissionPolicy: Row | undefined;
     if (["bill.approve", "bill.return", "bill.review"].includes(c.action)) {
       const policy = await get(tx, "entities", b.entity_id);
       approvals = (
@@ -611,6 +612,7 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
           created_by: b.created_by,
           base_minor: b.base_minor,
           approvals,
+          approval_policy: b.approval_policy,
         },
         {
           bill_finance_limit_minor: policy.bill_finance_limit_minor,
@@ -633,9 +635,19 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     if (c.action === "bill.submit") {
       if (b.status !== "Draft")
         throw new Problem(409, "Only a draft can be submitted.");
+      const policy = await get(tx, "entities", b.entity_id);
+      const snapshot = {
+        bill_finance_limit_minor: policy.bill_finance_limit_minor,
+        bill_separate_approver: policy.bill_separate_approver,
+        bill_two_stage: policy.bill_two_stage,
+        bill_approval_tiers: policy.bill_approval_tiers,
+        bill_approval_version: policy.bill_approval_version,
+        source: "submission",
+      };
+      submissionPolicy = snapshot;
       await tx.query(
-        "UPDATE bills SET status='Pending approval',approval_round=approval_round+1,version=version+1 WHERE id=$1",
-        [b.id],
+        "UPDATE bills SET status='Pending approval',approval_round=approval_round+1,approval_policy=$2,version=version+1 WHERE id=$1",
+        [b.id, JSON.stringify(snapshot)],
       );
     } else if (c.action === "bill.review") {
       if (b.status !== "Pending approval")
@@ -729,6 +741,9 @@ export async function executePayable(tx: SQL, ctx: Context, c: Row) {
     } else throw new Problem(400, "Unknown bill action.");
     await audit(tx, ctx, b.id, c.action, {
       actorName: ctx.name || null,
+      ...(submissionPolicy
+        ? { approvalPolicy: submissionPolicy, round: b.approval_round + 1 }
+        : {}),
       ...(c.action === "bill.review" || c.action === "bill.approve"
         ? stage
         : {}),
