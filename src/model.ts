@@ -169,6 +169,7 @@ export interface Payment {
   payment_date: string;
   amount_minor: string;
   wht_minor: string;
+  sales_tax_withheld_minor?: string;
   reference: string;
   fx_micros: string;
 }
@@ -284,6 +285,23 @@ export interface Data {
   bankAccounts: import("../shared/banking").BankAccount[];
   bills: Bill[];
   purchaseOrders: import("../shared/purchase-orders").PurchaseOrder[];
+  approvalRules: {
+    id: string;
+    entity_id: string;
+    kind: "bill" | "purchase-order";
+    version: number;
+    separate: boolean;
+    steps: import("../shared/approval-workflows").WorkflowStep[];
+  }[];
+  approvalRuns: import("../shared/approval-workflows").ApprovalRun[];
+  approvalPeople: {
+    id: string;
+    name: string;
+    role: string;
+    role_profile_id: string | null;
+    entity_ids: string[] | null;
+  }[];
+  approvalProfiles: { id: string; name: string }[];
   vendorPayments: VendorPayment[];
   vendorPaymentBatches: VendorPaymentBatch[];
   vendorCredits: import("../shared/vendor-credits").VendorCredit[];
@@ -318,6 +336,7 @@ export interface Data {
   events: Event[];
 }
 export interface Bill {
+  workflow?: import("../shared/approval-workflows").ApprovalRun | null;
   approval_round: number;
   approval_policy: import("../shared/bill-approval").ReviewableBill["approval_policy"];
   // Approvers of the current submission, in step order.

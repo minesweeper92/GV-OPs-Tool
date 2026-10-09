@@ -39,6 +39,7 @@ import {
 import { crmSnapshot, executeCrm } from "./crm.ts";
 import { executeProfile } from "./profiles.ts";
 import { executeDocument } from "./documents.ts";
+import { approvalSnapshot, saveApprovalRules } from "./approval-workflows.ts";
 import {
   attachmentRequestLimit,
   decodeAttachment,
@@ -475,6 +476,7 @@ export function createApp(
       ctx,
       async (tx) => ({
         ...(await snapshot(tx, ctx)),
+        ...(await approvalSnapshot(tx, ctx)),
         ...(await payableSnapshot(tx, ctx)),
         ...(await purchaseOrderSnapshot(tx, ctx)),
         bankAccounts: await bankAccounts(tx, ctx),
@@ -603,54 +605,58 @@ export function createApp(
       ctx = access.context(sessions.get(req)!);
     requireCommandPermission(ctx, c);
     return inTenant(db, ctx, (tx) =>
-      c.action.startsWith("document.")
-        ? executeDocument(tx, ctx, c)
-        : c.action === "period.transition"
-          ? transitionPeriod(tx, ctx, c)
-          : c.action === "period.legacy-unlock"
-            ? unlockLegacyPeriod(tx, ctx, c)
-            : c.action === "account.create" ||
-                c.action === "account.update" ||
-                c.action === "account.set-active"
-              ? executeAccount(tx, ctx, c)
-              : c.action === "manual-journal.create" ||
-                  c.action === "manual-journal.reverse"
-                ? executeManualJournal(tx, ctx, c)
-                : c.action === "journal-schedule.create" ||
-                    c.action === "journal-schedule.status" ||
-                    c.action === "journal-schedule.run" ||
-                    c.action === "journal-schedule.skip" ||
-                    c.action === "journal-schedule.post" ||
-                    c.action === "journal-reversal.post"
-                  ? executeJournalSchedule(tx, ctx, c)
-                  : c.action.startsWith("profile.")
-                    ? executeProfile(tx, ctx, c)
-                    : c.action.startsWith("crm.")
-                      ? executeCrm(tx, ctx, c)
-                      : c.action.startsWith("recurring.")
-                        ? executeRecurring(tx, ctx, c)
-                        : c.action.startsWith("bill-schedule.")
-                          ? executeBillSchedule(tx, ctx, c)
-                          : c.action.startsWith("credit.")
-                            ? executeCredit(tx, ctx, c)
-                            : c.action.startsWith("vendor-credit.")
-                              ? executeVendorCredit(tx, ctx, c)
-                              : c.action.startsWith("vendor-advance.")
-                                ? executeVendorAdvance(tx, ctx, c)
-                                : c.action.startsWith("project.") ||
-                                    [
-                                      "invoice.cancel",
-                                      "invoice.recognise",
-                                    ].includes(c.action)
-                                  ? executeProject(tx, ctx, c)
-                                  : c.action.startsWith("bank.")
-                                    ? executeBank(tx, ctx, c)
-                                    : c.action.startsWith("purchase-order.")
-                                      ? executePurchaseOrder(tx, ctx, c)
-                                      : c.action.startsWith("bill.") ||
-                                          c.action.startsWith("vendor-payment.")
-                                        ? executePayable(tx, ctx, c)
-                                        : execute(tx, ctx, c),
+      c.action === "approval.rules"
+        ? saveApprovalRules(tx, ctx, c)
+        : c.action.startsWith("document.")
+          ? executeDocument(tx, ctx, c)
+          : c.action === "period.transition"
+            ? transitionPeriod(tx, ctx, c)
+            : c.action === "period.legacy-unlock"
+              ? unlockLegacyPeriod(tx, ctx, c)
+              : c.action === "account.create" ||
+                  c.action === "account.update" ||
+                  c.action === "account.set-active"
+                ? executeAccount(tx, ctx, c)
+                : c.action === "manual-journal.create" ||
+                    c.action === "manual-journal.reverse"
+                  ? executeManualJournal(tx, ctx, c)
+                  : c.action === "journal-schedule.create" ||
+                      c.action === "journal-schedule.status" ||
+                      c.action === "journal-schedule.run" ||
+                      c.action === "journal-schedule.skip" ||
+                      c.action === "journal-schedule.post" ||
+                      c.action === "journal-reversal.post"
+                    ? executeJournalSchedule(tx, ctx, c)
+                    : c.action.startsWith("profile.")
+                      ? executeProfile(tx, ctx, c)
+                      : c.action.startsWith("crm.")
+                        ? executeCrm(tx, ctx, c)
+                        : c.action.startsWith("recurring.")
+                          ? executeRecurring(tx, ctx, c)
+                          : c.action.startsWith("bill-schedule.")
+                            ? executeBillSchedule(tx, ctx, c)
+                            : c.action.startsWith("credit.")
+                              ? executeCredit(tx, ctx, c)
+                              : c.action.startsWith("vendor-credit.")
+                                ? executeVendorCredit(tx, ctx, c)
+                                : c.action.startsWith("vendor-advance.")
+                                  ? executeVendorAdvance(tx, ctx, c)
+                                  : c.action.startsWith("project.") ||
+                                      [
+                                        "invoice.cancel",
+                                        "invoice.recognise",
+                                      ].includes(c.action)
+                                    ? executeProject(tx, ctx, c)
+                                    : c.action.startsWith("bank.")
+                                      ? executeBank(tx, ctx, c)
+                                      : c.action.startsWith("purchase-order.")
+                                        ? executePurchaseOrder(tx, ctx, c)
+                                        : c.action.startsWith("bill.") ||
+                                            c.action.startsWith(
+                                              "vendor-payment.",
+                                            )
+                                          ? executePayable(tx, ctx, c)
+                                          : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

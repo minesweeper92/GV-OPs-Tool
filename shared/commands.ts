@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workflowCommands } from "./approval-workflows.ts";
 import { bankCommands } from "./banking.ts";
 import { projectCommands } from "./projects.ts";
 import { billingCommands } from "./billing.ts";
@@ -36,6 +37,7 @@ const line = z
   })
   .strict();
 export const commandSchema = z.discriminatedUnion("action", [
+  ...workflowCommands,
   z.strictObject({
     action: z.literal("bill.approval-policy"),
     entity_id: id,
@@ -119,11 +121,13 @@ export const commandSchema = z.discriminatedUnion("action", [
   }),
   z.strictObject({
     action: z.literal("bill.review"),
+    comment: optional,
     id,
     version: z.number().int().positive(),
   }),
   z.strictObject({
     action: z.literal("bill.approve"),
+    comment: optional,
     id,
     version: z.number().int().positive(),
   }),
@@ -284,6 +288,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     date,
     amount: money,
     wht: money,
+    sales_tax_withheld: money.default("0"),
     fx,
     reference: text,
     request_key: id,

@@ -2,8 +2,14 @@ import { randomUUID as uuid } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { SQL, Row } from "./db.ts";
 import { Problem, post, audit, type Context } from "./domain.ts";
-import { signedMinor, type BankDetail } from "../shared/banking.ts";
+import {
+  bankTransactionProblem,
+  signedMinor,
+  type BankDetail,
+} from "../shared/banking.ts";
 import { hasCapability } from "../shared/permissions.ts";
+import { checkFreeFormAccounts } from "./manual-journals.ts";
+import { minor } from "../shared/money.ts";
 
 function finance(ctx: Context) {
   if (!hasCapability(ctx, "books.post"))
@@ -36,7 +42,7 @@ async function entityLock(tx: SQL, id: string) {
 }
 async function retry(
   tx: SQL,
-  table: "bank_accounts" | "bank_statements",
+  table: "bank_accounts" | "bank_statements" | "bank_transactions",
   c: Row,
 ) {
   const r = (
@@ -195,6 +201,7 @@ export async function executeBank(tx: SQL, ctx: Context, c: Row) {
     });
     return { id };
   }
+  if (c.action === "bank.transaction") return bankTransaction(tx, ctx, c);
   let s: Row | undefined;
   let target = c.bank_id;
   if (c.action === "bank.match") {
@@ -440,4 +447,79 @@ export async function executeBank(tx: SQL, ctx: Context, c: Row) {
     return { id: s!.id };
   }
   throw new Problem(400, "Unknown bank action.");
+}
+
+// Money in or out with no sales or purchase document behind it: drawings,
+// capital, salaries net of withheld tax, partner reimbursements, interest.
+async function bankTransaction(tx: SQL, ctx: Context, c: Row) {
+  const problem = bankTransactionProblem(c as never);
+  if (problem) throw new Problem(400, problem);
+  const b = await bank(tx, c.bank_id);
+  const prior = await retry(tx, "bank_transactions", c);
+  if (prior) return prior;
+  const e = await entityLock(tx, b.entity_id);
+  if (e.lock_date && c.date <= String(e.lock_date).slice(0, 10))
+    throw new Problem(
+      409,
+      "This accounting period is locked. Choose a later date.",
+    );
+  if (c.date < String(b.opening_on).slice(0, 10))
+    throw new Problem(
+      400,
+      "The date cannot precede the account's opening date.",
+    );
+  if (c.date <= String(b.last_reconciled_on).slice(0, 10))
+    throw new Problem(
+      409,
+      "This bank period is reconciled. Choose a later date.",
+    );
+  await checkFreeFormAccounts(tx, b.entity_id, [
+    ...new Set<string>(c.lines.map((l: Row) => l.account_code)),
+  ]);
+  const id = uuid(),
+    total = minor(c.amount);
+  await tx.query(
+    "INSERT INTO bank_transactions(id,tenant_id,entity_id,bank_id,direction,amount_minor,transaction_date,description,reference,lines,created_by,request_key,request_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+    [
+      id,
+      ctx.tenantId,
+      b.entity_id,
+      b.id,
+      c.direction,
+      String(total),
+      c.date,
+      c.description,
+      c.reference,
+      JSON.stringify(c.lines),
+      ctx.userId,
+      c.request_key,
+      JSON.stringify(c),
+    ],
+  );
+  await post(
+    tx,
+    ctx,
+    b.entity_id,
+    c.date,
+    "bank-transaction",
+    id,
+    c.description,
+    [
+      c.direction === "in"
+        ? { account: b.account_code, debit: total, memo: c.reference }
+        : { account: b.account_code, credit: total, memo: c.reference },
+      ...c.lines.map((l: Row) => ({
+        account: l.account_code,
+        debit: minor(l.debit),
+        credit: minor(l.credit),
+        memo: l.memo,
+      })),
+    ],
+    { reference: c.reference },
+  );
+  await audit(tx, ctx, id, c.action, {
+    actorName: ctx.name || null,
+    text: `${c.direction === "in" ? "Received" : "Paid out"} PKR ${c.amount} ${c.direction === "in" ? "into" : "from"} ${b.name}: ${c.description}.`,
+  });
+  return { id };
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { ApprovalWorkflows } from "./ApprovalWorkflows";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -169,6 +170,7 @@ const groups = [
     items: [
       ["settings", "Entities & settings", Settings],
       ["team", "Team & access", Users],
+      ["approval-workflows", "Approval workflows", Settings],
       ["activity", "Activity log", BookOpen],
     ],
   },
@@ -250,8 +252,9 @@ function Login({ done }: { done: () => void }) {
         From relationship to revenue.
       </h1>
       <p className="login-copy">
-        Explore the new CRM and books workflow with fictional records. Your
-        existing app and business data are separate.
+        Local development access to CRM and books. Records belong to the
+        selected organization; local sign-in does not mean its data is
+        fictional.
       </p>
       <h2>Choose a sample role</h2>
       {q.data?.map((a) => (
@@ -549,6 +552,17 @@ export default function App() {
         <ErrorBox
           error={dataQuery.error?.message || "Unable to load records."}
         />
+      );
+    if (view === "approval-workflows")
+      return me!.user.role === "admin" ? (
+        <ApprovalWorkflows
+          data={data}
+          me={me!}
+          entity={entity}
+          setEntity={setEntity}
+        />
+      ) : (
+        denied()
       );
     if (view === "tasks")
       return <Tasks data={data} me={me!} open={crmEdit} entity={entity} />;
@@ -1602,7 +1616,8 @@ export default function App() {
               "Date",
               "Entity",
               "Amount received",
-              "Withholding",
+              "Income tax withheld",
+              "Sales tax withheld",
             ]}
           >
             {data.payments
@@ -1621,6 +1636,9 @@ export default function App() {
                       {money(p.amount_minor, i?.currency)}
                     </td>
                     <td className="num">{money(p.wht_minor, i?.currency)}</td>
+                    <td className="num">
+                      {money(p.sales_tax_withheld_minor || "0", i?.currency)}
+                    </td>
                   </tr>
                 );
               })}
@@ -1869,13 +1887,13 @@ export default function App() {
               This fresh development build covers the first connected
               CRM-to-ledger workflow.{" "}
               {me!.mode === "sample"
-                ? "It uses fictional data and local sample roles."
+                ? "It uses loopback-only development sign-in. Treat organization records as potentially real."
                 : "This identity-enabled environment requires release validation before live financial use."}
             </p>
             <p>
-              Custom roles, per-entity grants, bank connections, email delivery,
-              tax compliance, subscriptions and the remaining requirements are
-              not enabled yet.{" "}
+              Custom roles and per-entity access are available in Team & access.
+              Live bank connections, email delivery, tax-compliance validation,
+              subscriptions and production release gates remain outstanding.{" "}
               {me!.mode === "sample"
                 ? "Secure sign-in is available only on a separately configured identity-enabled server; this preview uses sample accounts."
                 : "Sign-in is handled by the configured identity provider."}
@@ -1974,12 +1992,12 @@ export default function App() {
         className={`sidebar ${menu ? "open" : ""}`}
         aria-label="Workspace navigation"
       >
-        <a className="brand" href="#home">
+        <a className="brand" href="/?view=home">
           <Brand />
         </a>
         <a
           className="organization-name organization-link"
-          href="#organizations"
+          href="/?view=organizations"
           aria-label={`Switch organization: ${me.organization.name}`}
         >
           {me.organization.name}
@@ -2175,7 +2193,9 @@ export default function App() {
           </label>
           <div className="topbar-actions">
             <span className="sample-label">
-              {me.mode === "sample" ? "Sample workspace" : "Secure workspace"}
+              {me.mode === "sample"
+                ? "Local development access"
+                : "Identity-enabled access"}
             </span>
             <button
               aria-label="Toggle theme"
@@ -2273,7 +2293,7 @@ export default function App() {
         </main>
         <footer className="app-footer">
           {me.mode === "sample"
-            ? "Fresh build · Synthetic data only · No live integrations"
+            ? "Local development build · Not a production release"
             : "GV Workspace · CRM and books"}
         </footer>
       </div>

@@ -12,7 +12,7 @@ const port = Number(process.env.PORT || 4320);
 const db = await openDatabase(process.env.GV_SAMPLE_DB || ".data/workspace");
 await migrate(db);
 await bindEnvironment(db, "sample");
-await seed(db);
+if (process.env.GV_SKIP_SEED !== "1") await seed(db);
 const app = createApp(db, `http://127.0.0.1:${port}`);
 // Prefer port + 1 for live reload, but fall back to any free port so another
 // dev server (or a browser-test run) on a neighbouring port cannot collide.
@@ -46,7 +46,10 @@ app.setNotFoundHandler((req, res) => {
 });
 await app.listen({ host: "127.0.0.1", port });
 console.log(`Fresh GV Workspace sample build: http://127.0.0.1:${port}`);
-const stopRecurring = startRecurringWorker(db);
+const stopRecurring =
+  process.env.GV_DISABLE_RECURRING_WORKER === "1"
+    ? async () => {}
+    : startRecurringWorker(db);
 async function close() {
   await stopRecurring();
   await app.close();
