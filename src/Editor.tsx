@@ -1077,7 +1077,13 @@ export function Editor({
               )}
               {text(
                 "wht",
-                `Withholding deducted (${invoice?.currency})`,
+                `Income tax withheld (${invoice?.currency})`,
+                true,
+                "0",
+              )}
+              {text(
+                "sales_tax_withheld",
+                `Sales tax withheld by customer (${invoice?.currency})`,
                 true,
                 "0",
               )}
@@ -1089,9 +1095,11 @@ export function Editor({
               )}
               {text("reference", "Bank or receipt reference")}
               <p className="posting-notice">
-                Records cash and withholding receivable, reduces the invoice
-                balance, and posts any exchange gain or loss. No bank transfer
-                is initiated.
+                Records cash, income tax withheld and any sales tax the customer
+                withheld (each in its own receivable), reduces the invoice
+                balance, and posts any exchange gain or loss. Money received can
+                be zero when the customer withheld the whole amount. No bank
+                transfer is initiated.
               </p>
             </>
           ) : null}

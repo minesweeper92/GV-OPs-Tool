@@ -53,12 +53,13 @@ async function priorRequest(
   return { id: prior.id as string };
 }
 
-export async function validatedManualLines(
+// Free-form postings may only touch ordinary accounts: sub-ledgers own the
+// control accounts, and bank accounts move through the banking workflows.
+export async function checkFreeFormAccounts(
   tx: SQL,
   entityId: string,
-  input: JournalLine[],
+  accountCodes: string[],
 ) {
-  const accountCodes = [...new Set(input.map((line) => line.account_code))];
   if (accountCodes.some((code) => controlledAccountCodes.has(code)))
     throw new Problem(
       400,
@@ -80,6 +81,15 @@ export async function validatedManualLines(
   ).rows;
   if (accounts.length !== accountCodes.length)
     throw new Problem(400, "Choose accounts from this legal entity's chart.");
+}
+
+export async function validatedManualLines(
+  tx: SQL,
+  entityId: string,
+  input: JournalLine[],
+) {
+  const accountCodes = [...new Set(input.map((line) => line.account_code))];
+  await checkFreeFormAccounts(tx, entityId, accountCodes);
   const lines = input.map((line) => ({
     account: line.account_code,
     debit: minor(line.debit),

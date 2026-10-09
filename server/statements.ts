@@ -15,7 +15,7 @@ const customerEffects = `
  CASE WHEN j.source_type='invoice' THEN i.total_minor ELSE -i.total_minor END AS amount,
  0::bigint AS credit_delta,'invoice' AS link_type,i.id AS link_id
  FROM invoices i JOIN journals j ON j.source_id=i.id AND j.source_type IN ('invoice','invoice_void')
- UNION ALL SELECT 'payment',p.id,i.company_id,i.currency,coalesce(nullif(p.reference,''),i.number),-(p.amount_minor+p.wht_minor),0,'invoice',i.id
+ UNION ALL SELECT 'payment',p.id,i.company_id,i.currency,coalesce(nullif(p.reference,''),i.number),-(p.amount_minor+p.wht_minor+p.sales_tax_withheld_minor),0,'invoice',i.id
  FROM payments p JOIN invoices i ON i.id=p.invoice_id
  UNION ALL SELECT 'credit',c.id,i.company_id,i.currency,c.number,-c.total_minor,c.total_minor,'credit',c.id
  FROM credit_notes c JOIN invoices i ON i.id=c.invoice_id

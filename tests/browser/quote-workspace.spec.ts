@@ -305,7 +305,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
     .getByRole("button", { name: "Record payment", exact: true })
     .click();
   await page.getByLabel("Money received (PKR)").fill("52500");
-  await page.getByLabel("Withholding deducted (PKR)").fill("0");
+  await page.getByLabel("Income tax withheld (PKR)").fill("0");
   await page.getByLabel("Bank or receipt reference").fill("PORTAL-BANK-001");
   await page
     .getByRole("dialog")

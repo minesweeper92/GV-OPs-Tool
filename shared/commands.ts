@@ -284,6 +284,7 @@ export const commandSchema = z.discriminatedUnion("action", [
     date,
     amount: money,
     wht: money,
+    sales_tax_withheld: money.default("0"),
     fx,
     reference: text,
     request_key: id,

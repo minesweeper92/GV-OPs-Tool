@@ -16,6 +16,7 @@ import {
   type BankDetail,
 } from "../shared/banking";
 import { hasCapability } from "../shared/permissions";
+import { BankTransactionEditor } from "./BankTransactions";
 
 export function BankSelect({
   data,
@@ -292,7 +293,9 @@ export function Banking({
 }) {
   const cache = useQueryClient(),
     [statementId, setStatementId] = useState("");
-  const [modal, setModal] = useState<"account" | "import" | null>(null),
+  const [modal, setModal] = useState<
+      "account" | "import" | "transaction" | null
+    >(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [selectedBank, setSelectedBank] = useState<string[]>([]),
@@ -443,6 +446,14 @@ export function Banking({
                     onClick={() => setModal("import")}
                   >
                     Import statement
+                  </button>
+                ) : null}
+                {canPost ? (
+                  <button
+                    disabled={busy}
+                    onClick={() => setModal("transaction")}
+                  >
+                    Record transaction
                   </button>
                 ) : null}
               </div>
@@ -663,7 +674,15 @@ export function Banking({
           ) : null}
         </>
       )}
-      {modal ? (
+      {modal === "transaction" && d ? (
+        <BankTransactionEditor
+          me={me}
+          account={d.account}
+          close={() => setModal(null)}
+          save={(c) => run(c)}
+        />
+      ) : null}
+      {modal && modal !== "transaction" ? (
         <BankEditor
           mode={modal}
           data={data}

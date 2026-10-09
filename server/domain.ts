@@ -39,6 +39,7 @@ export const chart = [
   ["1000", "Bank and cash", "Asset"],
   ["1100", "Accounts receivable", "Asset"],
   ["1200", "Withholding tax receivable", "Asset"],
+  ["1210", "Sales tax withheld by customers", "Asset"],
   ["1300", "Input tax receivable", "Asset"],
   ["1350", "Vendor credits receivable", "Asset"],
   ["1400", "Prepayments", "Asset"],
@@ -781,6 +782,8 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           prior.invoice_id !== c.invoice_id ||
           BigInt(prior.amount_minor) !== minor(c.amount) ||
           BigInt(prior.wht_minor) !== minor(c.wht) ||
+          BigInt(prior.sales_tax_withheld_minor) !==
+            minor(c.sales_tax_withheld ?? "0") ||
           BigInt(prior.fx_micros) !== scaled(c.fx, 6) ||
           String(prior.payment_date).slice(0, 10) !== c.date ||
           prior.reference !== c.reference ||
@@ -805,13 +808,15 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         reject(400, "Payment date cannot precede invoice date.");
       const cash = minor(c.amount),
         wht = minor(c.wht),
-        settled = cash + wht,
+        salesTax = minor(c.sales_tax_withheld ?? "0"),
+        settled = cash + wht + salesTax,
         fx = scaled(c.fx, 6),
         total = BigInt(i.total_minor),
         paid = BigInt(i.paid_minor),
         credited = BigInt(i.credited_minor);
       if (
-        cash <= 0n ||
+        cash < 0n ||
+        settled <= 0n ||
         fx <= 0n ||
         (i.currency === "PKR" && fx !== 1_000_000n) ||
         settled > total - paid - credited
@@ -830,9 +835,10 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         );
       const bank = baseAmount(cash, fx),
         tax = baseAmount(wht, fx),
-        gain = bank + tax - ar;
+        salesTaxBase = baseAmount(salesTax, fx),
+        gain = bank + tax + salesTaxBase - ar;
       await tx.query(
-        "INSERT INTO payments(id,tenant_id,entity_id,invoice_id,payment_date,amount_minor,wht_minor,fx_micros,reference,request_key,bank_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+        "INSERT INTO payments(id,tenant_id,entity_id,invoice_id,payment_date,amount_minor,wht_minor,fx_micros,reference,request_key,bank_account_id,sales_tax_withheld_minor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
         [
           id,
           t,
@@ -845,6 +851,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           c.reference,
           c.request_key,
           c.bank_account_id || null,
+          String(salesTax),
         ],
       );
       await post(
@@ -858,6 +865,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         [
           { account: bankCode, debit: bank },
           { account: "1200", debit: tax },
+          { account: "1210", debit: salesTaxBase },
           { account: "1100", credit: ar },
           gain >= 0n
             ? { account: "4100", credit: gain }

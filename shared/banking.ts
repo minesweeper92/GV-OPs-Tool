@@ -17,7 +17,49 @@ const statementLine = z.strictObject({
   reference: z.string().trim().max(200),
   amount: signedAmount,
 });
+const amount = z
+  .string()
+  .regex(
+    /^\d{1,13}(\.\d{1,2})?$/,
+    "Use an amount with at most two decimal places.",
+  );
+const allocation = z.strictObject({
+  account_code: z.string().regex(/^[A-Za-z0-9]{1,12}$/),
+  debit: amount,
+  credit: amount,
+  memo: z.string().trim().max(400),
+});
+// The bank side is implied by the direction; allocations must balance it.
+export function bankTransactionProblem(t: {
+  direction: "in" | "out";
+  amount: string;
+  lines: { debit: string; credit: string }[];
+}) {
+  const total = minor(t.amount);
+  if (total <= 0n) return "Enter an amount greater than zero.";
+  if (t.lines.some((l) => minor(l.debit) > 0n === minor(l.credit) > 0n))
+    return "Each allocation needs either a debit or a credit, not both.";
+  const debit = t.lines.reduce((s, l) => s + minor(l.debit), 0n),
+    credit = t.lines.reduce((s, l) => s + minor(l.credit), 0n);
+  const net = t.direction === "out" ? debit - credit : credit - debit;
+  if (net !== total)
+    return t.direction === "out"
+      ? "Allocations must explain where the money went: debits less credits must equal the amount paid out."
+      : "Allocations must explain where the money came from: credits less debits must equal the amount received.";
+  return null;
+}
 export const bankCommands = [
+  z.strictObject({
+    action: z.literal("bank.transaction"),
+    bank_id: id,
+    date,
+    direction: z.enum(["in", "out"]),
+    amount,
+    description: text,
+    reference: z.string().trim().max(200),
+    lines: z.array(allocation).min(1).max(50),
+    request_key: id,
+  }),
   z.strictObject({
     action: z.literal("bank.create"),
     entity_id: id,
