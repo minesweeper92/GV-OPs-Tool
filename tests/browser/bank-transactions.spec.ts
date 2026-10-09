@@ -245,4 +245,11 @@ test("bank drafts survive close and reload, require fresh review, and retry a lo
   page.once("dialog", (d) => d.dismiss());
   await drawer.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(drawer).toBeVisible();
+  const bankUrl = page.url();
+  page.once("dialog", (d) => d.dismiss());
+  await page.goBack();
+  await expect(page).toHaveURL(bankUrl);
+  await expect(drawer.getByLabel("Description", { exact: true })).toHaveValue(
+    "Unsaved entry",
+  );
 });

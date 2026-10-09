@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLeaveGuard } from "./NavigationSafety";
 import { controlledAccountCodes } from "../shared/accounting";
 import { minor } from "../shared/money";
 import {
@@ -105,6 +106,12 @@ export function ManualJournals({
   const [skipReason, setSkipReason] = useState("");
   const [reviewingOccurrenceId, setReviewingOccurrenceId] = useState("");
   const [scheduledReversalId, setScheduledReversalId] = useState("");
+  useLeaveGuard({
+    label: "journal details",
+    dirty,
+    recoverable: draftSaved,
+    busy,
+  });
   useEffect(() => {
     if (!dirty) return;
     setDraftSaved(
@@ -139,13 +146,6 @@ export function ManualJournals({
     lines,
     requestKey,
   ]);
-  useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => {
-      if (dirty && !draftSaved) e.preventDefault();
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, draftSaved]);
   function closeForm() {
     if (busy) return;
     if (

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useLeaveGuard } from "./NavigationSafety";
 import { useQuery } from "@tanstack/react-query";
 import { Field, Drawer, ErrorBox } from "./components";
 import { request, money, today, type Me } from "./model";
@@ -113,16 +114,15 @@ export function BankTransactionEditor({
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [key, setKey] = useState(() => restored?.requestKey ?? crypto.randomUUID());
+  useLeaveGuard({
+    label: "bank transaction details",
+    dirty,
+    recoverable: draftSaved,
+    busy,
+  });
   useEffect(() => {
     if (reviewing) reviewHeading.current?.focus();
   }, [reviewing]);
-  useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => {
-      if (dirty && !draftSaved) e.preventDefault();
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, draftSaved]);
   useEffect(() => {
     if (!dirty) return;
     setDraftSaved(

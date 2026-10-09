@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ErrorBox, Table } from "./components";
 import { money, type Entity, type Report } from "./model";
+import { useLeaveGuard } from "./NavigationSafety";
 import {
   accountEntryDraft,
   accountEntryDraftKey,
@@ -61,6 +62,12 @@ export function ChartOfAccounts({
   const heading = useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useLeaveGuard({
+    label: "account details",
+    dirty,
+    recoverable: storageOk,
+    busy,
+  });
   useEffect(() => {
     if (!dirty || !mode || !canManage) return;
     setStorageOk(
@@ -88,15 +95,6 @@ export function ChartOfAccounts({
     key,
     canManage,
   ]);
-  useEffect(() => {
-    if (!dirty || storageOk) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, storageOk]);
   useEffect(() => {
     if (formOpen) heading.current?.focus();
   }, [formOpen]);
