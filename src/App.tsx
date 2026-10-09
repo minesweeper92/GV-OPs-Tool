@@ -1761,7 +1761,8 @@ export default function App() {
               ) : reportQuery.data ? (
                 view === "journals" || view === "journal-schedules" ? (
                   <ManualJournals
-                    key={`${entity}-${view}`}
+                    key={`${me.organization.id}-${me.user.id}-${entity}-${view}`}
+                    me={me}
                     entity={data.entities.find((e) => e.id === entity)!}
                     report={reportQuery.data}
                     data={data}

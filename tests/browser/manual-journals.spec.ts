@@ -2,6 +2,110 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID } from "node:crypto";
 
+test("five-line journal draft survives navigation and reload without crossing entities or recurring forms", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
+  const data = await (await page.request.get("/api/data")).json();
+  const pvt = data.entities.find((e: { code: string }) => e.code === "PVT");
+  const aop = data.entities.find((e: { code: string }) => e.code === "AOP");
+  await page.goto("/#journals");
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "+ New manual journal" }).click();
+  await page.getByLabel("Reference", { exact: true }).fill("DRAFT-FIVE");
+  await page.getByLabel("Explanation").fill("Interrupted adjustment");
+  for (let i = 0; i < 3; i++)
+    await page.getByRole("button", { name: "+ Add line", exact: true }).click();
+  const lines = page
+    .getByRole("group", { name: "Journal lines" })
+    .locator(".manual-journal-line");
+  for (let i = 0; i < 5; i++) {
+    await lines
+      .nth(i)
+      .getByRole("combobox", { name: "Account", exact: true })
+      .selectOption(i === 4 ? "3000" : "5000");
+    await lines
+      .nth(i)
+      .getByLabel(i === 4 ? "Credit (PKR)" : "Debit (PKR)", { exact: true })
+      .fill(i === 4 ? "100" : "25");
+    await lines
+      .nth(i)
+      .getByLabel("Line note", { exact: true })
+      .fill(`Retain line ${i + 1}`);
+  }
+  await page
+    .getByRole("button", { name: "Review journal", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Close · keep draft", exact: true })
+    .click();
+  await page.getByLabel("Legal entity view").selectOption(aop.id);
+  await expect(
+    page.getByRole("button", { name: "Resume draft", exact: true }),
+  ).toHaveCount(0);
+  await page.goto("/#journal-schedules");
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await expect(
+    page.getByRole("button", { name: "Resume draft", exact: true }),
+  ).toHaveCount(0);
+  await page.goto("/#journals");
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "Resume draft", exact: true }).click();
+  await expect(page.getByLabel("Reference", { exact: true })).toHaveValue(
+    "DRAFT-FIVE",
+  );
+  await expect(lines).toHaveCount(5);
+  await expect(
+    lines.nth(4).getByLabel("Line note", { exact: true }),
+  ).toHaveValue("Retain line 5");
+  await expect(
+    page.getByRole("button", { name: "Post journal", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Review journal", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Post journal", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Manual journal DRAFT-FIVE" }),
+  ).toBeVisible();
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await expect(
+    page.getByRole("button", { name: "Resume draft", exact: true }),
+  ).toHaveCount(0);
+  await page.goto("/#journal-schedules");
+  await page.getByRole("button", { name: "+ New recurring journal" }).click();
+  await page.getByLabel("Schedule name").fill("Recover recurring pattern");
+  await page
+    .getByRole("combobox", { name: "Frequency", exact: true })
+    .selectOption("quarterly");
+  await page.getByLabel("Number of occurrences (optional)").fill("8");
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "Resume draft", exact: true }).click();
+  await expect(page.getByLabel("Schedule name")).toHaveValue(
+    "Recover recurring pattern",
+  );
+  await expect(
+    page.getByRole("combobox", { name: "Frequency", exact: true }),
+  ).toHaveValue("quarterly");
+  await expect(page.getByLabel("Number of occurrences (optional)")).toHaveValue(
+    "8",
+  );
+  page.once("dialog", (d) => d.accept());
+  await page
+    .getByRole("button", { name: "Discard draft", exact: true })
+    .click();
+  await expect(page.getByLabel("Schedule name")).toHaveValue("");
+});
+
 test("manual journal review, posting and reversal work in the accounting UI", async ({
   page,
 }) => {
@@ -46,7 +150,16 @@ test("manual journal review, posting and reversal work in the accounting UI", as
     path: "test-results/manual-journal-posted.png",
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Reverse this journal" }).click();
+  await page
+    .locator("section")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "Manual journal UI-ADJ-001",
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "Reverse this journal" })
+    .click();
   await page.getByLabel("Reason").fill("Incorrect classification");
   await page.getByRole("button", { name: "Post reversal" }).click();
   await expect(

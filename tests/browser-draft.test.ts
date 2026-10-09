@@ -6,8 +6,46 @@ import {
   readBrowserDraft,
   writeBrowserDraft,
   draftDetails,
+  bankTransactionDraft,
+  bankTransactionDraftKey,
+  journalEntryDraft,
+  journalEntryDraftKey,
 } from "../src/browserDraft";
 import { documentDetails } from "../shared/documents";
+
+test("bank draft keeps incomplete allocations and retry identity, isolated by organization, user, entity and bank", () => {
+  const storage = memoryStorage();
+  const key = bankTransactionDraftKey("org", "user", "entity", "bank");
+  const draft = {
+    direction: "out",
+    amount: "1.",
+    description: "Draft",
+    date: "",
+    reference: "",
+    hint: "",
+    requestKey: crypto.randomUUID(),
+    lines: [{ account_code: "", debit: "-", credit: "", memo: "unfinished" }],
+  };
+  writeBrowserDraft(key, draft, storage);
+  const recovered = readBrowserDraft(key, bankTransactionDraft, storage);
+  assert.equal(recovered?.lines[0].debit, "-");
+  assert.equal(recovered?.requestKey, draft.requestKey);
+  for (const parts of [
+    ["other", "user", "entity", "bank"],
+    ["org", "other", "entity", "bank"],
+    ["org", "user", "other", "bank"],
+    ["org", "user", "entity", "other"],
+  ]) {
+    assert.equal(
+      readBrowserDraft(
+        bankTransactionDraftKey(parts[0], parts[1], parts[2], parts[3]),
+        bankTransactionDraft,
+        storage,
+      ),
+      null,
+    );
+  }
+});
 
 test("recovery preserves incomplete amounts, recipients and references without weakening save validation", () => {
   const details = {
@@ -22,6 +60,41 @@ test("recovery preserves incomplete amounts, recipients and references without w
 });
 
 const schema = z.object({ savedAt: z.number(), text: z.string() });
+test("journal drafts preserve incomplete schedules and remain separate from manual entries", () => {
+  const storage = memoryStorage();
+  const key = journalEntryDraftKey("org", "user", "entity", "schedules");
+  const draft = {
+    date: "",
+    reference: "",
+    requestKey: crypto.randomUUID(),
+    lines: [{ account_code: "", debit: ".", credit: "", memo: "" }],
+    memo: "",
+    autoReverseOn: "",
+    scheduleName: "Incomplete",
+    frequency: "quarterly",
+    timezone: "UTC",
+    endDate: "",
+    occurrences: "",
+    reverseNextMonth: true,
+  };
+  writeBrowserDraft(key, draft, storage);
+  assert.equal(
+    readBrowserDraft(key, journalEntryDraft, storage)?.lines[0].debit,
+    ".",
+  );
+  assert.equal(
+    readBrowserDraft(key, journalEntryDraft, storage)?.frequency,
+    "quarterly",
+  );
+  assert.equal(
+    readBrowserDraft(
+      journalEntryDraftKey("org", "user", "entity", "manual"),
+      journalEntryDraft,
+      storage,
+    ),
+    null,
+  );
+});
 function memoryStorage() {
   const values = new Map<string, string>();
   return {
