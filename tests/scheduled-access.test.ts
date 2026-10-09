@@ -43,8 +43,8 @@ test("scheduled drafts stop when creator entity access or effective posting perm
     name: "Access boundary",
     start_date: "2035-01-01",
     end_date: null,
-    frequency: "monthly",
-    timezone: "UTC",
+    frequency: "monthly" as const,
+    timezone: "UTC" as const,
     occurrences: 1,
   };
   const expense = await inTenant(db, ctx.tenantId, (tx) =>
