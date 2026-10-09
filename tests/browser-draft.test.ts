@@ -10,6 +10,8 @@ import {
   bankTransactionDraftKey,
   journalEntryDraft,
   journalEntryDraftKey,
+  accountEntryDraft,
+  accountEntryDraftKey,
 } from "../src/browserDraft";
 import { documentDetails } from "../shared/documents";
 
@@ -60,6 +62,53 @@ test("recovery preserves incomplete amounts, recipients and references without w
 });
 
 const schema = z.object({ savedAt: z.number(), text: z.string() });
+test("account drafts isolate identity/entity and retain original edit versions and incomplete codes", () => {
+  const storage = memoryStorage();
+  const key = accountEntryDraftKey("org", "owner", "pvt");
+  const draft = {
+    mode: "edit",
+    selected: { code: "5400", version: 2 },
+    code: "5400",
+    name: "",
+    type: "Expense",
+    parent: "5000",
+    description: "Unsaved",
+    requestKey: crypto.randomUUID(),
+  };
+  writeBrowserDraft(key, draft, storage);
+  assert.equal(
+    readBrowserDraft(key, accountEntryDraft, storage)?.selected?.version,
+    2,
+  );
+  for (const parts of [
+    ["other", "owner", "pvt"],
+    ["org", "other", "pvt"],
+    ["org", "owner", "aop"],
+  ]) {
+    assert.equal(
+      readBrowserDraft(
+        accountEntryDraftKey(parts[0], parts[1], parts[2]),
+        accountEntryDraft,
+        storage,
+      ),
+      null,
+    );
+  }
+  writeBrowserDraft(
+    key,
+    { ...draft, mode: "create", selected: null, code: "A" },
+    storage,
+  );
+  assert.equal(readBrowserDraft(key, accountEntryDraft, storage)?.code, "A");
+  assert.equal(
+    accountEntryDraft.safeParse({
+      ...draft,
+      savedAt: Date.now(),
+      selected: null,
+    }).success,
+    false,
+  );
+});
 test("journal drafts preserve incomplete schedules and remain separate from manual entries", () => {
   const storage = memoryStorage();
   const key = journalEntryDraftKey("org", "user", "entity", "schedules");

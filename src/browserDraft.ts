@@ -154,6 +154,27 @@ export const journalEntryDraftKey = (
   focus: "manual" | "schedules",
 ) => `gv-journal-entry-draft-v1:${organization}:${user}:${entity}:${focus}`;
 
+export const accountEntryDraft = z
+  .object({
+    savedAt: z.number(),
+    mode: z.enum(["create", "edit"]),
+    selected: z
+      .object({ code: z.string().max(8), version: z.number().int() })
+      .nullable(),
+    code: z.string().max(8),
+    name: z.string().max(200),
+    type: z.enum(["Asset", "Liability", "Equity", "Income", "Expense"]),
+    parent: z.string().max(8),
+    description: z.string().max(1000),
+    requestKey: z.uuid(),
+  })
+  .refine((draft) => draft.mode === "create" || draft.selected !== null);
+export const accountEntryDraftKey = (
+  organization: string,
+  user: string,
+  entity: string,
+) => `gv-account-entry-draft-v1:${organization}:${user}:${entity}`;
+
 export function clearBrowserDraft(key: string, storage?: DraftStorage) {
   try {
     (storage ?? window.sessionStorage).removeItem(key);

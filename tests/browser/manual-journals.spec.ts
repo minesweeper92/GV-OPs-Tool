@@ -235,6 +235,154 @@ test("recurring journals generate review drafts and scheduled reversals", async 
   expect(errors).toEqual([]);
 });
 
+test("account drafts recover create/edit details without crossing entities or overwriting concurrent edits", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Owner Grid Velocity · sample" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "My day", exact: true }),
+  ).toBeVisible();
+  const data = await (await page.request.get("/api/data")).json();
+  const pvt = data.entities.find((e: { code: string }) => e.code === "PVT");
+  const aop = data.entities.find((e: { code: string }) => e.code === "AOP");
+  const code = `D${randomUUID().slice(0, 6).toUpperCase()}`;
+  await page.goto("/#accounts");
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "+ New account" }).click();
+  await page.getByLabel("Account code").fill("D");
+  await page.getByLabel("Account name").fill("Recovered account");
+  await page.getByLabel("Parent account").selectOption("5000");
+  await page.getByLabel("Description").fill("Retain unfinished setup");
+  await page
+    .getByRole("button", { name: "Close · keep account draft" })
+    .click();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "+ New account" }).click();
+  await expect(
+    page.getByRole("button", { name: "Resume account draft" }),
+  ).toBeVisible();
+  await page.getByLabel("Legal entity view").selectOption(aop.id);
+  await expect(
+    page.getByRole("button", { name: "Resume account draft" }),
+  ).toHaveCount(0);
+  await page.goto("/#journals");
+  await page.goto("/#accounts");
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "Resume account draft" }).click();
+  await expect(page.getByLabel("Account code")).toHaveValue("D");
+  await expect(page.getByLabel("Parent account")).toHaveValue("5000");
+  await expect(page.getByLabel("Description")).toHaveValue(
+    "Retain unfinished setup",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  await page.getByLabel("Account code").fill(code);
+  const retryKeys: string[] = [];
+  await page.route("**/api/commands", async (route) => {
+    const command = route.request().postDataJSON();
+    if (command.action !== "account.create") return route.continue();
+    retryKeys.push(command.request_key);
+    if (retryKeys.length === 1) {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      return route.abort("failed");
+    }
+    return route.continue();
+  });
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(
+    page.locator(".chart-of-accounts").getByRole("alert"),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Close · keep account draft" })
+    .click();
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "Resume account draft" }).click();
+  await page.getByRole("button", { name: "Create account" }).click();
+  const row = page.getByRole("row").filter({ hasText: code });
+  await expect(row).toContainText("Recovered account");
+  await expect(row).toHaveCount(1);
+  expect(retryKeys).toHaveLength(2);
+  expect(retryKeys[1]).toBe(retryKeys[0]);
+  await page.unroute("**/api/commands");
+  await expect(
+    page.getByRole("button", { name: "Resume account draft" }),
+  ).toHaveCount(0);
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Account name").fill("My unsaved changes");
+  await page
+    .getByRole("button", { name: "Close · keep account draft" })
+    .click();
+  const peer = await context.newPage();
+  await peer.goto("/#accounts");
+  await peer.getByLabel("Legal entity view").selectOption(pvt.id);
+  await peer
+    .getByRole("row")
+    .filter({ hasText: code })
+    .getByRole("button", { name: "Edit", exact: true })
+    .click();
+  await peer.getByLabel("Account name").fill("Other tab saved first");
+  await peer.getByRole("button", { name: "Save changes" }).click();
+  await expect(peer.getByRole("row").filter({ hasText: code })).toContainText(
+    "Other tab saved first",
+  );
+  await peer.close();
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await page.getByRole("button", { name: "Resume account draft" }).click();
+  await expect(page.getByLabel("Account name")).toHaveValue(
+    "My unsaved changes",
+  );
+  await expect(page.getByLabel("Account code")).toBeDisabled();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page
+      .locator(".chart-of-accounts")
+      .getByText("This account changed. Refresh before saving.", {
+        exact: true,
+      }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Account name")).toHaveValue(
+    "My unsaved changes",
+  );
+  await expect(row).toContainText("Other tab saved first");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Discard account draft" }).click();
+  await page.reload();
+  await page.getByLabel("Legal entity view").selectOption(pvt.id);
+  await expect(
+    page.getByRole("button", { name: "Resume account draft" }),
+  ).toHaveCount(0);
+  await page.evaluate(() => {
+    Storage.prototype.setItem = function () {
+      throw Error("Storage blocked in this test");
+    };
+  });
+  await page.getByRole("button", { name: "+ New account" }).click();
+  await page.getByLabel("Account name").fill("Keep me open");
+  await expect(
+    page.getByText(
+      "Draft recovery is unavailable in this browser. Keep this page open or save before navigating away.",
+    ),
+  ).toBeVisible();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByLabel("Account name")).toHaveValue("Keep me open");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Discard account draft" }).click();
+});
+
 test("chart account creation, editing and deactivation are usable", async ({
   page,
 }) => {

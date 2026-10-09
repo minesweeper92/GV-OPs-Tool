@@ -1774,7 +1774,11 @@ export default function App() {
                   />
                 ) : view === "accounts" ? (
                   <ChartOfAccounts
-                    key={entity}
+                    key={`${me.organization.id}:${me.user.id}:${entity}`}
+                    draftScope={{
+                      organization: me.organization.id,
+                      user: me.user.id,
+                    }}
                     entity={data.entities.find((e) => e.id === entity)!}
                     report={reportQuery.data}
                     canManage={me!.user.role === "admin"}
