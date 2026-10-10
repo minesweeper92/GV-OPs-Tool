@@ -11,6 +11,15 @@ import { NumberSeriesField } from "./NumberSeriesField";
 import { decimal, money, rate, today, type Data, type Line } from "./model";
 import { documentDetails, documentTotals } from "../shared/documents";
 import { DocumentCharges } from "./DocumentCharges";
+import { PaymentTermsField } from "./PaymentTermsField";
+import {
+  defaultsFor,
+  resolvedDefaults,
+  defaultDetails,
+  updateDefaultDetails,
+  replaceDefault,
+  termDueDate,
+} from "../shared/document-defaults";
 import {
   clearBrowserDraft,
   invoiceDraft,
@@ -29,12 +38,6 @@ const blankLine = (): Line => ({
 });
 const normalized = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-function plusDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00Z`);
-  if (Number.isNaN(date.getTime())) return "";
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
 
 export function InvoiceComposer({
   id,
@@ -100,12 +103,26 @@ export function InvoiceComposer({
   const [seriesId, setSeriesId] = useState(restored?.seriesId ?? "");
   const [issueDate, setIssueDate] = useState(restored?.issueDate ?? today());
   const customer = data.companies.find((c) => c.id === customerId);
+  const defaults = defaultsFor(data.documentDefaults, issuerId);
+  const initialDefaults = resolvedDefaults(
+    defaults,
+    "invoice",
+    issueDate,
+    customer?.profile,
+  );
+  const previousDefaults = useRef(initialDefaults);
   const [dueDate, setDueDate] = useState(
     restored?.dueDate ??
-      plusDays(today(), customer?.profile.payment_days ?? 30),
+      termDueDate(
+        issueDate,
+        quote?.details?.payment_term ?? initialDefaults.term,
+      ),
   );
   const [currency, setCurrency] = useState(
-    restored?.currency ?? quote?.currency ?? "PKR",
+    restored?.currency ??
+      quote?.currency ??
+      customer?.profile.currency ??
+      "PKR",
   );
   const [fx, setFx] = useState(
     restored?.fx ?? (quote ? rate(quote.fx_micros) : "1"),
@@ -138,12 +155,23 @@ export function InvoiceComposer({
   const [billingKind, setBillingKind] = useState<"earned" | "advance">(
     restored?.billingKind ?? "earned",
   );
-  const [terms, setTerms] = useState(restored?.terms ?? quote?.terms ?? "");
+  const [terms, setTerms] = useState(
+    restored?.terms ?? quote?.terms ?? initialDefaults.terms,
+  );
   const [details, setDetails] = useState(
     () =>
       restored?.details ??
       documentDetails.parse({
-        ...quote?.details,
+        ...defaultDetails(initialDefaults),
+        ...(quote
+          ? quote.details
+          : {
+              billing_address: customer?.address || "",
+              shipping_address: customer?.shipping_address || "",
+              customer_tax_id: customer?.tax_id || "",
+              recipients: customer?.profile.billing_recipients || [],
+            }),
+        payment_term: quote?.details?.payment_term ?? initialDefaults.term,
         quote_date: quote?.details?.quote_date || today(),
       }),
   );
@@ -219,18 +247,47 @@ export function InvoiceComposer({
     setDetails((old) => ({ ...old, [key]: value }));
     setDirty(true);
   };
+  function applyDefaults(
+    nextIssuer: string,
+    company?: Data["companies"][number],
+  ) {
+    const next = resolvedDefaults(
+      defaultsFor(data.documentDefaults, nextIssuer),
+      "invoice",
+      issueDate,
+      company?.profile,
+    );
+    const previous = previousDefaults.current;
+    const merged = updateDefaultDetails(details, previous, next);
+    setDetails((old) => updateDefaultDetails(old, previous, next));
+    setTerms((old) => replaceDefault(old, previous.terms, next.terms));
+    setDueDate((old) =>
+      replaceDefault(
+        old,
+        termDueDate(issueDate, details.payment_term ?? previous.term),
+        termDueDate(issueDate, merged.payment_term ?? next.term),
+      ),
+    );
+    previousDefaults.current = next;
+    setDirty(true);
+  }
   function selectCustomer(companyId: string) {
     const company = data.companies.find((c) => c.id === companyId);
+    applyDefaults(issuerId, company);
+    setCurrency((old) =>
+      replaceDefault(
+        old,
+        customer?.profile.currency ?? "PKR",
+        company?.profile.currency ?? "PKR",
+      ),
+    );
     setCustomerId(companyId);
-    setDueDate(plusDays(issueDate, company?.profile.payment_days ?? 30));
     setDetails((old) => ({
       ...old,
       billing_address: company?.address || "",
       shipping_address: company?.shipping_address || "",
       customer_tax_id: company?.tax_id || "",
-      customer_notes: company?.profile.document_notes || "",
       recipients: company?.profile.billing_recipients || [],
-      payment_terms: `Net ${company?.profile.payment_days ?? 30} days`,
     }));
     setDirty(true);
   }
@@ -275,13 +332,12 @@ export function InvoiceComposer({
         request_key: customerRetry.current.key,
       });
       setCreatedCustomer({ id: result.id, name });
+      applyDefaults(issuerId);
       setCustomerId(result.id);
-      setDueDate(plusDays(issueDate, 30));
       setDetails((old) => ({
         ...old,
         billing_address: command.address,
         customer_tax_id: command.tax_id,
-        payment_terms: "Net 30 days",
       }));
       setNewCustomerOpen(false);
       setDirty(true);
@@ -490,6 +546,7 @@ export function InvoiceComposer({
                   value={issuerId}
                   disabled={!!quote}
                   onChange={(e) => {
+                    applyDefaults(e.target.value, customer);
                     setIssuerId(e.target.value);
                     setSeriesId("");
                   }}
@@ -608,13 +665,16 @@ export function InvoiceComposer({
                   required
                   value={issueDate}
                   onChange={(e) => {
-                    setIssueDate(e.target.value);
-                    setDueDate(
-                      plusDays(
-                        e.target.value,
-                        customer?.profile.payment_days ?? 30,
+                    const term = details.payment_term ?? initialDefaults.term;
+                    setDueDate((old) =>
+                      replaceDefault(
+                        old,
+                        termDueDate(issueDate, term),
+                        termDueDate(e.target.value, term),
                       ),
                     );
+                    setIssueDate(e.target.value);
+                    setDirty(true);
                   }}
                 />
               </Field>
@@ -624,9 +684,25 @@ export function InvoiceComposer({
                   required
                   min={issueDate}
                   value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
+                  onChange={(e) => {
+                    setDueDate(e.target.value);
+                    setDirty(true);
+                  }}
                 />
               </Field>
+              <PaymentTermsField
+                settings={defaults}
+                value={details.payment_term}
+                onChange={(term) => {
+                  setDetails((old) => ({
+                    ...old,
+                    payment_term: term,
+                    payment_terms: term.name,
+                  }));
+                  setDueDate(termDueDate(issueDate, term));
+                  setDirty(true);
+                }}
+              />
               <Field label="Related opportunity">
                 <input
                   value={deal?.name || "No linked opportunity (direct invoice)"}
@@ -927,7 +1003,10 @@ export function InvoiceComposer({
             <Field label="Terms & conditions">
               <textarea
                 value={terms}
-                onChange={(e) => setTerms(e.target.value)}
+                onChange={(e) => {
+                  setTerms(e.target.value);
+                  setDirty(true);
+                }}
                 rows={4}
                 maxLength={4000}
                 disabled={!!quote}

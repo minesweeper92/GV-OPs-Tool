@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defaultsCommands } from "./document-defaults.ts";
 import { workflowCommands } from "./approval-workflows.ts";
 import { bankCommands } from "./banking.ts";
 import { projectCommands } from "./projects.ts";
@@ -37,6 +38,7 @@ const line = z
   })
   .strict();
 export const commandSchema = z.discriminatedUnion("action", [
+  ...defaultsCommands,
   ...workflowCommands,
   z.strictObject({
     action: z.literal("bill.approval-policy"),

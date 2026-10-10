@@ -7,6 +7,14 @@ import { today, money, rate, type Data, type Line } from "./model";
 import { documentDetails, documentTotals } from "../shared/documents";
 import { NumberSeriesField } from "./NumberSeriesField";
 import { DocumentCharges } from "./DocumentCharges";
+import { PaymentTermsField } from "./PaymentTermsField";
+import {
+  defaultsFor,
+  resolvedDefaults,
+  defaultDetails,
+  updateDefaultDetails,
+  replaceDefault,
+} from "../shared/document-defaults";
 import {
   clearBrowserDraft,
   draftLines,
@@ -74,6 +82,18 @@ export function QuoteComposer({
   const [dealId, setDealId] = useState(
     restored?.dealId ?? initialDeal?.id ?? "",
   );
+  const defaults = defaultsFor(
+    data.documentDefaults,
+    data.deals.find((d) => d.id === dealId)?.entity_id ??
+      (entityId === "all" ? "" : entityId),
+  );
+  const initialDefaults = resolvedDefaults(
+    defaults,
+    "quote",
+    today(),
+    data.companies.find((c) => c.id === companyId)?.profile,
+  );
+  const previousDefaults = useRef(initialDefaults);
   const [customerSearch, setCustomerSearch] = useState("");
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
@@ -109,7 +129,10 @@ export function QuoteComposer({
     restored?.optionName ?? initialQuote?.option_name ?? "",
   );
   const [currency, setCurrency] = useState(
-    restored?.currency ?? initialQuote?.currency ?? "PKR",
+    restored?.currency ??
+      initialQuote?.currency ??
+      data.companies.find((c) => c.id === companyId)?.profile.currency ??
+      "PKR",
   );
   const [fx, setFx] = useState(
     restored?.fx ?? (initialQuote ? rate(initialQuote.fx_micros) : "1"),
@@ -147,12 +170,13 @@ export function QuoteComposer({
     () =>
       restored?.details ??
       documentDetails.parse({
+        ...defaultDetails(initialDefaults),
         ...initialQuote?.details,
         quote_date: initialQuote?.details?.quote_date || today(),
       }),
   );
   const [terms, setTerms] = useState(
-    restored?.terms ?? initialQuote?.terms ?? "",
+    restored?.terms ?? initialQuote?.terms ?? initialDefaults.terms,
   );
 
   useEffect(() => {
@@ -226,6 +250,19 @@ export function QuoteComposer({
     setDetails((old) => ({ ...old, [key]: value }));
     setDirty(true);
   };
+  function applyDefaults(issuer: string, company?: Data["companies"][number]) {
+    if (initialQuote) return;
+    const next = resolvedDefaults(
+      defaultsFor(data.documentDefaults, issuer),
+      "quote",
+      details.quote_date || today(),
+      company?.profile,
+    );
+    const previous = previousDefaults.current;
+    setDetails((old) => updateDefaultDetails(old, previous, next));
+    setTerms((old) => replaceDefault(old, previous.terms, next.terms));
+    previousDefaults.current = next;
+  }
   const setLine = (index: number, field: keyof Line, value: string) => {
     setLines((old) =>
       old.map((line, i) => (i === index ? { ...line, [field]: value } : line)),
@@ -279,6 +316,7 @@ export function QuoteComposer({
         role: "Primary contact",
       });
       setCompanyId(company);
+      applyDefaults(entityId === "all" ? "" : entityId);
       setDealId("");
       setNewCustomerOpen(false);
       setProjectOpen(true);
@@ -337,6 +375,7 @@ export function QuoteComposer({
         setCreatedLeadId(lead);
       }
       const deal = (await create({ action: "lead.convert", id: lead })).id;
+      applyDefaults(projectEntity, chosenCompany);
       setDealId(deal);
       setNumberSeriesId("");
       setProjectOpen(false);
@@ -461,13 +500,21 @@ export function QuoteComposer({
                       (c) => c.id === e.target.value,
                     );
                     setCompanyId(e.target.value);
+                    applyDefaults(entityId === "all" ? "" : entityId, company);
+                    setCurrency((old) =>
+                      replaceDefault(
+                        old,
+                        chosenCompany?.profile.currency ?? "PKR",
+                        company?.profile.currency ?? "PKR",
+                      ),
+                    );
                     setDealId("");
                     setDetails((old) => ({
                       ...old,
                       billing_address: company?.address || "",
                       shipping_address: company?.shipping_address || "",
                       customer_tax_id: company?.tax_id || "",
-                      customer_notes: company?.profile.document_notes || "",
+                      recipients: company?.profile.billing_recipients || [],
                     }));
                     setDirty(true);
                   }}
@@ -593,7 +640,31 @@ export function QuoteComposer({
                   type="date"
                   required
                   value={details.quote_date || ""}
-                  onChange={(e) => setDetail("quote_date", e.target.value)}
+                  onChange={(e) => {
+                    const before = resolvedDefaults(
+                      defaults,
+                      "quote",
+                      details.quote_date || today(),
+                      chosenCompany?.profile,
+                    );
+                    const next = resolvedDefaults(
+                      defaults,
+                      "quote",
+                      e.target.value,
+                      chosenCompany?.profile,
+                    );
+                    setDetails((old) => ({
+                      ...old,
+                      quote_date: e.target.value,
+                      valid_until: replaceDefault(
+                        old.valid_until,
+                        before.valid_until,
+                        next.valid_until,
+                      ),
+                    }));
+                    previousDefaults.current = next;
+                    setDirty(true);
+                  }}
                 />
               </Field>
               <Field label="Expiry date">
@@ -606,6 +677,18 @@ export function QuoteComposer({
                   }
                 />
               </Field>
+              <PaymentTermsField
+                settings={defaults}
+                value={details.payment_term}
+                onChange={(term) => {
+                  setDetails((old) => ({
+                    ...old,
+                    payment_term: term,
+                    payment_terms: term.name,
+                  }));
+                  setDirty(true);
+                }}
+              />
             </div>
             <div className="quote-field-grid">
               <div className="quote-project-picker">
@@ -620,6 +703,11 @@ export function QuoteComposer({
                     onChange={(e) => {
                       if (e.target.value === "new") setProjectOpen(true);
                       else {
+                        applyDefaults(
+                          data.deals.find((d) => d.id === e.target.value)
+                            ?.entity_id || "",
+                          chosenCompany,
+                        );
                         setDealId(e.target.value);
                         setNumberSeriesId("");
                       }

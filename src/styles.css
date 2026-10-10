@@ -1318,6 +1318,29 @@ tbody tr:hover {
   margin-top: 16px;
   max-width: 280px;
 }
+.document-defaults {
+  max-width: 960px;
+}
+.document-defaults label {
+  display: grid;
+  align-items: start;
+  gap: 6px;
+  max-width: none;
+}
+.document-defaults fieldset {
+  min-width: 0;
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.document-defaults .table-scroll {
+  margin: 16px 0;
+}
+.document-defaults td input,
+.document-defaults td select {
+  min-width: 100px;
+}
 .drawer {
   padding: 0;
   border: 0;

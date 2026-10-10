@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { ApprovalWorkflows } from "./ApprovalWorkflows";
+const SalesDefaults = lazy(() =>
+  import("./SalesDefaults").then((m) => ({ default: m.SalesDefaults })),
+);
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -1933,6 +1936,13 @@ export default function App() {
               </tr>
             ))}
           </Table>
+          <SalesDefaults
+            data={data}
+            me={me!}
+            entity={entity}
+            setEntity={setEntity}
+            save={runWithResult}
+          />
           <section className="settings-note">
             <h2>Build scope</h2>
             <p>

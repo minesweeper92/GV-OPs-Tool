@@ -204,7 +204,19 @@ export function ProfileFields({
               "EUR",
               "GBP",
             ])}
-            {field("payment_days", "Payment terms (days)", "number")}
+            <Field label="Customer payment terms">
+              <select
+                value={value.payment_terms_mode ?? "days"}
+                onChange={(e) => set("payment_terms_mode", e.target.value)}
+              >
+                <option value="entity">Use issuing entity default</option>
+                <option value="days">Custom number of days</option>
+                <option value="end-month">End of month</option>
+              </select>
+            </Field>
+            {(value.payment_terms_mode ?? "days") === "days"
+              ? field("payment_days", "Payment terms (days)", "number")
+              : null}
             {field("credit_limit", "Advisory credit limit (customer currency)")}
           </div>
           <Field label="Billing recipients (comma separated)">

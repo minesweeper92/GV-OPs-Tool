@@ -6,6 +6,7 @@ import { z } from "zod";
 import { inTenant, type Database } from "./db.ts";
 import { audit, execute, snapshot, reports, Problem } from "./domain.ts";
 import { commandSchema } from "../shared/commands.ts";
+import { defaultsSnapshot, saveDocumentDefaults } from "./document-defaults.ts";
 import { capabilities, hasCapability } from "../shared/permissions.ts";
 import { requireCommandPermission } from "./permission-checks.ts";
 import { Access, hash, type Session } from "./access.ts";
@@ -477,6 +478,7 @@ export function createApp(
       async (tx) => ({
         ...(await snapshot(tx, ctx)),
         ...(await approvalSnapshot(tx, ctx)),
+        ...(await defaultsSnapshot(tx, ctx)),
         ...(await payableSnapshot(tx, ctx)),
         ...(await purchaseOrderSnapshot(tx, ctx)),
         bankAccounts: await bankAccounts(tx, ctx),
@@ -604,6 +606,8 @@ export function createApp(
     const c = commandSchema.parse(req.body),
       ctx = access.context(sessions.get(req)!);
     requireCommandPermission(ctx, c);
+    if (c.action === "settings.sales-defaults")
+      return inTenant(db, ctx, (tx) => saveDocumentDefaults(tx, ctx, c));
     return inTenant(db, ctx, (tx) =>
       c.action === "approval.rules"
         ? saveApprovalRules(tx, ctx, c)

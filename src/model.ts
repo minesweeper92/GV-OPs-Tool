@@ -191,6 +191,13 @@ export interface Event {
   details: Record<string, unknown>;
 }
 export interface Data {
+  documentDefaults: import("../shared/document-defaults").DefaultsRecord[];
+  documentDefaultsHistory: {
+    entity_id: string;
+    version: number;
+    actor_name: string;
+    created_at: string;
+  }[];
   journalSchedules: {
     id: string;
     entity_id: string;
