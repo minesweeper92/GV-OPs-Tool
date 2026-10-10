@@ -28,6 +28,14 @@ const sum = (rows: AccountBalance[], f: (r: AccountBalance) => bigint) =>
   rows.reduce((v, r) => v + f(r), 0n);
 const movement = (r: AccountBalance) => BigInt(r.debit) - BigInt(r.credit);
 
+// One customer receipt journal can settle several invoices, so each
+// allocation supplies its own carrying amount instead of the journal total.
+const receiptAgeingEffects = `
+ UNION ALL SELECT a.invoice_id,j.id,-(a.amount_minor+a.wht_minor+a.sales_tax_withheld_minor),-a.carrying_minor FROM customer_receipt_allocations a JOIN journals j ON j.source_id=a.receipt_id AND j.source_type='customer-receipt'
+ UNION ALL SELECT a.invoice_id,j.id,a.amount_minor+a.wht_minor+a.sales_tax_withheld_minor,a.carrying_minor FROM customer_receipt_allocations a JOIN customer_receipt_reversals r ON r.receipt_id=a.receipt_id JOIN journals j ON j.source_id=r.id AND j.source_type='customer-receipt-reversal'
+ UNION ALL SELECT a.invoice_id,j.id,-a.amount_minor,-a.ar_base_minor FROM customer_receipt_applications a JOIN journals j ON j.source_id=a.id AND j.source_type='customer-receipt-application'
+ UNION ALL SELECT a.invoice_id,j.id,a.amount_minor,a.ar_base_minor FROM customer_receipt_application_reversals r JOIN customer_receipt_applications a ON a.id=r.application_id JOIN journals j ON j.source_id=r.id AND j.source_type='customer-receipt-application-reversal'`;
+
 export async function ageing(
   tx: SQL,
   ids: string[],
@@ -63,7 +71,7 @@ export async function ageing(
       : `SELECT id,entity_id,vendor_id AS party_id,vendor_name AS party,reference AS number,bill_date AS date,due_date,currency FROM bills`;
   const rows = (
     await tx.query(
-      `WITH original_effects AS (${effects}), effects AS (SELECT original_effects.*,NULL::bigint AS base_override FROM original_effects ${kind === "ap" ? `UNION ALL SELECT a.bill_id,j.id,-(a.amount_minor+a.wht_minor),-a.carrying_minor FROM vendor_payment_batch_allocations a JOIN journals j ON j.source_id=a.payment_id AND j.source_type='vendor-payment-batch' UNION ALL SELECT a.bill_id,j.id,a.amount_minor+a.wht_minor,a.carrying_minor FROM vendor_payment_batch_allocations a JOIN vendor_payment_batch_reversals r ON r.payment_id=a.payment_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-batch-reversal'` : ""}), documents AS (${documents}), balances AS (
+      `WITH original_effects AS (${effects}), effects AS (SELECT original_effects.*,NULL::bigint AS base_override FROM original_effects ${kind === "ap" ? `UNION ALL SELECT a.bill_id,j.id,-(a.amount_minor+a.wht_minor),-a.carrying_minor FROM vendor_payment_batch_allocations a JOIN journals j ON j.source_id=a.payment_id AND j.source_type='vendor-payment-batch' UNION ALL SELECT a.bill_id,j.id,a.amount_minor+a.wht_minor,a.carrying_minor FROM vendor_payment_batch_allocations a JOIN vendor_payment_batch_reversals r ON r.payment_id=a.payment_id JOIN journals j ON j.source_id=r.id AND j.source_type='vendor-payment-batch-reversal'` : receiptAgeingEffects}), documents AS (${documents}), balances AS (
     SELECT ef.doc,sum(ef.amount)::text AS outstanding,coalesce(sum(coalesce(ef.base_override,${kind === "ar" ? "l.delta" : "-l.delta"})),0)::text AS base
     FROM effects ef JOIN journals j ON j.id=ef.journal LEFT JOIN (SELECT journal_id,sum(debit_minor-credit_minor) AS delta FROM journal_lines WHERE account_code=$3 GROUP BY journal_id) l ON l.journal_id=j.id
     WHERE j.entity_id=ANY($1::uuid[]) AND j.posted_on<=$2 GROUP BY ef.doc)
@@ -170,6 +178,7 @@ export async function financialReports(
     "2200",
     "2300",
     "2400",
+    "2410",
   ];
   const workingCapital = -sum(
     accounts.filter((a) => workingCodes.includes(a.code)),
@@ -265,6 +274,11 @@ export async function financialReports(
         "expense",
         "customer-refund",
         "customer-refund-reversal",
+        // Customer receipts, their refunds and reversals are operating cash.
+        "customer-receipt",
+        "customer-receipt-reversal",
+        "customer-receipt-refund",
+        "customer-receipt-refund-reversal",
       ].includes(j.source_type)
     )
       unsupported.add(j.source_type);

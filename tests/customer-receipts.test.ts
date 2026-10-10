@@ -16,6 +16,9 @@ import {
   executeCustomerReceipt,
   customerReceiptSnapshot,
 } from "../server/customer-receipts.ts";
+import { financialReports } from "../server/financial-reports.ts";
+import { partyStatement } from "../server/statements.ts";
+import { projectSnapshot } from "../server/projects.ts";
 import {
   receiptProblem,
   suggestAllocations,
@@ -278,6 +281,11 @@ test("customer receipts allocate, hold unapplied cash and reverse without rewrit
         [receiptId],
       );
       assert.equal(journal[0].n, 1);
+      // 90,000 still owed on the second invoice; 100,000 held on account.
+      await reportsReconcile("with unapplied cash", {
+        outstanding: 9000000n,
+        credit: 10000000n,
+      });
     },
   );
 
@@ -501,6 +509,51 @@ test("customer receipts allocate, hold unapplied cash and reverse without rewrit
     },
   );
 
+  // Every report that interprets posting sources must understand receipts.
+  async function reportsReconcile(
+    label: string,
+    expect: { outstanding: bigint; credit: bigint },
+  ) {
+    const report = await inTenant(db, admin, (tx) =>
+      financialReports(tx, admin, {
+        entityId: entity,
+        from: "2026-01-01",
+        to: "2026-12-31",
+      } as never),
+    );
+    assert.deepEqual(report.cash.unsupported, [], label);
+    assert.equal(report.cash.difference, "0", label);
+    assert.equal(report.receivables.difference, "0", label);
+    const statement = await inTenant(db, admin, (tx) =>
+      partyStatement(tx, admin, {
+        kind: "customer",
+        companyId: customer,
+        entityId: entity,
+        from: "2026-01-01",
+        to: "2026-12-31",
+      } as never),
+    );
+    const pkr = statement.groups.find((g) => g.currency === "PKR")!;
+    assert.equal(BigInt(pkr.outstanding), expect.outstanding, label);
+    assert.equal(BigInt(pkr.availableCredit), expect.credit, label);
+    // Net position: what is still owed less cash the customer has on account.
+    assert.equal(
+      BigInt(pkr.closing),
+      expect.outstanding - expect.credit,
+      label,
+    );
+    await inTenant(db, admin, (tx) => projectSnapshot(tx, admin));
+  }
+  await t.test(
+    "ageing, statements, cash flow and project results all reconcile",
+    async () => {
+      await reportsReconcile("after application and refund", {
+        outstanding: 0n,
+        credit: 0n,
+      });
+    },
+  );
+
   await t.test(
     "reversals are dated, ordered and restore exactly what they undo",
     async () => {
@@ -596,6 +649,13 @@ test("customer receipts allocate, hold unapplied cash and reverse without rewrit
       );
     },
   );
+
+  await t.test("reports still reconcile after every reversal", async () => {
+    await reportsReconcile("after reversals", {
+      outstanding: 73800000n,
+      credit: 0n,
+    });
+  });
 
   await t.test(
     "foreign-currency receipts carry each amount at the right rate",
