@@ -48,6 +48,7 @@ export async function currentMemberContext(
 const sales = /^(lead|deal|quote)\.|^profile\.(lead|deal)$|^crm\.lead-edit$/;
 const contacts = /^(company|contact|note|crm|profile)\./;
 export function commandCapability(action: string): Capability | Capability[] {
+  if (action === "settings.sales-defaults") return "team.manage";
   if (sales.test(action)) return "crm.sales";
   if (contacts.test(action)) return "contacts.manage";
   if (action.startsWith("document.item-")) return ["crm.sales", "books.post"];

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { paymentTerm } from "./document-defaults.ts";
 import { customFields } from "./profiles.ts";
 import { minor, scaled, totals } from "./money.ts";
 const text = z.string().trim().max(4000).default("");
@@ -27,6 +28,7 @@ export const documentDetails = z.strictObject({
   attention: short,
   recipients: z.array(z.email()).max(20).default([]),
   payment_terms: short,
+  payment_term: paymentTerm.nullable().default(null),
   document_discount_type: z.enum(["percent", "amount"]).default("percent"),
   document_discount: money.default("0"),
   shipping_amount: money.default("0"),

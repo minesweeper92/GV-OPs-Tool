@@ -16,7 +16,10 @@ test("vendor advance draft recovery, application, refund and dated reversals wor
   const data = await (await page.request.get("/api/data")).json();
   const command = async (data: unknown) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: {
+        origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+        "x-csrf-token": me.csrf,
+      },
       data,
     });
     expect(response.ok(), await response.text()).toBeTruthy();

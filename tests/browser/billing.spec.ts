@@ -14,7 +14,10 @@ async function setup(page: Page) {
     entity = data.entities.find((e: any) => e.code === "PVT").id;
   const command = async (c: Record<string, unknown>) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: {
+        origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+        "x-csrf-token": me.csrf,
+      },
       data: c,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

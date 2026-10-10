@@ -18,6 +18,7 @@ import { verifyManualJournals } from "./manual-journal-cases.ts";
 import { verifyPeriodClose } from "./period-cases.ts";
 import { verifyJournalSchedules } from "./journal-schedule-cases.ts";
 import { verifyCutover } from "./cutover-cases.ts";
+import { verifyDefaultsStorage } from "./document-defaults-cases.ts";
 
 test("integer pricing, tax rounding and FX remain exact", () => {
   assert.equal(minor("90071992547.41"), 9007199254741n);
@@ -127,6 +128,10 @@ test("fresh integrated platform", async (t) => {
   t.after(() => db.close());
   await migrate(db);
   await seed(db);
+  await t.test(
+    "document default storage and concurrent saves on the configured database",
+    (sub) => verifyDefaultsStorage(sub, db),
+  );
   await t.test("CRM profiles, qualification and linked work", (sub) =>
     verifyCrm(sub, db),
   );

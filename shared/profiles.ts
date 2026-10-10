@@ -92,6 +92,7 @@ export const companyProfile = z.strictObject({
   parent_company_id: id.nullable().default(null),
   currency: z.enum(["PKR", "USD", "AED", "EUR", "GBP"]).default("PKR"),
   payment_days: z.number().int().min(0).max(365).default(30),
+  payment_terms_mode: z.enum(["entity", "days", "end-month"]).optional(),
   credit_limit: z
     .string()
     .regex(/^\d{1,13}(\.\d{1,2})?$/)

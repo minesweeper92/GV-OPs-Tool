@@ -571,7 +571,14 @@ export function CrmEditor({
       : state.mode === "contact"
         ? contactProfile.parse(contact?.profile || {})
         : state.mode === "company"
-          ? companyProfile.parse(company?.profile || {})
+          ? companyProfile.parse({
+              ...company?.profile,
+              payment_terms_mode:
+                company?.profile.payment_terms_mode ??
+                (company?.profile.payment_days !== undefined
+                  ? "days"
+                  : "entity"),
+            })
           : commercialProfile.parse(
               (state.mode === "deal" ? deal?.profile : lead?.profile) || {},
             ),
