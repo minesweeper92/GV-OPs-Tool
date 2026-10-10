@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { testOrigin } from "./test-origin";
 
-const origin = "http://127.0.0.1:4322";
+const origin = testOrigin;
 async function signIn(page: Page, name: string) {
   await page.goto("/");
   await page

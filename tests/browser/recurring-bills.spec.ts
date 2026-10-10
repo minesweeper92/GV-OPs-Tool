@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID } from "node:crypto";
+import { testOrigin } from "./test-origin";
 test("recurring vendor bill draft recovery, lost-response retry and reviewed posting work through the UI", async ({
   page,
 }) => {
@@ -16,7 +17,7 @@ test("recurring vendor bill draft recovery, lost-response retry and reviewed pos
   const me = await (await page.request.get("/api/me")).json();
   const vendorName = `Recurring vendor ${randomUUID()}`;
   const response = await page.request.post("/api/commands", {
-    headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+    headers: { origin: testOrigin, "x-csrf-token": me.csrf },
     data: {
       action: "company.create",
       name: vendorName,

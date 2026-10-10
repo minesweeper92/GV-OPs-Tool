@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID as uuid } from "node:crypto";
+import { testOrigin } from "./test-origin";
 
 async function fixture(page: Page) {
   await page.goto("/");
@@ -14,7 +15,7 @@ async function fixture(page: Page) {
   const data = await (await page.request.get("/api/data")).json();
   const command = async (data: Record<string, unknown>) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data,
     });
     expect(response.ok(), await response.text()).toBeTruthy();

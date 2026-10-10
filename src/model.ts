@@ -304,6 +304,10 @@ export interface Data {
   approvalProfiles: { id: string; name: string }[];
   vendorPayments: VendorPayment[];
   vendorPaymentBatches: VendorPaymentBatch[];
+  customerReceipts?: import("../shared/customer-receipts").CustomerReceipt[];
+  customerReceiptAllocations?: import("../shared/customer-receipts").CustomerReceiptAllocation[];
+  customerReceiptApplications?: import("../shared/customer-receipts").CustomerReceiptApplication[];
+  customerReceiptRefunds?: import("../shared/customer-receipts").CustomerReceiptRefund[];
   vendorCredits: import("../shared/vendor-credits").VendorCredit[];
   vendorCreditApplications: import("../shared/vendor-credits").VendorCreditUse[];
   vendorRefunds: import("../shared/vendor-credits").VendorCreditUse[];

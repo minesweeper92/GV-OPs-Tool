@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { testOrigin } from "./test-origin";
 
 test("customer and vendor statements show historical balances, credits, export and responsive UI", async ({
   page,
@@ -14,7 +15,7 @@ test("customer and vendor statements show historical balances, credits, export a
   const data = await (await page.request.get("/api/data")).json();
   const command = async (body: Record<string, unknown>) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: body,
     });
     expect(response.ok(), await response.text()).toBeTruthy();

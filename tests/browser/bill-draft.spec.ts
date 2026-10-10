@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { testOrigin } from "./test-origin";
 
 test("bill recovery preserves retry identity and edit drafts can be resumed or discarded", async ({
   page,
@@ -14,7 +15,7 @@ test("bill recovery preserves retry identity and edit drafts can be resumed or d
   const me = await (await page.request.get("/api/me")).json();
   const data = await (await page.request.get("/api/data")).json();
   const response = await page.request.post("/api/commands", {
-    headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+    headers: { origin: testOrigin, "x-csrf-token": me.csrf },
     data: {
       action: "company.create",
       name: `Draft vendor ${randomUUID().slice(0, 8)}`,

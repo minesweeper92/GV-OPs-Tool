@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID } from "node:crypto";
+import { testOrigin } from "./test-origin";
 test("one vendor payment allocates bills, recovers a lost response and reverses all allocations", async ({
   page,
 }) => {
@@ -15,7 +16,7 @@ test("one vendor payment allocates bills, recovers a lost response and reverses 
     data = await (await page.request.get("/api/data")).json();
   const command = async (c: unknown) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: c,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

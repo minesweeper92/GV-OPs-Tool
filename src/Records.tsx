@@ -1,3 +1,4 @@
+import { InvoiceReceiptHistory } from "./InvoiceReceiptHistory";
 import { hasCapability } from "../shared/permissions";
 import type { Data, Deal, Editor, Invoice, Me, Report } from "./model";
 import { day, money, invoiceBalance } from "./model";
@@ -1668,6 +1669,11 @@ export function DocumentRecord({
                       <small>{day(p.payment_date)}</small>
                     </div>
                   ))}
+                <InvoiceReceiptHistory
+                  data={data}
+                  invoiceId={id}
+                  currency={invoice.currency}
+                />
                 {invoice.status === "Issued" &&
                 invoice.paid_minor === "0" &&
                 invoice.credited_minor === "0" &&

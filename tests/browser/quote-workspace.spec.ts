@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID } from "node:crypto";
+import { testOrigin } from "./test-origin";
 
 test("quote navigation, customer/project selection, draft, detail and manual sharing", async ({
   page,
@@ -19,7 +20,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   const entity = data.entities[0];
   const command = async (payload: Record<string, unknown>) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: payload,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -179,7 +180,7 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   const customerLink = await page.getByLabel("Customer link").inputValue();
-  expect(customerLink).toMatch(/^http:\/\/127\.0\.0\.1:4322\/p\//);
+  expect(customerLink).toMatch(new RegExp(`^${testOrigin}/p/`));
   expect(await page.getByLabel("Email message").inputValue()).toContain(
     customerLink,
   );
