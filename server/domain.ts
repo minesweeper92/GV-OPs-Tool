@@ -49,6 +49,7 @@ export const chart = [
   ["2200", "Withholding tax payable", "Liability"],
   ["2300", "Deferred service revenue", "Liability"],
   ["2400", "Customer credits payable", "Liability"],
+  ["2410", "Unapplied customer receipts", "Liability"],
   ["3000", "Owner equity", "Equity"],
   ["3900", "Opening balance clearing", "Equity"],
   ["4000", "Service revenue", "Income"],
