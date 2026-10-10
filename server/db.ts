@@ -98,6 +98,8 @@ async function migrations() {
       "./migrations/040_bank_transactions.sql",
       "./migrations/041_sales_tax_withholding.sql",
       "./migrations/042_approval_directory.sql",
+      "./migrations/050_customer_receipts.sql",
+      "./migrations/051_collections.sql",
     ].map(async (path) => {
       const sql = await readFile(new URL(path, import.meta.url), "utf8");
       return {

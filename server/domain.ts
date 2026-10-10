@@ -7,6 +7,7 @@ import { createProjectInvoice } from "./projects.ts";
 import { detailsSnapshot } from "./documents.ts";
 import { allocateNumber, createNumberSeries } from "./numbering.ts";
 import { hasCapability } from "../shared/permissions.ts";
+import { assertSaleAllowed } from "./collections.ts";
 import { requireCommandPermission } from "./permission-checks.ts";
 export type Context = {
   capabilities?: import("../shared/permissions.ts").Capability[];
@@ -49,6 +50,7 @@ export const chart = [
   ["2200", "Withholding tax payable", "Liability"],
   ["2300", "Deferred service revenue", "Liability"],
   ["2400", "Customer credits payable", "Liability"],
+  ["2410", "Unapplied customer receipts", "Liability"],
   ["3000", "Owner equity", "Equity"],
   ["3900", "Opening balance clearing", "Equity"],
   ["4000", "Service revenue", "Income"],
@@ -598,6 +600,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
         reject(409, "Cannot revise a closed deal.");
       const e = await record(tx, "entities", d.entity_id, ctx),
         company = await record(tx, "companies", d.company_id, ctx, true);
+      await assertSaleAllowed(tx, e.id, company.id);
       const fx = scaled(c.fx, 6);
       if (fx <= 0n || (c.currency === e.currency && fx !== 1_000_000n))
         reject(
@@ -716,6 +719,7 @@ export async function execute(tx: SQL, ctx: Context, c: Row) {
           return { id: i.id };
         reject(409, "This invoice cannot be issued.");
       }
+      await assertSaleAllowed(tx, i.entity_id, i.company_id);
       const e = await entityDate(
         tx,
         i.entity_id,

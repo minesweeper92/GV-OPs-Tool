@@ -50,6 +50,12 @@ const VendorCredits = lazy(() =>
   import("./VendorCredits").then((m) => ({ default: m.VendorCredits })),
 );
 import { FinancialReports } from "./FinancialReports";
+const CustomerReceipts = lazy(() =>
+  import("./CustomerReceipts").then((m) => ({ default: m.CustomerReceipts })),
+);
+const Collections = lazy(() =>
+  import("./Collections").then((m) => ({ default: m.Collections })),
+);
 const PartyStatements = lazy(() =>
   import("./PartyStatements").then((m) => ({ default: m.PartyStatements })),
 );
@@ -166,6 +172,8 @@ const groups = [
       ["quotes", "Quotes", FileText],
       ["invoices", "Invoices", Receipt],
       ["payments", "Payments received", Wallet],
+      ["customer-receipts", "Customer receipts", Wallet],
+      ["collections", "Collections", BookOpen],
       ["credits", "Credit notes & refunds", Receipt],
       ["recurring", "Recurring invoices", FileText],
       ["customer-statements", "Customer statements", BookOpen],
@@ -654,6 +662,29 @@ export default function App() {
           rememberPosition={() => {
             listScroll.current.bills = window.scrollY;
           }}
+        />
+      ) : (
+        denied()
+      );
+    if (view === "collections")
+      return canFinance ? (
+        <Collections
+          key={`${me!.organization.id}/${me!.user.id}/${entity}`}
+          data={data}
+          me={me!}
+          entity={entity}
+        />
+      ) : (
+        denied()
+      );
+    if (view === "customer-receipts")
+      return canFinance ? (
+        <CustomerReceipts
+          key={`${me!.organization.id}/${me!.user.id}/${id || ""}/${entity}`}
+          data={data}
+          me={me!}
+          entity={entity}
+          id={id}
         />
       ) : (
         denied()
@@ -2078,6 +2109,8 @@ export default function App() {
                   ([key]) =>
                     canFinance ||
                     ![
+                      "customer-receipts",
+                      "collections",
                       "credits",
                       "recurring",
                       "recurring-expenses",

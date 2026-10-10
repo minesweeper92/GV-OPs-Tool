@@ -8,6 +8,16 @@ import type {
 } from "../shared/statements.ts";
 import { hasCapability } from "../shared/permissions.ts";
 
+// Customer receipts reduce the customer's net position by everything
+// received; the part not allocated to an invoice stays available to them
+// (credit_delta) until it is applied or refunded.
+const customerReceiptEffects = `
+ UNION ALL SELECT 'customer-receipt',r.id,r.company_id,r.currency,r.reference,-(r.amount_minor+r.wht_minor+r.sales_tax_withheld_minor),r.unapplied_minor,'customer-receipts',r.id FROM customer_receipts r
+ UNION ALL SELECT 'customer-receipt-reversal',v.id,r.company_id,r.currency,r.reference,r.amount_minor+r.wht_minor+r.sales_tax_withheld_minor,-r.unapplied_minor,'customer-receipts',r.id FROM customer_receipt_reversals v JOIN customer_receipts r ON r.id=v.receipt_id
+ UNION ALL SELECT 'customer-receipt-application',a.id,r.company_id,r.currency,r.reference,0,-a.amount_minor,'invoice',a.invoice_id FROM customer_receipt_applications a JOIN customer_receipts r ON r.id=a.receipt_id
+ UNION ALL SELECT 'customer-receipt-application-reversal',v.id,r.company_id,r.currency,r.reference,0,a.amount_minor,'invoice',a.invoice_id FROM customer_receipt_application_reversals v JOIN customer_receipt_applications a ON a.id=v.application_id JOIN customer_receipts r ON r.id=a.receipt_id
+ UNION ALL SELECT 'customer-receipt-refund',f.id,r.company_id,r.currency,coalesce(nullif(f.reference,''),r.reference),f.amount_minor,-f.amount_minor,'customer-receipts',r.id FROM customer_receipt_refunds f JOIN customer_receipts r ON r.id=f.receipt_id
+ UNION ALL SELECT 'customer-receipt-refund-reversal',v.id,r.company_id,r.currency,r.reference,-f.amount_minor,f.amount_minor,'customer-receipts',r.id FROM customer_receipt_refund_reversals v JOIN customer_receipt_refunds f ON f.id=v.refund_id JOIN customer_receipts r ON r.id=f.receipt_id`;
 // Link each immutable posting to its party and transaction currency. Applications
 // move AR into credits payable, so they have zero net statement movement.
 const customerEffects = `
@@ -28,7 +38,8 @@ const customerEffects = `
  UNION ALL SELECT 'customer-refund',r.id,i.company_id,i.currency,coalesce(nullif(r.reference,''),c.number),r.amount_minor,-r.amount_minor,'credit',c.id
  FROM customer_refunds r JOIN credit_notes c ON c.id=r.credit_id JOIN invoices i ON i.id=c.invoice_id
  UNION ALL SELECT 'customer-refund-reversal',v.id,i.company_id,i.currency,c.number,-r.amount_minor,r.amount_minor,'credit',c.id
- FROM refund_reversals v JOIN customer_refunds r ON r.id=v.refund_id JOIN credit_notes c ON c.id=r.credit_id JOIN invoices i ON i.id=c.invoice_id`;
+ FROM refund_reversals v JOIN customer_refunds r ON r.id=v.refund_id JOIN credit_notes c ON c.id=r.credit_id JOIN invoices i ON i.id=c.invoice_id
+ ${customerReceiptEffects}`;
 const vendorEffects = `
  SELECT j.source_type AS type,b.id,b.vendor_id AS party_id,b.currency,b.reference AS number,
  CASE WHEN j.source_type='bill' THEN b.total_minor ELSE -b.total_minor END AS amount,
@@ -88,7 +99,7 @@ export async function partyStatement(
     FROM effects ef JOIN journals j ON j.source_type=ef.type AND j.source_id=ef.id
     JOIN entities e ON e.id=j.entity_id
     LEFT JOIN (SELECT journal_id,sum(debit_minor-credit_minor) AS delta FROM journal_lines
-      WHERE account_code ${customer ? "IN ('1100','2400')" : "IN ('2000','1350')"} GROUP BY journal_id) l ON l.journal_id=j.id
+      WHERE account_code ${customer ? "IN ('1100','2400','2410')" : "IN ('2000','1350')"} GROUP BY journal_id) l ON l.journal_id=j.id
     WHERE ef.party_id=$1 AND j.entity_id=ANY($2::uuid[]) AND j.posted_on<=$3
     ORDER BY j.posted_on,j.created_at,j.id`,
       [filter.companyId, ids, filter.to],

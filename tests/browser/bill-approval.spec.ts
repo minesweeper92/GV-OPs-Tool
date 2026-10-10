@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
+import { testOrigin } from "./test-origin";
 test("bill approval rules save by entity and survive refresh", async ({
   page,
 }) => {
@@ -58,7 +59,7 @@ test("bill approval rules save by entity and survive refresh", async ({
   const data = await (await page.request.get("/api/data")).json();
   const entity = data.entities[0];
   const restored = await page.request.post("/api/commands", {
-    headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+    headers: { origin: testOrigin, "x-csrf-token": me.csrf },
     data: {
       action: "bill.approval-policy",
       entity_id: entity.id,
@@ -87,7 +88,7 @@ test("tiered rules show each approval step and who acts next", async ({
     const me = await (await page.request.get("/api/me")).json();
     return async (payload: Record<string, unknown>) => {
       const r = await page.request.post("/api/commands", {
-        headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+        headers: { origin: testOrigin, "x-csrf-token": me.csrf },
         data: payload,
       });
       expect(r.ok(), await r.text()).toBeTruthy();
@@ -193,14 +194,14 @@ test("tiered rules show each approval step and who acts next", async ({
         a.name === "Owner" && a.organization.startsWith("Grid"),
     );
     await page.request.post("/api/demo-login", {
-      headers: { origin: "http://127.0.0.1:4322" },
+      headers: { origin: testOrigin },
       data: { userId: owner.user_id, tenantId: owner.tenant_id },
     });
     const me = await (await page.request.get("/api/me")).json();
     const latest = (await (await page.request.get("/api/data")).json())
       .entities[0];
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: {
         action: "bill.approval-policy",
         entity_id: latest.id,
@@ -230,7 +231,7 @@ test("review queues retain submitted self-review restrictions when policy change
   const entity = data.entities[0];
   const command = async (payload: Record<string, unknown>) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: payload,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -345,7 +346,7 @@ test("two-stage review passes from finance to a different administrator before p
   const entity = data.entities[0];
   const command = async (payload: Record<string, unknown>) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: payload,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -408,7 +409,7 @@ test("two-stage review passes from finance to a different administrator before p
   );
   const login = async (userId: string) => {
     const response = await page.request.post("/api/demo-login", {
-      headers: { origin: "http://127.0.0.1:4322" },
+      headers: { origin: testOrigin },
       data: { tenantId: owner.organization.id, userId },
     });
     expect(response.ok()).toBeTruthy();

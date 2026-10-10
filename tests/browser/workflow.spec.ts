@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { testOrigin } from "./test-origin";
 async function owner(page: Page) {
   await page.goto("/");
   await page
@@ -90,7 +91,7 @@ test("accepted work to project, advance invoice, delivery recognition and profit
   const entity = data.entities.find((e: any) => e.code === "PVT");
   const command = async (payload: Record<string, unknown>) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data: payload,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

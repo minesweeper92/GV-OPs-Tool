@@ -7,6 +7,7 @@ import {
 } from "react";
 import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { ErrorBox, Field } from "./components";
+import { CreditHoldNotice } from "./CreditHoldNotice";
 import { NumberSeriesField } from "./NumberSeriesField";
 import { decimal, money, rate, today, type Data, type Line } from "./model";
 import { documentDetails, documentTotals } from "../shared/documents";
@@ -1009,6 +1010,11 @@ export function InvoiceComposer({
                 {itemNotice}
               </p>
             ) : null}
+            <CreditHoldNotice
+              data={data}
+              companyId={customerId}
+              entityId={issuerId}
+            />
             {error ? <ErrorBox error={error} /> : null}
           </section>
         </div>

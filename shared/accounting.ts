@@ -10,5 +10,6 @@ export const controlledAccountCodes = new Set([
   "2200",
   "2300",
   "2400",
+  "2410",
   "3900",
 ]);

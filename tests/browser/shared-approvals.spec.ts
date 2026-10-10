@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { randomUUID as uuid } from "node:crypto";
+import { testOrigin } from "./test-origin";
 
 test("shared approval settings recover drafts; PO submits, reviews and issues with saved reviewers", async ({
   page,
@@ -15,7 +16,7 @@ test("shared approval settings recover drafts; PO submits, reviews and issues wi
   const me = await (await page.request.get("/api/me")).json();
   const command = async (data: unknown) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: { origin: testOrigin, "x-csrf-token": me.csrf },
       data,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

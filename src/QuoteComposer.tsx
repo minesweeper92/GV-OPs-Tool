@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 import { ArrowLeft, FileText, Plus, Trash2, X } from "lucide-react";
 import { Field, ErrorBox } from "./components";
+import { CreditHoldNotice } from "./CreditHoldNotice";
 import { CustomFields } from "./ProfileFields";
 import { today, money, rate, type Data, type Line } from "./model";
 import { documentDetails, documentTotals } from "../shared/documents";
@@ -1182,6 +1183,11 @@ export function QuoteComposer({
               {notice}
             </p>
           ) : null}
+          <CreditHoldNotice
+            data={data}
+            companyId={companyId}
+            entityId={chosenDeal?.entity_id}
+          />
           {error ? <ErrorBox error={error} /> : null}
         </div>
         <div className="quote-composer-footer">

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { testOrigin } from "./test-origin";
 
 test("opening balances require review, reconcile and post once in the UI", async ({
   page,
@@ -15,7 +16,7 @@ test("opening balances require review, reconcile and post once in the UI", async
     page.getByRole("heading", { name: "My day", exact: true }),
   ).toBeVisible();
   let me = await (await page.request.get("/api/me")).json();
-  let headers = { "x-csrf-token": me.csrf, origin: "http://127.0.0.1:4322" };
+  let headers = { "x-csrf-token": me.csrf, origin: testOrigin };
   const code = `X${randomUUID().slice(0, 6).toUpperCase()}`;
   const customer = `Customer ${code}`,
     vendor = `Vendor ${code}`;
@@ -35,7 +36,7 @@ test("opening balances require review, reconcile and post once in the UI", async
   });
   expect(switched.ok()).toBe(true);
   me = await (await page.request.get("/api/me")).json();
-  headers = { "x-csrf-token": me.csrf, origin: "http://127.0.0.1:4322" };
+  headers = { "x-csrf-token": me.csrf, origin: testOrigin };
   const entityId = (await (await page.request.get("/api/data")).json())
     .entities[0].id;
   for (const [name, isCustomer, isVendor] of [
