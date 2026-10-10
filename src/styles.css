@@ -3419,3 +3419,65 @@ details[open] summary {
 .receipt-summary p {
   margin: 4px 0;
 }
+/* Collections (sales). Scoped; no global primitives changed. */
+.collections-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.collections-head h2 {
+  margin: 0;
+}
+.collections-customer .receipt-facts small {
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.collections-holds ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.collections-holds li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+.collections-broken {
+  font-weight: 600;
+}
+.collections-template {
+  border-left: 3px solid var(--border);
+  padding: 4px 12px;
+  margin: 0 0 12px;
+}
+.collections-template p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+.collections-step {
+  margin: 12px 0;
+}
+.collections-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+.credit-hold-notice {
+  border: 1px solid var(--danger);
+  background: var(--danger-bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.credit-hold-notice p {
+  margin: 4px 0;
+}

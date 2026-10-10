@@ -308,6 +308,12 @@ export interface Data {
   customerReceiptAllocations?: import("../shared/customer-receipts").CustomerReceiptAllocation[];
   customerReceiptApplications?: import("../shared/customer-receipts").CustomerReceiptApplication[];
   customerReceiptRefunds?: import("../shared/customer-receipts").CustomerReceiptRefund[];
+  creditHolds?: import("../shared/collections").CreditHold[];
+  collectionContacts?: import("../shared/collections").CollectionContact[];
+  invoiceDisputes?: import("../shared/collections").InvoiceDispute[];
+  reminderSchedules?: import("../shared/collections").ReminderSchedule[];
+  reminderFollowups?: import("../shared/collections").ReminderFollowup[];
+  collectionPeople?: { id: string; name: string; entity_ids: string[] | null }[];
   vendorCredits: import("../shared/vendor-credits").VendorCredit[];
   vendorCreditApplications: import("../shared/vendor-credits").VendorCreditUse[];
   vendorRefunds: import("../shared/vendor-credits").VendorCreditUse[];

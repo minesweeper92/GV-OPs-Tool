@@ -12,6 +12,7 @@ import {
   executeCustomerReceipt,
   customerReceiptSnapshot,
 } from "./customer-receipts.ts";
+import { executeCollection, collectionSnapshot } from "./collections.ts";
 import { Access, hash, type Session } from "./access.ts";
 import { IdentityProvider, equalSecret } from "./oidc.ts";
 import {
@@ -490,6 +491,7 @@ export function createApp(
         ...(await recurringSnapshot(tx, ctx)),
         ...(await vendorAdvanceSnapshot(tx, ctx)),
         ...(await customerReceiptSnapshot(tx, ctx)),
+        ...(await collectionSnapshot(tx, ctx)),
         ...(await billScheduleSnapshot(tx, ctx)),
         ...(await journalScheduleSnapshot(tx, ctx)),
         ...(await crmSnapshot(tx, ctx)),
@@ -652,18 +654,22 @@ export function createApp(
                                         "invoice.recognise",
                                       ].includes(c.action)
                                     ? executeProject(tx, ctx, c)
-                                    : c.action.startsWith("customer-receipt.")
-                                      ? executeCustomerReceipt(tx, ctx, c)
-                                      : c.action.startsWith("bank.")
-                                        ? executeBank(tx, ctx, c)
-                                        : c.action.startsWith("purchase-order.")
-                                          ? executePurchaseOrder(tx, ctx, c)
-                                          : c.action.startsWith("bill.") ||
-                                              c.action.startsWith(
-                                                "vendor-payment.",
+                                    : c.action.startsWith("collection.")
+                                      ? executeCollection(tx, ctx, c)
+                                      : c.action.startsWith("customer-receipt.")
+                                        ? executeCustomerReceipt(tx, ctx, c)
+                                        : c.action.startsWith("bank.")
+                                          ? executeBank(tx, ctx, c)
+                                          : c.action.startsWith(
+                                                "purchase-order.",
                                               )
-                                            ? executePayable(tx, ctx, c)
-                                            : execute(tx, ctx, c),
+                                            ? executePurchaseOrder(tx, ctx, c)
+                                            : c.action.startsWith("bill.") ||
+                                                c.action.startsWith(
+                                                  "vendor-payment.",
+                                                )
+                                              ? executePayable(tx, ctx, c)
+                                              : execute(tx, ctx, c),
     );
   });
   app.setErrorHandler((error, req, res) => {

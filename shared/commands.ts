@@ -11,6 +11,7 @@ import { vendorCreditCommands } from "./vendor-credits.ts";
 import { billScheduleCommands } from "./recurring-bills.ts";
 import { vendorAdvanceCommands } from "./vendor-advances.ts";
 import { customerReceiptCommands } from "./customer-receipts.ts";
+import { collectionCommands } from "./collections.ts";
 import {
   documentCommands,
   documentDetails,
@@ -74,6 +75,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   ...billScheduleCommands,
   ...vendorAdvanceCommands,
   ...customerReceiptCommands,
+  ...collectionCommands,
   z.strictObject({
     action: z.literal("bill.create"),
     entity_id: id,
