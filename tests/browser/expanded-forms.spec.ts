@@ -165,7 +165,7 @@ test("direct invoice form saves discounted lines, reusable items and immutable c
   const me = await (await page.request.get("/api/me")).json();
   const changedAmounts = await page.request.post("/api/commands", {
     headers: {
-      origin: "http://127.0.0.1:4322",
+      origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
       "x-csrf-token": me.csrf,
     },
     data: {

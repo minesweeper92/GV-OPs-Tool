@@ -15,7 +15,10 @@ test("vendor credit issue retry, application, refund, reversals and bill balance
     data = await (await page.request.get("/api/data")).json();
   const command = async (c: unknown) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: {
+        origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+        "x-csrf-token": me.csrf,
+      },
       data: c,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

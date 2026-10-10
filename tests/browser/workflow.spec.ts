@@ -90,7 +90,10 @@ test("accepted work to project, advance invoice, delivery recognition and profit
   const entity = data.entities.find((e: any) => e.code === "PVT");
   const command = async (payload: Record<string, unknown>) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: {
+        origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+        "x-csrf-token": me.csrf,
+      },
       data: payload,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

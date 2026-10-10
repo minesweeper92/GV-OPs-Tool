@@ -15,7 +15,10 @@ test("shared approval settings recover drafts; PO submits, reviews and issues wi
   const me = await (await page.request.get("/api/me")).json();
   const command = async (data: unknown) => {
     const r = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: {
+        origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+        "x-csrf-token": me.csrf,
+      },
       data,
     });
     expect(r.ok(), await r.text()).toBeTruthy();

@@ -17,7 +17,10 @@ test("month-end review, soft-close, final close and audited reopen work in the U
   const me = await (await page.request.get("/api/me")).json();
   const code = `C${randomUUID().slice(0, 6).toUpperCase()}`;
   const created = await page.request.post("/api/commands", {
-    headers: { "x-csrf-token": me.csrf, origin: "http://127.0.0.1:4322" },
+    headers: {
+      "x-csrf-token": me.csrf,
+      origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+    },
     data: {
       action: "entity.create",
       name: "Close review company",
@@ -67,7 +70,10 @@ test("month-end review, soft-close, final close and audited reopen work in the U
   await page.getByLabel("Accounting month").fill(month);
   await expect(page.getByText("Closed → Open")).toBeVisible();
   const locked = await page.request.post("/api/commands", {
-    headers: { "x-csrf-token": me.csrf, origin: "http://127.0.0.1:4322" },
+    headers: {
+      "x-csrf-token": me.csrf,
+      origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+    },
     data: {
       action: "period.close",
       entity_id: entityId,

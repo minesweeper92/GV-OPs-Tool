@@ -19,7 +19,10 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   const entity = data.entities[0];
   const command = async (payload: Record<string, unknown>) => {
     const response = await page.request.post("/api/commands", {
-      headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+      headers: {
+        origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+        "x-csrf-token": me.csrf,
+      },
       data: payload,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -179,7 +182,9 @@ test("quote navigation, customer/project selection, draft, detail and manual sha
   ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   const customerLink = await page.getByLabel("Customer link").inputValue();
-  expect(customerLink).toMatch(/^http:\/\/127\.0\.0\.1:4322\/p\//);
+  expect(
+    customerLink.startsWith(new URL(page.url()).origin + "/p/"),
+  ).toBeTruthy();
   expect(await page.getByLabel("Email message").inputValue()).toContain(
     customerLink,
   );

@@ -15,7 +15,10 @@ test("purchase order draft recovery, partial bill conversion and lost response r
   const me = await (await page.request.get("/api/me")).json();
   const data = await (await page.request.get("/api/data")).json();
   const vendorResponse = await page.request.post("/api/commands", {
-    headers: { origin: "http://127.0.0.1:4322", "x-csrf-token": me.csrf },
+    headers: {
+      origin: `http://127.0.0.1:${process.env.GV_BROWSER_PORT || 4322}`,
+      "x-csrf-token": me.csrf,
+    },
     data: {
       action: "company.create",
       name: `PO vendor ${randomUUID()}`,
